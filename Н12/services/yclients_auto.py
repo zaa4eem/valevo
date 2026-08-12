@@ -6,6 +6,7 @@ from typing import Optional
 from config import YCLIENTS_AUTO_SYNC, YCLIENTS_SYNC_ON_STARTUP, SUPPORT_CHAT_ID
 from database.db import (
     bind_yclients_client,
+    claim_pending_yclients_operation,
     create_pending_yclients_operation,
     get_pending_yclients_operations,
     get_unsynced_pilots,
@@ -137,11 +138,24 @@ async def issue_or_queue_valevo_bonus(
     return result
 
 
+_pending_ops_lock = asyncio.Lock()
+
+
 async def process_pending_yclients_operations(bot=None, limit: int = 100) -> dict:
     """Повторяет операции, которые не прошли из-за отсутствия карты/временной ошибки API."""
+    if _pending_ops_lock.locked():
+        return {"ok": False, "status": "already_running"}
+    async with _pending_ops_lock:
+        return await _process_pending_yclients_operations_locked(limit=limit)
+
+
+async def _process_pending_yclients_operations_locked(limit: int = 100) -> dict:
     ops = await get_pending_yclients_operations(limit=limit)
     done = failed = 0
     for op in ops:
+        if not await claim_pending_yclients_operation(op["id"]):
+            # Кто-то другой уже забрал эту операцию в обработку.
+            continue
         try:
             if op["operation_type"] == "ensure_card":
                 ensured = await ensure_valevo_bonus_card(op["yclients_client_id"])

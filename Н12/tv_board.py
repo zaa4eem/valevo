@@ -1,5 +1,6 @@
 import html
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from datetime import datetime
@@ -9,9 +10,13 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from config import BASE_DIR, DB_NAME
 
-DB_PATH = Path("valevo.db")
-STATIC_DIR = Path("static")
+# Используем те же пути, что и основной бот (config.py), а не путь относительно
+# текущей рабочей директории — иначе TV-board, запущенный из другой папки/сервиса,
+# молча открывает пустую/несуществующую БД.
+DB_PATH = Path(DB_NAME)
+STATIC_DIR = BASE_DIR / "static"
 BOT_USERNAME = "@VALEVO_RND_BOT"
 PORT = 8010
 
@@ -1095,6 +1100,7 @@ def load_groups() -> dict[str, list[dict]]:
     groups = {item["key"]: [] for item in DISPLAY_ORDER}
 
     if not DB_PATH.exists():
+        logging.warning("TV board: файл БД не найден: %s", DB_PATH)
         return groups
 
     try:

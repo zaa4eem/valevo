@@ -1,12 +1,13 @@
 import re, logging
 import asyncio
+import html
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
 from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from config import SUPPORT_CHAT_ID, MENU_VERSION   # добавлен MENU_VERSION
+from config import SUPPORT_CHAT_ID
 from database.db import (
     create_pilot, get_pilot_by_telegram_id, get_pilot_history_stats, update_display_name,
     get_top10_pilots
@@ -72,11 +73,6 @@ def format_hours(hours: float | int | None) -> str:
         total_minutes = 0
     return format_minutes(total_minutes)
 
-# ---------- Обновление версии меню ----------
-async def update_menu_version(state: FSMContext):
-    if state:
-        await state.update_data(menu_version=MENU_VERSION)
-
 def _registration_phone_keyboard() -> ReplyKeyboardMarkup:
     """Кнопка Telegram-контакта; ручной ввод номера тоже остаётся доступен."""
     return ReplyKeyboardMarkup(
@@ -127,7 +123,6 @@ async def start(message: Message, state: FSMContext):
     pilot = await get_pilot_by_telegram_id(message.from_user.id)
 
     if pilot:
-        await update_menu_version(state)
         await message.answer(
             "🏁 Добро пожаловать обратно!",
             reply_markup=get_menu(message.from_user.id),
@@ -354,7 +349,6 @@ async def profile(message: Message, state: FSMContext):
             f"📈 Рейтинг: <b>{pilot.get('rating', 0)}</b>\n"
         )
 
-        await update_menu_version(state)
         await message.answer(text, reply_markup=profile_menu)
 
     except Exception as e:
@@ -468,7 +462,7 @@ async def handle_support_message(message: Message, state: FSMContext, bot):
     try:
         await bot.send_message(
             SUPPORT_CHAT_ID,
-            f"{user_info}\n\n{message.text}"
+            f"{user_info}\n\n{html.escape(message.text or '')}"
         )
         await message.answer("✅ Ваше обращение отправлено разработчику. Спасибо!")
     except Exception as e:
@@ -476,13 +470,11 @@ async def handle_support_message(message: Message, state: FSMContext, bot):
         await message.answer("❌ Не удалось отправить обращение. Попробуйте позже.")
     finally:
         await state.clear()
-        await update_menu_version(state)
         await message.answer("Главное меню:", reply_markup=get_menu(message.from_user.id))
 
 @router.message(SupportMessage.waiting_for_text, F.text == "🔙 Назад")
 async def support_back(message: Message, state: FSMContext):
     await state.clear()
-    await update_menu_version(state)
     await message.answer("Главное меню:", reply_markup=get_menu(message.from_user.id))
 
 # ---------- ТОП-10 ----------

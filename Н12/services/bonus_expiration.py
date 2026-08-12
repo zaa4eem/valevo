@@ -4,7 +4,11 @@ from datetime import datetime
 from pytz import timezone
 
 from config import MOSCOW_TZ, SUPPORT_CHAT_ID
-from database.db import get_expired_season_wallet_entries, mark_wallet_entry_expired
+from database.db import (
+    claim_wallet_entry_expiry,
+    get_expired_season_wallet_entries,
+    mark_wallet_entry_expired,
+)
 from services.yclients_auto import issue_or_queue_valevo_bonus
 from services.yclients_service import get_valevo_bonus_balance
 
@@ -34,6 +38,12 @@ async def expire_season_bonuses(bot=None) -> dict:
         else:
             amount_to_withdraw = amount
 
+        # Резервируем сгорание ДО списания через YCLIENTS (см. docstring claim_wallet_entry_expiry).
+        claimed = await claim_wallet_entry_expiry(e["id"], amount_to_withdraw)
+        if not claimed:
+            # Запись уже обработана параллельным запуском.
+            continue
+
         if amount_to_withdraw > 0:
             result = await issue_or_queue_valevo_bonus(
                 telegram_id=e.get("telegram_id"),
@@ -46,7 +56,8 @@ async def expire_season_bonuses(bot=None) -> dict:
                 expired += 1
             else:
                 queued += 1
-        await mark_wallet_entry_expired(e["id"], amount_to_withdraw)
+        else:
+            skipped += 1
 
     if bot and SUPPORT_CHAT_ID and (expired or queued):
         try:

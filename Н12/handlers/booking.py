@@ -124,6 +124,14 @@ async def ensure_booking_schema() -> None:
         ON booking_items_v2(staff_id, booking_id)
         """
     )
+
+    cursor = await db.execute("PRAGMA table_info(booking_requests_v2)")
+    columns = [row[1] for row in await cursor.fetchall()]
+    if "experience_granted" not in columns:
+        await db.execute(
+            "ALTER TABLE booking_requests_v2 ADD COLUMN experience_granted INTEGER NOT NULL DEFAULT 0"
+        )
+
     await db.commit()
     await db.close()
 
@@ -339,6 +347,74 @@ async def _save_yclients_record(booking_id: int, item_id: int, record_id: int | 
     )
     await db.commit()
     await db.close()
+
+
+async def get_bookings_pending_experience(now_iso: str) -> list[dict[str, Any]]:
+    """Подтверждённые брони, чьё время уже прошло, но опыт/рейтинг ещё не начислены."""
+    db = await get_db()
+    db.row_factory = aiosqlite.Row
+    cur = await db.execute(
+        """
+        SELECT id, telegram_id, duration_minutes
+        FROM booking_requests_v2
+        WHERE status IN ('confirmed', 'user_confirmed')
+          AND experience_granted = 0
+          AND end_at <= ?
+        ORDER BY end_at
+        """,
+        (now_iso,),
+    )
+    rows = [dict(x) for x in await cur.fetchall()]
+    await cur.close()
+    await db.close()
+    return rows
+
+
+async def claim_booking_experience(
+    booking_id: int, telegram_id: int, experience_minutes: int, rating_delta: int
+) -> bool:
+    """Атомарно резервирует начисление опыта/рейтинга за отыгранную бронь.
+
+    Рейтинг и опыт применяются в той же транзакции, что и пометка "начислено" —
+    падение процесса между шагами не может привести ни к потере, ни к
+    задвоению награды: если COMMIT не прошёл, при следующем проходе бронь
+    обработается заново с нуля.
+    """
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            """
+            UPDATE booking_requests_v2
+            SET experience_granted = 1
+            WHERE id = ? AND experience_granted = 0
+            """,
+            (booking_id,),
+        )
+        if cursor.rowcount != 1:
+            await db.rollback()
+            return False
+
+        await db.execute(
+            """
+            UPDATE pilots
+            SET experience_minutes = COALESCE(experience_minutes, 0) + ?
+            WHERE telegram_id = ?
+            """,
+            (experience_minutes, telegram_id),
+        )
+        if rating_delta:
+            await db.execute(
+                "UPDATE pilots SET rating = rating + ? WHERE telegram_id = ?",
+                (rating_delta, telegram_id),
+            )
+        await db.commit()
+        return True
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
 
 
 # ============================================================================

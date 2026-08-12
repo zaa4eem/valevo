@@ -158,6 +158,7 @@ async def init_db():
     await safe_add("bonus_mobile_minutes INTEGER DEFAULT 0", "bonus_mobile_minutes")
     await safe_add("bonus_static_minutes INTEGER DEFAULT 0", "bonus_static_minutes")
     await safe_add("experience_minutes INTEGER DEFAULT 0", "experience_minutes")
+    await safe_add("menu_version INTEGER DEFAULT 0", "menu_version")
 
     async def safe_add_to_table(table_name: str, col_sql: str, col_name: str):
         cursor = await db.execute(f"PRAGMA table_info({table_name})")
@@ -258,39 +259,45 @@ async def init_db():
 # --- Pilots CRUD ---
 async def create_pilot(telegram_id, username, phone, yclients_client_id=None):
     db = await get_db()
+    try:
+        # Проверка уникальности телефона
+        cursor = await db.execute("SELECT telegram_id FROM pilots WHERE phone = ?", (phone,))
+        if await cursor.fetchone():
+            return False, "phone_exists"
 
-    # Проверка уникальности телефона
-    cursor = await db.execute("SELECT telegram_id FROM pilots WHERE phone = ?", (phone,))
-    if await cursor.fetchone():
+        # Проверка уникальности username
+        if username:
+            cursor = await db.execute("SELECT telegram_id FROM pilots WHERE username = ?", (username,))
+            if await cursor.fetchone():
+                return False, "username_exists"
+
+        # Генерация уникального пилотского номера
+        pilot_number = None
+        for _ in range(100):
+            candidate = random.randint(1, 999)
+            cursor = await db.execute("SELECT telegram_id FROM pilots WHERE pilot_number = ?", (candidate,))
+            if not await cursor.fetchone():
+                pilot_number = candidate
+                break
+        if pilot_number is None:
+            return False, "no_number"
+
+        cursor = await db.execute(
+            '''INSERT OR IGNORE INTO pilots (telegram_id, username, phone, pilot_number, yclients_client_id)
+               VALUES (?, ?, ?, ?, ?)''',
+            (telegram_id, username, phone, pilot_number, yclients_client_id)
+        )
+        await db.commit()
+
+        # INSERT OR IGNORE молча ничего не делает при конфликте уникальных индексов
+        # (например, параллельная регистрация с тем же telegram_id/телефоном/номером).
+        # Без этой проверки функция вернула бы "успех", хотя строка не была создана.
+        if cursor.rowcount != 1:
+            return False, "conflict"
+
+        return True, pilot_number
+    finally:
         await db.close()
-        return False, "phone_exists"
-
-    # Проверка уникальности username
-    cursor = await db.execute("SELECT telegram_id FROM pilots WHERE username = ?", (username,))
-    if await cursor.fetchone():
-        await db.close()
-        return False, "username_exists"
-
-    # Генерация уникального пилотского номера
-    pilot_number = None
-    for _ in range(100):
-        candidate = random.randint(1, 999)
-        cursor = await db.execute("SELECT telegram_id FROM pilots WHERE pilot_number = ?", (candidate,))
-        if not await cursor.fetchone():
-            pilot_number = candidate
-            break
-    if pilot_number is None:
-        await db.close()
-        return False, "no_number"
-
-    await db.execute(
-        '''INSERT OR IGNORE INTO pilots (telegram_id, username, phone, pilot_number, yclients_client_id)
-           VALUES (?, ?, ?, ?, ?)''',
-        (telegram_id, username, phone, pilot_number, yclients_client_id)
-    )
-    await db.commit()
-    await db.close()
-    return True, pilot_number
 
 async def get_pilot(telegram_id):
     db = await get_db()
@@ -387,10 +394,19 @@ async def update_pilot_rating(telegram_id, amount):
     await db.close()
 
 async def update_pilot_number(telegram_id, number):
+    """Возвращает True, если номер пилота изменён.
+
+    Может выбросить sqlite3.IntegrityError, если номер заняли параллельно
+    между проверкой на уровне хендлера и этим UPDATE — вызывающий код должен
+    обработать это как "номер уже занят".
+    """
     db = await get_db()
-    await db.execute('UPDATE pilots SET pilot_number = ? WHERE telegram_id = ?', (number, telegram_id))
-    await db.commit()
-    await db.close()
+    try:
+        cursor = await db.execute('UPDATE pilots SET pilot_number = ? WHERE telegram_id = ?', (number, telegram_id))
+        await db.commit()
+        return cursor.rowcount == 1
+    finally:
+        await db.close()
 
 async def update_display_name(telegram_id, new_display_name):
     """Возвращает True, если ник обновлён, иначе False (если ник занят)."""
@@ -410,6 +426,34 @@ async def update_display_name(telegram_id, new_display_name):
     await db.commit()
     await db.close()
     return True
+
+async def sync_pilot_menu_version(telegram_id: int, target_version: int) -> bool:
+    """Обновляет сохранённую версию reply-меню пилота, если она отстала от текущей.
+
+    Возвращает True, если версия была обновлена — значит, пилоту нужно один раз
+    показать обновлённую клавиатуру. Хранится в БД (а не в FSM-состоянии),
+    потому что FSM-состояние регулярно очищается state.clear() внутри обычных сценариев.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT menu_version FROM pilots WHERE telegram_id = ?", (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return False
+        current = row[0] or 0
+        if current == target_version:
+            return False
+        await db.execute(
+            "UPDATE pilots SET menu_version = ? WHERE telegram_id = ?",
+            (target_version, telegram_id),
+        )
+        await db.commit()
+        return True
+    finally:
+        await db.close()
+
 
 async def update_pilot_bonus(telegram_id, platform, minutes_delta):
     field = "bonus_mobile_minutes" if platform == "mobile" else "bonus_static_minutes"
@@ -819,6 +863,90 @@ async def has_season_award(season_key, telegram_id, reason):
     await db.close()
     return row is not None
 
+
+async def get_season_award(season_key, telegram_id, reason):
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT bonus_hours, rating_delta, yclients_bonus_rub, yclients_status
+           FROM season_awards WHERE season_key = ? AND telegram_id = ? AND reason = ? LIMIT 1""",
+        (season_key, telegram_id, reason)
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    if not row:
+        return None
+    return {
+        "bonus_hours": row[0],
+        "rating_delta": row[1],
+        "yclients_bonus_rub": row[2],
+        "yclients_status": row[3],
+    }
+
+
+async def claim_season_award(
+    season_key, telegram_id, place, bonus_hours, rating_delta, reason,
+    yclients_bonus_rub=0, wallet_entry=None, yclients_status="pending",
+):
+    """Атомарно резервирует сезонную награду и применяет её локальные последствия
+    (рейтинг, запись в бонусный кошелёк) одной транзакцией.
+
+    Если процесс упадёт до COMMIT — ничего не применится, и при следующем запуске
+    награда обработается заново с нуля. Если COMMIT прошёл — рейтинг и кошелёк
+    гарантированно применены вместе, а не по отдельности, поэтому промежуточного
+    состояния "начислили рейтинг, но забыли про деньги" быть не может.
+
+    wallet_entry (если передан) — dict с ключами yclients_client_id, amount,
+    expires_at, reason для записи в bonus_wallet.
+
+    Возвращает True, если награда наша (только что застолблена и применена).
+    False — награда уже была выдана раньше другим запуском (гонка/повторный запуск).
+    """
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            """INSERT OR IGNORE INTO season_awards
+               (season_key, telegram_id, place, bonus_hours, rating_delta, reason,
+                yclients_bonus_rub, yclients_status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (season_key, telegram_id, place, bonus_hours, rating_delta, reason, yclients_bonus_rub, yclients_status)
+        )
+        if cursor.rowcount != 1:
+            await db.rollback()
+            return False
+
+        if rating_delta:
+            await db.execute(
+                "UPDATE pilots SET rating = rating + ? WHERE telegram_id = ?",
+                (rating_delta, telegram_id)
+            )
+
+        if wallet_entry:
+            amount = round(float(wallet_entry.get("amount") or 0), 2)
+            await db.execute(
+                """INSERT INTO bonus_wallet
+                   (telegram_id, yclients_client_id, source, amount, spent, remaining,
+                    expires_at, reason, yclients_status)
+                   VALUES (?, ?, 'season_award', ?, 0, ?, ?, ?, 'pending')""",
+                (
+                    telegram_id,
+                    wallet_entry.get("yclients_client_id"),
+                    amount,
+                    amount,
+                    wallet_entry.get("expires_at"),
+                    wallet_entry.get("reason"),
+                )
+            )
+
+        await db.commit()
+        return True
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
 async def mark_season_award(
     season_key, telegram_id, place, bonus_hours, rating_delta, reason,
     yclients_bonus_rub=0, yclients_status="not_required", yclients_error=None, yclients_card_id=None
@@ -1017,6 +1145,27 @@ async def create_pending_yclients_operation(telegram_id: int | None, yclients_cl
     await db.close()
     return row_id
 
+async def claim_pending_yclients_operation(operation_id: int) -> bool:
+    """Атомарно резервирует отложенную операцию перед обработкой.
+
+    Без этого шага параллельный запуск обработки (например, задача при
+    старте бота и одновременно сработавший scheduler) мог бы применить
+    одну и ту же операцию (начисление/списание бонуса) дважды.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """UPDATE pending_yclients_operations
+               SET status = 'processing', updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status IN ('pending', 'retry')""",
+            (operation_id,)
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+    finally:
+        await db.close()
+
+
 async def update_pending_yclients_operation(operation_id: int, status: str, last_error: str | None = None,
                                             yclients_card_id: str | None = None):
     db = await get_db()
@@ -1093,6 +1242,32 @@ async def get_expired_season_wallet_entries(now_iso: str):
         {"id": r[0], "telegram_id": r[1], "yclients_client_id": r[2], "remaining": r[3], "source": r[4], "reason": r[5]}
         for r in rows
     ]
+
+async def claim_wallet_entry_expiry(entry_id: int, amount_to_withdraw: float) -> bool:
+    """Атомарно резервирует сгорание бонуса (ставит expired_at) до попытки
+    списания через YCLIENTS.
+
+    Порядок важен: если сначала списывать деньги через внешний API, а потом
+    отмечать запись сгоревшей, то падение процесса между этими шагами приведёт
+    к повторному списанию той же суммы при следующем запуске. Пометка первой
+    гарантирует, что при сбое максимум "потеряется" списание в YCLIENTS
+    (безопасно и восстановимо через pending_yclients_operations), но никогда
+    не произойдёт двойное списание с карты клиента.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            """UPDATE bonus_wallet
+               SET expired_at = CURRENT_TIMESTAMP, remaining = 0,
+                   spent = spent + ?
+               WHERE id = ? AND expired_at IS NULL AND remaining > 0""",
+            (round(float(amount_to_withdraw or 0), 2), entry_id)
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+    finally:
+        await db.close()
+
 
 async def mark_wallet_entry_expired(entry_id: int, amount_spent: float = 0):
     db = await get_db()

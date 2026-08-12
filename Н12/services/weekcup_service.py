@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -14,6 +15,10 @@ from database.db import (
 logger = logging.getLogger(__name__)
 
 WEEKCUP_HISTORY_DIR = Path("data/history/weekcup")
+
+# Не даёт закрыть Week CUP дважды подряд (двойное нажатие кнопки, повторная
+# доставка callback от Telegram) — иначе призовые начисляются дважды.
+_close_lock = asyncio.Lock()
 
 
 def _safe_name(value):
@@ -47,6 +52,14 @@ async def close_weekcup(bot):
     3 место — 750 бонусных рублей.
     Потом очищает только Week CUP.
     """
+    if _close_lock.locked():
+        return "⏳ Week CUP уже закрывается, подождите завершения текущей операции."
+
+    async with _close_lock:
+        return await _close_weekcup_locked(bot)
+
+
+async def _close_weekcup_locked(bot):
     top3 = await get_weekcup_top3()
 
     if not top3:

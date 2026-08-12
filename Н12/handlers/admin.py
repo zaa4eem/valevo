@@ -266,6 +266,9 @@ async def broadcast_cancel(message: Message, state: FSMContext):
 # ======================== СМЕНА НОМЕРА ========================
 @router.callback_query(F.data.startswith("number_"))
 async def change_number(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     tid = int(callback.data.split("_")[1])
     await state.update_data(change_number_user=tid)
     await state.set_state(ChangePilotNumber.number)
@@ -273,18 +276,29 @@ async def change_number(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ChangePilotNumber.number)
 async def save_new_number(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
     data = await state.get_data()
     tid = data["change_number_user"]
     try:
         num = int(message.text)
-    except:
+    except (TypeError, ValueError):
         await message.answer("❌ Введите число")
         return
     existing = await get_pilot_by_number(num)
     if existing and existing["telegram_id"] != tid:
         await message.answer("❌ Этот номер уже занят другим пилотом.")
         return
-    await update_pilot_number(tid, num)
+    try:
+        changed = await update_pilot_number(tid, num)
+    except Exception as exc:
+        logger.warning("Не удалось обновить номер пилота %s -> %s: %s", tid, num, exc)
+        await message.answer("❌ Этот номер только что заняли. Введите другой номер.")
+        return
+    if not changed:
+        await message.answer("❌ Пилот не найден.")
+        await state.clear()
+        return
     await message.answer(f"✅ Номер пилота обновлён: #{num}")
     try:
         await message.bot.send_message(tid,
@@ -348,15 +362,22 @@ async def choose_discipline(callback: CallbackQuery, state: FSMContext):
     await state.update_data(discipline=discipline)
     await state.set_state(AddLap.track)
     try:
-        await callback.message.edit_text(
-            "🗺 Выберите трассу:",
-            reply_markup=await get_tracks_keyboard(discipline)
-        )
+        keyboard = await get_tracks_keyboard(discipline)
     except Exception:
-        await callback.message.answer(
-            "🗺 Выберите трассу:",
-            reply_markup=await get_tracks_keyboard(discipline)
-        )
+        logger.exception("Не удалось построить клавиатуру трасс для %s", discipline)
+        await callback.message.answer("❌ Не удалось загрузить трассы. Попробуйте ещё раз.")
+        return
+    try:
+        await callback.message.edit_text("🗺 Выберите трассу:", reply_markup=keyboard)
+    except Exception:
+        try:
+            await callback.message.answer("🗺 Выберите трассу:", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Не удалось показать клавиатуру трасс для %s", discipline)
+            await callback.message.answer(
+                "❌ Не удалось показать список трасс (возможно, слишком длинное название). "
+                "Обратитесь к разработчику."
+            )
 
 
 @router.callback_query(F.data.startswith("track_"))
@@ -515,22 +536,22 @@ async def remove_undo_button(msg: Message, delay: int):
     except: pass
 
 # ======================== ПИЛОТЫ (СТАТИСТИКА) ========================
-@router.message(F.text == "👥 Пилоты")
-async def pilots_stats(message: Message):
-    if not is_admin(message.from_user.id): return
+async def _build_pilots_stats() -> tuple[str, InlineKeyboardMarkup]:
     pilots = await get_all_pilots()
     total_pilots = len(pilots)
     db = await get_db()
-    cursor = await db.execute("SELECT COUNT(*) FROM laps")
-    total_laps = (await cursor.fetchone())[0]
-    cursor = await db.execute("SELECT COUNT(*) FROM disciplines")
-    total_disciplines = (await cursor.fetchone())[0]
-    cursor = await db.execute(
-        "SELECT d.name, COUNT(*) as cnt FROM laps l JOIN disciplines d ON l.discipline_id = d.id "
-        "GROUP BY d.name ORDER BY cnt DESC LIMIT 1")
-    row = await cursor.fetchone()
-    popular_discipline = f"{row[0]} ({row[1]} кругов)" if row else "—"
-    await db.close()
+    try:
+        cursor = await db.execute("SELECT COUNT(*) FROM laps")
+        total_laps = (await cursor.fetchone())[0]
+        cursor = await db.execute("SELECT COUNT(*) FROM disciplines")
+        total_disciplines = (await cursor.fetchone())[0]
+        cursor = await db.execute(
+            "SELECT d.name, COUNT(*) as cnt FROM laps l JOIN disciplines d ON l.discipline_id = d.id "
+            "GROUP BY d.name ORDER BY cnt DESC LIMIT 1")
+        row = await cursor.fetchone()
+        popular_discipline = f"{row[0]} ({row[1]} кругов)" if row else "—"
+    finally:
+        await db.close()
     text = (
         f"📊 <b>СТАТИСТИКА КЛУБА</b>\n\n"
         f"👥 Пользователей: <b>{total_pilots}</b>\n"
@@ -540,10 +561,20 @@ async def pilots_stats(message: Message):
         f"▸ Введите <b>номер пилота</b>, чтобы посмотреть его профиль и управлять им.")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 Список пилотов", callback_data="show_pilots_list")]])
+    return text, kb
+
+
+@router.message(F.text == "👥 Пилоты")
+async def pilots_stats(message: Message):
+    if not is_admin(message.from_user.id): return
+    text, kb = await _build_pilots_stats()
     await message.answer(text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("pilot_"))
 async def pilot_card(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     await callback.answer()
     tid = int(callback.data.split("_")[1])
     pilot = await get_pilot_by_telegram_id(tid)
@@ -561,7 +592,12 @@ async def pilot_card(callback: CallbackQuery):
 
 @router.callback_query(F.data == "back_pilots")
 async def back_to_stats(callback: CallbackQuery):
-    await pilots_stats(callback.message)
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
+    text, kb = await _build_pilots_stats()
+    await callback.message.edit_text(text, reply_markup=kb)
 
 @router.callback_query(F.data == "show_pilots_list")
 async def show_pilots_list(callback: CallbackQuery):
@@ -577,16 +613,28 @@ async def show_pilots_list(callback: CallbackQuery):
 # ======================== РЕЙТИНГ ========================
 @router.callback_query(F.data.startswith("rating_plus_"))
 async def plus_rating(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
     tid = int(callback.data.split("_")[2])
     await callback.message.edit_text("➕ Выберите:", reply_markup=rating_keyboard("+", tid))
 
 @router.callback_query(F.data.startswith("rating_minus_"))
 async def minus_rating(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
     tid = int(callback.data.split("_")[2])
     await callback.message.edit_text("➖ Выберите:", reply_markup=rating_keyboard("-", tid))
 
 @router.callback_query(F.data.startswith("rate_"))
 async def change_rating(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
     _, action, amount, tid = callback.data.split("_")
     amount = int(amount); tid = int(tid)
     if action == "-": amount = -amount
@@ -610,6 +658,10 @@ async def get_bonus_balance(client_id: int) -> float:
 
 @router.callback_query(F.data.startswith("balance_plus_"))
 async def balance_plus_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
     tid = int(callback.data.split("_")[2])
     await state.update_data(balance_tid=tid, balance_action="+")
     await state.set_state(BalanceAction.waiting_for_amount)
@@ -617,6 +669,10 @@ async def balance_plus_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("balance_minus_"))
 async def balance_minus_start(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
     tid = int(callback.data.split("_")[2])
     await state.update_data(balance_tid=tid, balance_action="-")
     await state.set_state(BalanceAction.waiting_for_amount)
@@ -624,6 +680,9 @@ async def balance_minus_start(callback: CallbackQuery, state: FSMContext):
 
 @router.message(BalanceAction.waiting_for_amount)
 async def balance_amount(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
     try:
         amount = float(message.text.strip().replace(",", "."))
         if amount <= 0:
@@ -991,11 +1050,23 @@ async def add_track_choose_discipline(callback: CallbackQuery, state: FSMContext
     await callback.message.edit_text(f"Введите название трассы для дисциплины «{discipline}»:")
     await state.set_state(TrackAdd.waiting_for_track_name)
 
+MAX_TRACK_NAME_LENGTH = 24
+
+
 @router.message(TrackAdd.waiting_for_track_name)
 async def add_track_save(message: Message, state: FSMContext):
     data = await state.get_data()
     discipline = data["discipline"]
-    track_name = message.text.strip()
+    track_name = (message.text or "").strip()
+    if not track_name:
+        await message.answer("❌ Введите название трассы текстом.")
+        return
+    if len(track_name) > MAX_TRACK_NAME_LENGTH:
+        await message.answer(
+            f"❌ Слишком длинное название (максимум {MAX_TRACK_NAME_LENGTH} символов). "
+            "Короткое имя нужно, чтобы кнопка трассы корректно работала в Telegram."
+        )
+        return
     success, reason = await add_track(discipline, track_name)
     if not success:
         await message.answer("❌ Такая трасса уже есть в этой дисциплине." if reason == "exists" else "❌ Ошибка при добавлении.")

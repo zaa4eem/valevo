@@ -1,13 +1,20 @@
+import logging
 from typing import Any, Awaitable, Callable, Dict
 
 from aiogram import BaseMiddleware
 from aiogram.types import Message, CallbackQuery, TelegramObject
 
-from database.db import get_pilot_by_telegram_id
+from config import MENU_VERSION
+from database.db import sync_pilot_menu_version
 from keyboards.menu import get_menu
+
+logger = logging.getLogger(__name__)
 
 
 class MenuUpdaterMiddleware(BaseMiddleware):
+    """Один раз показывает пилоту обновлённое reply-меню после того, как
+    в конфиге поднимается MENU_VERSION (например, добавили новую кнопку)."""
+
     async def __call__(
         self,
         handler: Callable[
@@ -20,27 +27,23 @@ class MenuUpdaterMiddleware(BaseMiddleware):
         result = await handler(event, data)
 
         user = data.get("event_from_user")
-
         if not user:
             return result
 
-        pilot = await get_pilot_by_telegram_id(user.id)
+        chat_target: Message | None = None
+        if isinstance(event, Message):
+            chat_target = event
+        elif isinstance(event, CallbackQuery) and event.message:
+            chat_target = event.message
 
-        if not pilot:
+        if chat_target is None:
             return result
 
         try:
-            if isinstance(event, Message):
-                await event.answer(
-                    reply_markup=get_menu(user.id)
-                )
-
-            elif isinstance(event, CallbackQuery) and event.message:
-                await event.message.answer(
-                    reply_markup=get_menu(user.id)
-                )
-
+            updated = await sync_pilot_menu_version(user.id, MENU_VERSION)
+            if updated:
+                await chat_target.answer("🔄 Меню обновлено.", reply_markup=get_menu(user.id))
         except Exception:
-            pass
+            logger.exception("Не удалось обновить меню пользователю %s", user.id)
 
         return result

@@ -1,10 +1,17 @@
 .env
+.env.*
+!.env.example
+*.db
 *.db-wal
 *.db-shm
 __pycache__/
 *.pyc
+*.log
+log.txt
 logs/
 backups/
 build/
 dist/
 *.exe
+.venv/
+venv/
