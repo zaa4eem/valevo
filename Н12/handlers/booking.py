@@ -768,7 +768,7 @@ def _selection_summary(data: dict[str, Any]) -> str:
     end_at = datetime.fromisoformat(data["end_at"]).astimezone(TZ)
     places = ", ".join(BOOKING_PLACES[key]["title"] for key in data["selected_places"])
     return (
-        "Проверьте заявку:\n\n"
+        "📋 <b>ПРОВЕРЬТЕ ЗАЯВКУ</b>\n\n"
         f"🖥 Места: <b>{places}</b>\n"
         f"📅 Дата: <b>{start_at.strftime('%d.%m.%Y')}</b>\n"
         f"⏰ Время: <b>{start_at.strftime('%H:%M')}–{end_at.strftime('%H:%M')}</b>\n"

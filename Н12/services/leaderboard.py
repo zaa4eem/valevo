@@ -1,23 +1,35 @@
+import html
+
 from database.db import get_leaderboard_data, get_pilot_by_username
 
-async def build_leaderboard():
+MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+DIVIDER = "━━━━━━━━━━━━━━━━━━"
+
+
+async def build_leaderboard() -> str:
     data = await get_leaderboard_data()
     if not data:
-        return "🏆 Таблица лидеров пока пуста."
+        return (
+            "🏆 <b>Таблица лидеров пока пуста.</b>\n\n"
+            "Станьте первым — отправьте свой результат через «⏱ Установить время»!"
+        )
 
-    text = "🏁 <b>ТАБЛИЦА ЛИДЕРОВ</b>\n\n"
-    medals = ["🥇", "🥈", "🥉", "⚪", "⚪"]
-
+    blocks = []
     for discipline, rows in data.items():
         if not rows:
             continue
-        # Берём название трассы из первой записи (обычно оно одинаковое для всех)
         track = rows[0].get("track", "")
-        text += f"<b>{discipline} - {track}</b>\n"
+        lines = [f"🏁 <b>{html.escape(str(discipline))}</b> · {html.escape(str(track))}"]
         for i, r in enumerate(rows):
             pilot = await get_pilot_by_username(r["username"])
             display = pilot[4] if pilot and pilot[4] else r["username"]
-            text += f"{medals[i]} {display} – {r['lap_text']}\n"
-        text += "\n"
+            lines.append(
+                f"{MEDALS[i]} {html.escape(str(display))} — "
+                f"<code>{html.escape(str(r['lap_text']))}</code>"
+            )
+        blocks.append("\n".join(lines))
 
-    return text
+    return (
+        f"🏆 <b>ТАБЛИЦА ЛИДЕРОВ</b>\n{DIVIDER}\n\n"
+        + f"\n\n{DIVIDER}\n\n".join(blocks)
+    )
