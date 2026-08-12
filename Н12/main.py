@@ -1,6 +1,8 @@
 import asyncio
 import html
 import logging
+import os
+import sys
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
@@ -173,7 +175,12 @@ async def main() -> None:
     background_tasks = await _run_startup_jobs(bot, scheduler)
     background_tasks.append(asyncio.create_task(process_completed_bookings(bot)))
 
-    logger.info("Бот запущен")
+    exe_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
+    try:
+        build_time = datetime.fromtimestamp(os.path.getmtime(exe_path)).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError:
+        build_time = "неизвестно"
+    logger.info("Бот запущен (сборка от %s)", build_time)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
