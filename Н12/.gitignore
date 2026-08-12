@@ -1,0 +1,10 @@
+.env
+*.db-wal
+*.db-shm
+__pycache__/
+*.pyc
+logs/
+backups/
+build/
+dist/
+*.exe

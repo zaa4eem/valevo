@@ -1,0 +1,1169 @@
+import json
+import asyncio
+import logging
+
+from aiogram import Router, F
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
+
+from config import ADMIN_IDS, GROUP_ID
+from services.weekcup_service import close_weekcup
+from utils.time_parser import time_to_ms
+from keyboards.menu import get_menu
+from keyboards.disciplines import get_disciplines_keyboard
+from keyboards.tracks import get_tracks_keyboard
+from keyboards.admin_menu import admin_menu
+from keyboards.admin_pilots import (
+    pilot_manage_keyboard,
+    rating_keyboard,
+    bonus_minutes_keyboard,
+)
+from database.db import (
+    add_lap, delete_lap, get_top3, get_pilot_by_username, get_all_pilots,
+    get_pilot_by_telegram_id, get_pilot_by_number,
+    update_pilot_rating, update_pilot_number,
+    clear_all_laps, get_db,
+    add_track, remove_track, get_all_disciplines, get_tracks_for_discipline,
+    get_disciplines_with_current_results, get_current_discipline_results,
+    get_current_ranked_lap
+)
+from services.leaderboard import build_leaderboard
+from services.yclients_service import (
+    get_client, update_balance, get_client_total_hours,
+    get_valevo_bonus_balance, change_valevo_bonus
+)
+from services.yclients_auto import issue_or_queue_valevo_bonus, auto_sync_pilot_with_yclients
+
+router = Router()
+logger = logging.getLogger(__name__)
+
+# ======================== HELPERS ========================
+async def safe_delete_message(bot, chat_id, msg_id):
+    try: await bot.delete_message(chat_id, msg_id)
+    except: pass
+
+async def delete_later(msg, delay=10):
+    await asyncio.sleep(delay)
+    try: await msg.delete()
+    except: pass
+
+async def cleanup_undo_state(msg: Message, state: FSMContext, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await msg.edit_reply_markup(reply_markup=None)
+    except: pass
+    await state.clear()
+
+def is_admin(uid): return uid in ADMIN_IDS
+
+# ======================== STATES ========================
+class AddLap(StatesGroup):
+    discipline = State()
+    track = State()
+    pilot_number = State()
+    lap_time = State()
+
+class ChangePilotNumber(StatesGroup):
+    number = State()
+
+class BalanceAction(StatesGroup):
+    waiting_for_amount = State()
+
+class ClearTableConfirm(StatesGroup):
+    wait = State()
+
+class Broadcast(StatesGroup):
+    waiting_for_text = State()
+    confirm = State()
+
+class TrackAdd(StatesGroup):
+    waiting_for_discipline = State()
+    waiting_for_track_name = State()
+
+class TrackRemove(StatesGroup):
+    waiting_for_discipline = State()
+    waiting_for_track_name = State()
+
+# ======================== АДМИН-МЕНЮ ========================
+@router.message(F.text == "🛠 Панель администратора")
+async def admin_panel(message: Message):
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён")
+        return
+    await message.answer("🛠 <b>Панель администратора</b>", reply_markup=admin_menu)
+
+@router.message(F.text == "🔙 Назад")
+async def back_to_menu(message: Message):
+    await message.answer("🏁 Главное меню", reply_markup=get_menu(message.from_user.id))
+
+# ======================== ОЧИСТКА ТАБЛИЦЫ ========================
+@router.message(F.text == "🗑 Очистить таблицу")
+async def clear_table_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    await state.set_state(ClearTableConfirm.wait)
+    await message.answer(
+        "⚠️ Вы уверены, что хотите удалить ВСЕ круги из таблицы?\n"
+        "Напишите в точности: Я уверен что я делаю\n\n"
+        "Для отмены нажмите '🔙 Назад'."
+    )
+
+@router.message(ClearTableConfirm.wait, F.text == "🔙 Назад")
+async def clear_table_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Операция отменена.", reply_markup=admin_menu)
+
+@router.message(ClearTableConfirm.wait)
+async def clear_table_confirm(message: Message, state: FSMContext):
+    if message.text.strip() == "Я уверен что я делаю":
+        await clear_all_laps()
+        await message.answer("✅ Таблица рекордов полностью очищена. Рейтинг пилотов сохранён.", reply_markup=admin_menu)
+    else:
+        await message.answer("❌ Текст не совпадает. Операция отменена.", reply_markup=admin_menu)
+    await state.clear()
+
+# ======================== РАССЫЛКА ========================
+@router.message(F.text == "📢 Рассылка")
+async def broadcast_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.set_state(Broadcast.waiting_for_text)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="❌ Отменить")]],
+        resize_keyboard=True
+    )
+
+    await message.answer(
+        "📢 Отправьте сообщение для рассылки.\n\n"
+        "Поддерживается:\n"
+        "• текст\n"
+        "• фото\n"
+        "• фото с подписью\n\n"
+        "Это сообщение получат все зарегистрированные пилоты.",
+        reply_markup=kb
+    )
+
+
+@router.message(Broadcast.waiting_for_text)
+async def broadcast_text(message: Message, state: FSMContext):
+
+    if message.text == "❌ Отменить":
+        await state.clear()
+        await message.answer("🚫 Рассылка отменена.", reply_markup=admin_menu)
+        return
+
+    if message.photo:
+        await state.update_data(
+            photo=message.photo[-1].file_id,
+            caption=message.caption or ""
+        )
+
+        preview = (
+            "🖼 Предпросмотр рассылки\n\n"
+            f"{message.caption or '(без подписи)'}"
+        )
+
+    elif message.text:
+        await state.update_data(
+            text=message.text.strip()
+        )
+
+        preview = (
+            "📝 Предпросмотр рассылки\n\n"
+            f"{message.text.strip()}"
+        )
+
+    else:
+        await message.answer("❌ Можно отправить только текст или фотографию.")
+        return
+
+    await state.set_state(Broadcast.confirm)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✅ Отправить")],
+            [KeyboardButton(text="❌ Отменить")]
+        ],
+        resize_keyboard=True
+    )
+
+    await message.answer(
+        preview + "\n\nПодтвердите отправку.",
+        reply_markup=kb
+    )
+
+
+@router.message(Broadcast.confirm, F.text == "✅ Отправить")
+async def broadcast_send(message: Message, state: FSMContext):
+
+    data = await state.get_data()
+
+    text = data.get("text")
+    photo = data.get("photo")
+    caption = data.get("caption", "")
+
+    pilots = await get_all_pilots()
+
+    sent = 0
+    failed = 0
+
+    for pilot in pilots:
+        try:
+
+            if photo:
+                await message.bot.send_photo(
+                    pilot["telegram_id"],
+                    photo=photo,
+                    caption=f"{caption}\n\n❤️ С уважением, администрация ВАЛЕВО!"
+                )
+
+            else:
+                await message.bot.send_message(
+                    pilot["telegram_id"],
+                    f"🏁 <b>ВАЛЕВО сим рейсинг клуб уведомляет:</b>\n\n"
+                    f"{text}\n\n"
+                    f"❤️ С уважением, администрация ВАЛЕВО!"
+                )
+
+            sent += 1
+            await asyncio.sleep(0.05)
+
+        except Exception as e:
+            logger.warning(
+                f"Не удалось отправить рассылку пилоту {pilot['telegram_id']}: {e}"
+            )
+            failed += 1
+
+    await message.answer(
+        f"✅ Рассылка завершена.\n\n"
+        f"Отправлено: {sent}\n"
+        f"Не удалось отправить: {failed}",
+        reply_markup=admin_menu
+    )
+
+    await state.clear()
+
+
+@router.message(Broadcast.confirm, F.text == "❌ Отменить")
+@router.message(Broadcast.waiting_for_text, F.text == "❌ Отменить")
+async def broadcast_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "🚫 Рассылка отменена.",
+        reply_markup=admin_menu
+    )
+
+# ======================== СМЕНА НОМЕРА ========================
+@router.callback_query(F.data.startswith("number_"))
+async def change_number(callback: CallbackQuery, state: FSMContext):
+    tid = int(callback.data.split("_")[1])
+    await state.update_data(change_number_user=tid)
+    await state.set_state(ChangePilotNumber.number)
+    await callback.message.edit_text("🏎 Введите новый номер:")
+
+@router.message(ChangePilotNumber.number)
+async def save_new_number(message: Message, state: FSMContext):
+    data = await state.get_data()
+    tid = data["change_number_user"]
+    try:
+        num = int(message.text)
+    except:
+        await message.answer("❌ Введите число")
+        return
+    existing = await get_pilot_by_number(num)
+    if existing and existing["telegram_id"] != tid:
+        await message.answer("❌ Этот номер уже занят другим пилотом.")
+        return
+    await update_pilot_number(tid, num)
+    await message.answer(f"✅ Номер пилота обновлён: #{num}")
+    try:
+        await message.bot.send_message(tid,
+            f"🎱 <b>ВАШ НОМЕР ПИЛОТА ОБНОВЛЁН!!!</b>\n\n🏁 ВАЛЕВО сим рейсинг присвоил вам новый уникальный номер: <b>{num}</b>")
+    except Exception as e:
+        logger.warning(f"Не удалось отправить уведомление о смене номера: {e}")
+    await state.clear()
+
+# ======================== ПОИСК ПИЛОТА ПО НОМЕРУ ========================
+@router.message(
+    StateFilter(None),
+    F.text.regexp(r'^\d{1,3}$')
+)
+async def search_pilot_by_number(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    number = int(message.text.strip())
+    pilot = await get_pilot_by_number(number)
+
+    if not pilot:
+        await message.answer("❌ Пилот с таким номером не найден.")
+        return
+
+    name = pilot["display_name"] or pilot["username"]
+    bonus_balance = (
+        await get_bonus_balance(pilot["yclients_client_id"])
+        if pilot.get("yclients_client_id")
+        else 0.0
+    )
+
+    text = (
+        f"👤 {name}\n"
+        f"🏎 Номер: #{pilot['pilot_number']}\n"
+        f"📱 {pilot['phone']}\n"
+        f"📈 Рейтинг: {pilot['rating']}\n"
+        f"🎁 Бонусный счёт: {bonus_balance:.2f} ₽"
+    )
+
+    await message.answer(
+        text,
+        reply_markup=pilot_manage_keyboard(pilot["telegram_id"]),
+    )
+
+# ======================== УСТАНОВКА ВРЕМЕНИ ========================
+@router.message(Command("addlap"))
+@router.message(F.text.contains("Установить время"))
+async def addlap_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    asyncio.create_task(delete_later(message, 1))
+    await state.clear()
+    await state.set_state(AddLap.discipline)
+    await message.answer("🏆 Выберите дисциплину:", reply_markup=get_disciplines_keyboard())
+
+
+@router.callback_query(F.data.startswith("discipline_"))
+async def choose_discipline(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    discipline = callback.data.split("_", 1)[1]
+    await state.update_data(discipline=discipline)
+    await state.set_state(AddLap.track)
+    try:
+        await callback.message.edit_text(
+            "🗺 Выберите трассу:",
+            reply_markup=await get_tracks_keyboard(discipline)
+        )
+    except Exception:
+        await callback.message.answer(
+            "🗺 Выберите трассу:",
+            reply_markup=await get_tracks_keyboard(discipline)
+        )
+
+
+@router.callback_query(F.data.startswith("track_"))
+async def choose_track(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    track = callback.data.split("_", 1)[1]
+    await state.update_data(track=track)
+    await state.set_state(AddLap.pilot_number)
+    try:
+        await callback.message.edit_text(
+            f"🏁 Трасса выбрана: {track}\n\n👤 Введите номер пилота:"
+        )
+    except Exception:
+        await callback.message.answer(
+            f"🏁 Трасса выбрана: {track}\n\n👤 Введите номер пилота:"
+        )
+
+
+@router.message(AddLap.pilot_number, F.text.regexp(r'^\d+$'))
+async def enter_pilot_number(message: Message, state: FSMContext):
+    number = int(message.text.strip())
+    pilot = await get_pilot_by_number(number)
+    if not pilot:
+        await message.answer("❌ Пилот с таким номером не найден. Попробуйте ещё раз.")
+        return
+    await state.update_data(username=pilot["username"], selected_telegram_id=pilot["telegram_id"])
+    await safe_delete_message(message.bot, message.chat.id, message.message_id)
+    msg = await message.answer("⏱ Введите время круга:\nПример: 01:18.565")
+    await state.update_data(bot_message_id=msg.message_id)
+    await state.set_state(AddLap.lap_time)
+
+
+@router.message(AddLap.pilot_number)
+async def pilot_number_invalid(message: Message):
+    await message.answer("❌ Введите корректный номер пилота (только цифры).")
+
+
+@router.message(AddLap.lap_time)
+async def finish_lap(message: Message, state: FSMContext):
+    data = await state.get_data()
+    lap_text = message.text.strip()
+    asyncio.create_task(delete_later(message, 1))
+
+    discipline = data.get("discipline")
+    username = data.get("username")
+    selected_tid = data.get("selected_telegram_id")
+    track = data.get("track")
+    if not all([discipline, username, selected_tid, track]):
+        await message.answer("❌ Данные установки времени потеряны. Начните заново через «Установить время».")
+        await state.clear()
+        return
+
+    try:
+        lap_ms = time_to_ms(lap_text)
+    except Exception as e:
+        logger.warning(f"Неверный формат времени: {lap_text} ({e})")
+        bot_msg = data.get("bot_message_id")
+        if bot_msg:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id, message_id=bot_msg,
+                    text="❌ Неверный формат времени\nПример: 01:18.565"
+                )
+            except Exception:
+                pass
+        else:
+            await message.answer("❌ Неверный формат времени\nПример: 01:18.565")
+        return
+
+    old_top = await get_top3()
+    old_rows = old_top.get(discipline, [])
+    lap_id = await add_lap(
+        discipline=discipline,
+        username=username,
+        telegram_id=selected_tid,
+        track=track,
+        lap_time_text=lap_text,
+        lap_time_ms=lap_ms,
+    )
+    new_top = await get_top3()
+    new_rows = new_top.get(discipline, [])
+
+    old_positions = {r["username"]: i for i, r in enumerate(old_rows)}
+    new_positions = {r["username"]: i for i, r in enumerate(new_rows)}
+    medals = ["🥇", "🥈", "🥉"]
+    rating_values = [20, 15, 10]
+    rating_changes = {}
+
+    for uname, new_i in new_positions.items():
+        old_i = old_positions.get(uname, 999)
+        if new_i < old_i and new_i < 3:
+            delta = rating_values[new_i] - (rating_values[old_i] if old_i < 3 else 0)
+            if delta > 0:
+                pilot = await get_pilot_by_username(uname)
+                if pilot:
+                    tid = pilot[1]
+                    await update_pilot_rating(tid, delta)
+                    rating_changes[tid] = rating_changes.get(tid, 0) + delta
+
+    undo_data = json.dumps({"lap_id": lap_id, "changes": rating_changes}, ensure_ascii=False)
+    undo_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Отменить (30 сек)", callback_data=f"undo_lap:{undo_data}")]
+    ])
+    text = f"✅ Круг засчитан!\n🏆 {discipline}\n👤 @{username}\n🗺 {track}\n⏱ {lap_text}"
+    bot_msg = data.get("bot_message_id")
+    if bot_msg:
+        try:
+            sent_msg = await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=bot_msg,
+                text=text,
+                reply_markup=undo_keyboard,
+            )
+            asyncio.create_task(cleanup_undo_state(sent_msg, state, 30))
+        except Exception:
+            await message.answer(text, reply_markup=undo_keyboard)
+    else:
+        await message.answer(text, reply_markup=undo_keyboard)
+
+    asyncio.create_task(send_notifications(
+        bot=message.bot,
+        old_positions=old_positions,
+        new_positions=new_positions,
+        medals=medals,
+        discipline=discipline,
+        new_username=username,
+        lap_text=lap_text,
+        selected_tid=selected_tid,
+        new_rows=new_rows,
+        track=track,
+        group_id=GROUP_ID,
+    ))
+    await state.clear()
+
+# ======================== ОТМЕНА УСТАНОВКИ ВРЕМЕНИ ========================
+@router.callback_query(F.data.startswith("undo_lap:"))
+async def undo_last_lap(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    payload = callback.data.split(":", 1)[1]
+    try:
+        undo_data = json.loads(payload)
+        lap_id = undo_data["lap_id"]
+        changes = undo_data["changes"]
+    except Exception:
+        await callback.answer("Некорректные данные для отмены.", show_alert=True)
+        return
+    await delete_lap(lap_id)
+    for tid_str, delta in changes.items():
+        await update_pilot_rating(int(tid_str), -delta)
+    await callback.message.edit_text("↩️ Результат отменён. Рейтинг возвращён.")
+    await callback.answer("Запись удалена.")
+
+async def remove_undo_button(msg: Message, delay: int):
+    await asyncio.sleep(delay)
+    try: await msg.edit_reply_markup(reply_markup=None)
+    except: pass
+
+# ======================== ПИЛОТЫ (СТАТИСТИКА) ========================
+@router.message(F.text == "👥 Пилоты")
+async def pilots_stats(message: Message):
+    if not is_admin(message.from_user.id): return
+    pilots = await get_all_pilots()
+    total_pilots = len(pilots)
+    db = await get_db()
+    cursor = await db.execute("SELECT COUNT(*) FROM laps")
+    total_laps = (await cursor.fetchone())[0]
+    cursor = await db.execute("SELECT COUNT(*) FROM disciplines")
+    total_disciplines = (await cursor.fetchone())[0]
+    cursor = await db.execute(
+        "SELECT d.name, COUNT(*) as cnt FROM laps l JOIN disciplines d ON l.discipline_id = d.id "
+        "GROUP BY d.name ORDER BY cnt DESC LIMIT 1")
+    row = await cursor.fetchone()
+    popular_discipline = f"{row[0]} ({row[1]} кругов)" if row else "—"
+    await db.close()
+    text = (
+        f"📊 <b>СТАТИСТИКА КЛУБА</b>\n\n"
+        f"👥 Пользователей: <b>{total_pilots}</b>\n"
+        f"🏎 Всего кругов: <b>{total_laps}</b>\n"
+        f"📚 Дисциплин: <b>{total_disciplines}</b>\n"
+        f"🔥 Популярная дисциплина: <b>{popular_discipline}</b>\n\n"
+        f"▸ Введите <b>номер пилота</b>, чтобы посмотреть его профиль и управлять им.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список пилотов", callback_data="show_pilots_list")]])
+    await message.answer(text, reply_markup=kb)
+
+@router.callback_query(F.data.startswith("pilot_"))
+async def pilot_card(callback: CallbackQuery):
+    await callback.answer()
+    tid = int(callback.data.split("_")[1])
+    pilot = await get_pilot_by_telegram_id(tid)
+    if not pilot:
+        await callback.message.edit_text("❌ Пилот не найден"); return
+    name = pilot.get("display_name") or pilot["username"]
+    bonus_balance = await get_bonus_balance(pilot['yclients_client_id']) if pilot.get('yclients_client_id') else 0.0
+    text = (
+        f"👤 {name}\n"
+        f"🏎 Номер: #{pilot.get('pilot_number', '—')}\n"
+        f"📱 {pilot.get('phone', '—')}\n"
+        f"📈 Рейтинг: {pilot.get('rating', 0)}\n"
+        f"🎁 Бонусный счёт: {bonus_balance:.2f} ₽")
+    await callback.message.edit_text(text, reply_markup=pilot_manage_keyboard(tid))
+
+@router.callback_query(F.data == "back_pilots")
+async def back_to_stats(callback: CallbackQuery):
+    await pilots_stats(callback.message)
+
+@router.callback_query(F.data == "show_pilots_list")
+async def show_pilots_list(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True); return
+    await callback.answer()
+    pilots = await get_all_pilots()
+    if not pilots:
+        await callback.message.answer("В клубе ещё нет пилотов."); return
+    lines = [f"@{p['username']} #{p.get('pilot_number', '—')}" for p in pilots]
+    await callback.message.answer("📋 <b>СПИСОК ПИЛОТОВ</b>\n\n" + "\n".join(lines))
+
+# ======================== РЕЙТИНГ ========================
+@router.callback_query(F.data.startswith("rating_plus_"))
+async def plus_rating(callback: CallbackQuery):
+    tid = int(callback.data.split("_")[2])
+    await callback.message.edit_text("➕ Выберите:", reply_markup=rating_keyboard("+", tid))
+
+@router.callback_query(F.data.startswith("rating_minus_"))
+async def minus_rating(callback: CallbackQuery):
+    tid = int(callback.data.split("_")[2])
+    await callback.message.edit_text("➖ Выберите:", reply_markup=rating_keyboard("-", tid))
+
+@router.callback_query(F.data.startswith("rate_"))
+async def change_rating(callback: CallbackQuery):
+    _, action, amount, tid = callback.data.split("_")
+    amount = int(amount); tid = int(tid)
+    if action == "-": amount = -amount
+    pilot = await get_pilot_by_telegram_id(tid)
+    if not pilot: await callback.message.edit_text("❌ Пилот не найден"); return
+    old = pilot["rating"]
+    await update_pilot_rating(tid, amount)
+    name = pilot.get("display_name") or pilot["username"]
+    await callback.message.edit_text(f"✅ Рейтинг обновлён\n👤 {name}\n📈 Новый рейтинг: {old + amount}")
+
+# ======================== БАЛАНС (YCLIENTS) ========================
+async def get_balance(client_id: int) -> float:
+    """Возвращает обычный баланс клиента из YCLIENTS. Может быть отрицательным."""
+    client = await get_client(client_id)
+    return float(client.get("balance", 0)) if client else 0.0
+
+
+async def get_bonus_balance(client_id: int) -> float:
+    """Возвращает бонусный счёт карты Valevo Bonus."""
+    return await get_valevo_bonus_balance(client_id)
+
+@router.callback_query(F.data.startswith("balance_plus_"))
+async def balance_plus_start(callback: CallbackQuery, state: FSMContext):
+    tid = int(callback.data.split("_")[2])
+    await state.update_data(balance_tid=tid, balance_action="+")
+    await state.set_state(BalanceAction.waiting_for_amount)
+    await callback.message.edit_text("🎁 Введите сумму для начисления на бонусный счёт Valevo Bonus (в рублях):")
+
+@router.callback_query(F.data.startswith("balance_minus_"))
+async def balance_minus_start(callback: CallbackQuery, state: FSMContext):
+    tid = int(callback.data.split("_")[2])
+    await state.update_data(balance_tid=tid, balance_action="-")
+    await state.set_state(BalanceAction.waiting_for_amount)
+    await callback.message.edit_text("🎁 Введите сумму для списания с бонусного счёта Valevo Bonus (в рублях):")
+
+@router.message(BalanceAction.waiting_for_amount)
+async def balance_amount(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.strip().replace(",", "."))
+        if amount <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Введите положительное число.")
+        return
+
+    data = await state.get_data()
+    tid = data["balance_tid"]
+    action = data["balance_action"]
+
+    pilot = await get_pilot_by_telegram_id(tid)
+    if not pilot:
+        await message.answer("❌ Пилот не найден.")
+        await state.clear()
+        return
+
+    if not pilot.get("yclients_client_id"):
+        try:
+            sync_result = await auto_sync_pilot_with_yclients(tid, pilot.get("phone"), pilot.get("username"))
+            pilot = await get_pilot_by_telegram_id(tid)
+        except Exception as exc:
+            logger.warning("Auto sync before bonus failed: %s", exc)
+
+    delta = amount if action == "+" else -amount
+    operation = "Начисление" if delta > 0 else "Списание"
+    pilot_name = pilot.get("display_name") or pilot.get("username") or "Пилот"
+
+    result = await issue_or_queue_valevo_bonus(
+        telegram_id=tid,
+        client_id=pilot.get("yclients_client_id"),
+        amount=delta,
+        title=f"Valevo Bonus: {operation.lower()} администратором {message.from_user.id}",
+        source="admin_manual",
+        phone=pilot.get("phone"),
+        name=pilot_name,
+    )
+
+    if result.get("ok"):
+        await message.answer(
+            f"✅ Бонусный счёт обновлён.\n"
+            f"👤 Пилот: {pilot_name}\n"
+            f"Операция: {operation} {abs(delta):.2f} ₽\n"
+            f"Текущий бонусный счёт: {float(result.get('balance') or 0):.2f} ₽"
+        )
+        if delta > 0:
+            try:
+                await message.bot.send_message(
+                    tid,
+                    (
+                        f"🏆 На ваш бонусный счёт Valevo начислено +{amount:g}₽\n\n"
+                        "Баланс уже доступен и может быть использован для заездов в клубе.\n\n"
+                        "📈 Продолжайте подниматься в рейтинге пилотов, участвуйте в сезоне и занимайте ТОП, "
+                        "чтобы получать ещё больше бонусов и наград.\n\n"
+                        "Ждём вас на трассе 🏁"
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Не удалось отправить уведомление пилоту %s: %s", tid, exc)
+    elif result.get("status") == "queued":
+        await message.answer(
+            f"⚠️ Операция поставлена в очередь автосинхронизации.\n"
+            f"👤 Пилот: {pilot_name}\n"
+            f"Сумма: {delta:+.2f} ₽\n"
+            f"Причина: {result.get('message', 'карта/синхронизация пока недоступна')}\n\n"
+            "Бот сам повторит начисление, когда карта Valevo Bonus будет доступна."
+        )
+    else:
+        await message.answer(f"❌ Ошибка YCLIENTS: {result.get('message', 'неизвестная ошибка')}")
+    await state.clear()
+
+
+# ======================== УДАЛЕНИЕ ОДНОГО ВРЕМЕНИ ========================
+DELETE_RESULTS_PAGE_SIZE = 8
+DELETE_RATING_POINTS = {1: 20, 2: 15, 3: 10}
+
+
+def _short_button_name(value: str, max_length: int = 22) -> str:
+    value = str(value or "Пилот").strip().lstrip("@") or "Пилот"
+    return value if len(value) <= max_length else value[:max_length - 1] + "…"
+
+
+def _delete_results_keyboard(discipline_id: int, results: list, page: int):
+    total_pages = max(1, (len(results) + DELETE_RESULTS_PAGE_SIZE - 1) // DELETE_RESULTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * DELETE_RESULTS_PAGE_SIZE
+    page_rows = results[start:start + DELETE_RESULTS_PAGE_SIZE]
+
+    keyboard = []
+    for row in page_rows:
+        label = (
+            f"{row['place']}. {_short_button_name(row['display_name'])} "
+            f"— {row['lap_time_text']}"
+        )
+        keyboard.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"delresult_lap:{row['lap_id']}"
+            )
+        ])
+
+    navigation = []
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                text="⬅️",
+                callback_data=f"delresult_page:{discipline_id}:{page - 1}"
+            )
+        )
+    navigation.append(
+        InlineKeyboardButton(
+            text=f"{page + 1}/{total_pages}",
+            callback_data="delresult_noop"
+        )
+    )
+    if page + 1 < total_pages:
+        navigation.append(
+            InlineKeyboardButton(
+                text="➡️",
+                callback_data=f"delresult_page:{discipline_id}:{page + 1}"
+            )
+        )
+    keyboard.append(navigation)
+    keyboard.append([
+        InlineKeyboardButton(text="❌ Отмена", callback_data="delresult_cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+async def _show_delete_results(callback: CallbackQuery, discipline_id: int, page: int = 0):
+    results = await get_current_discipline_results(discipline_id)
+    if not results:
+        await callback.message.edit_text("❌ В актуальной таблице этой дисциплины нет результатов.")
+        return
+
+    discipline = results[0]["discipline"]
+    track = results[0]["track"]
+    total_pages = max(1, (len(results) + DELETE_RESULTS_PAGE_SIZE - 1) // DELETE_RESULTS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+
+    await callback.message.edit_text(
+        "🗑 <b>Удаление времени</b>\n\n"
+        f"🏆 Дисциплина: <b>{discipline}</b>\n"
+        f"🗺 Актуальная трасса: <b>{track}</b>\n"
+        f"👥 Всего мест: <b>{len(results)}</b>\n\n"
+        "Выберите любое место из таблицы:",
+        reply_markup=_delete_results_keyboard(discipline_id, results, page)
+    )
+
+
+@router.message(F.text == "🗑 Удалить время")
+async def delete_result_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    await state.clear()
+    disciplines = await get_disciplines_with_current_results()
+
+    if not disciplines:
+        await message.answer("❌ В таблице пока нет результатов.", reply_markup=admin_menu)
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"{item['name']} — {item['current_track']}",
+                    callback_data=f"delresult_disc:{item['id']}"
+                )
+            ]
+            for item in disciplines
+        ] + [[InlineKeyboardButton(text="❌ Отмена", callback_data="delresult_cancel")]]
+    )
+
+    await message.answer(
+        "🗑 <b>Удаление времени из таблицы</b>\n\n"
+        "Сначала выберите дисциплину. После этого выберите нужное",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("delresult_disc:"))
+async def delete_result_choose_discipline(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    await callback.answer()
+    discipline_id = int(callback.data.split(":", 1)[1])
+    await _show_delete_results(callback, discipline_id, page=0)
+
+
+@router.callback_query(F.data.startswith("delresult_page:"))
+async def delete_result_change_page(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    _, discipline_id, page = callback.data.split(":", 2)
+    await callback.answer()
+    await _show_delete_results(callback, int(discipline_id), int(page))
+
+
+@router.callback_query(F.data == "delresult_noop")
+async def delete_result_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("delresult_lap:"))
+async def delete_result_preview(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    lap_id = int(callback.data.split(":", 1)[1])
+    row = await get_current_ranked_lap(lap_id)
+
+    if not row:
+        await callback.answer(
+            "Таблица уже изменилась. Откройте удаление заново.",
+            show_alert=True
+        )
+        return
+
+    pilot_number = f"#{row['pilot_number']}" if row.get("pilot_number") else "—"
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Удалить это время",
+                    callback_data=f"delresult_confirm:{lap_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Вернуться к таблице",
+                    callback_data=f"delresult_disc:{await _discipline_id_for_delete_row(row)}"
+                )
+            ],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="delresult_cancel")]
+        ]
+    )
+
+    await callback.message.edit_text(
+        "⚠️ <b>Подтвердите удаление</b>\n\n"
+        f"🏆 Дисциплина: <b>{row['discipline']}</b>\n"
+        f"🗺 Трасса: <b>{row['track']}</b>\n"
+        f"📍 Место сейчас: <b>{row['place']}</b>\n"
+        f"👤 Пилот: <b>{row['display_name']}</b> ({pilot_number})\n"
+        f"⏱ Время: <b>{row['lap_time_text']}</b>\n\n"
+        "Удалится конкретная запись этого круга. Если у пилота есть другой "
+        "результат на этой трассе, после удаления он автоматически займёт "
+        "новое место со своим следующим лучшим временем.",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+
+async def _discipline_id_for_delete_row(row: dict) -> int:
+    """Получает id дисциплины для кнопки возврата без хранения текста в callback_data."""
+    disciplines = await get_disciplines_with_current_results()
+    for item in disciplines:
+        if item["name"] == row["discipline"]:
+            return int(item["id"])
+    return 0
+
+
+@router.callback_query(F.data.startswith("delresult_confirm:"))
+async def delete_result_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    lap_id = int(callback.data.split(":", 1)[1])
+
+    # Повторная проверка прямо перед DELETE: место могло измениться,
+    # пока администратор читал подтверждение.
+    selected = await get_current_ranked_lap(lap_id)
+    if not selected:
+        await callback.answer(
+            "Запись уже удалена или таблица изменилась. Начните заново.",
+            show_alert=True
+        )
+        return
+
+    discipline_id = await _discipline_id_for_delete_row(selected)
+    if not discipline_id:
+        await callback.answer("Не удалось определить дисциплину.", show_alert=True)
+        return
+
+    old_results = await get_current_discipline_results(discipline_id)
+    old_points = {
+        row["username"]: DELETE_RATING_POINTS.get(row["place"], 0)
+        for row in old_results[:3]
+    }
+
+    await delete_lap(lap_id)
+
+    new_results = await get_current_discipline_results(discipline_id)
+    new_points = {
+        row["username"]: DELETE_RATING_POINTS.get(row["place"], 0)
+        for row in new_results[:3]
+    }
+
+    # Зеркально корректируем рейтинг тех, чья позиция TOP-3 изменилась.
+    for username in set(old_points) | set(new_points):
+        delta = new_points.get(username, 0) - old_points.get(username, 0)
+        if delta:
+            pilot = await get_pilot_by_username(username)
+            if pilot:
+                await update_pilot_rating(pilot[1], delta)
+
+    replacement = next(
+        (row for row in new_results if row["username"] == selected["username"]),
+        None
+    )
+    replacement_text = ""
+    if replacement:
+        replacement_text = (
+            "\n\nℹ️ У пилота остался другой результат:\n"
+            f"новое место — <b>{replacement['place']}</b>, "
+            f"время — <b>{replacement['lap_time_text']}</b>."
+        )
+
+    await callback.message.edit_text(
+        "✅ <b>Время удалено</b>\n\n"
+        f"🏆 {selected['discipline']}\n"
+        f"🗺 {selected['track']}\n"
+        f"👤 {selected['display_name']}\n"
+        f"📍 Было место: {selected['place']}\n"
+        f"⏱ Удалено: {selected['lap_time_text']}"
+        f"{replacement_text}\n\n"
+        "Таблица и позиции пересчитаны автоматически."
+    )
+    await callback.answer("Время удалено")
+
+
+@router.callback_query(F.data == "delresult_cancel")
+async def delete_result_cancel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    await callback.message.edit_text("❌ Удаление времени отменено.")
+    await callback.answer()
+
+
+# ======================== ТРАССЫ ========================
+@router.message(F.text == "➕ Добавить трассу")
+async def add_track_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    disciplines = await get_all_disciplines()
+    if not disciplines:
+        await message.answer("Нет дисциплин. Сначала создайте хотя бы одну через установку времени."); return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=d, callback_data=f"addtrack_{d}")] for d in disciplines])
+    await message.answer("Выберите дисциплину:", reply_markup=kb)
+    await state.set_state(TrackAdd.waiting_for_discipline)
+
+@router.callback_query(F.data.startswith("addtrack_"), TrackAdd.waiting_for_discipline)
+async def add_track_choose_discipline(callback: CallbackQuery, state: FSMContext):
+    discipline = callback.data.split("_", 1)[1]
+    await state.update_data(discipline=discipline)
+    await callback.message.edit_text(f"Введите название трассы для дисциплины «{discipline}»:")
+    await state.set_state(TrackAdd.waiting_for_track_name)
+
+@router.message(TrackAdd.waiting_for_track_name)
+async def add_track_save(message: Message, state: FSMContext):
+    data = await state.get_data()
+    discipline = data["discipline"]
+    track_name = message.text.strip()
+    success, reason = await add_track(discipline, track_name)
+    if not success:
+        await message.answer("❌ Такая трасса уже есть в этой дисциплине." if reason == "exists" else "❌ Ошибка при добавлении.")
+    else:
+        await message.answer(f"✅ Трасса «{track_name}» добавлена в дисциплину «{discipline}».")
+    await state.clear()
+
+@router.message(F.text == "➖ Удалить трассу")
+async def remove_track_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id): return
+    disciplines = await get_all_disciplines()
+    if not disciplines:
+        await message.answer("Нет дисциплин."); return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=d, callback_data=f"removetrack_{d}")] for d in disciplines])
+    await message.answer("Выберите дисциплину:", reply_markup=kb)
+    await state.set_state(TrackRemove.waiting_for_discipline)
+
+@router.callback_query(F.data.startswith("removetrack_"), TrackRemove.waiting_for_discipline)
+async def remove_track_choose_discipline(callback: CallbackQuery, state: FSMContext):
+    discipline = callback.data.split("_", 1)[1]
+    tracks = await get_tracks_for_discipline(discipline)
+    if not tracks:
+        await callback.message.edit_text(f"В дисциплине «{discipline}» нет трасс.")
+        await state.clear(); return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=t, callback_data=f"deltrack_{discipline}_{t}")] for t in tracks])
+    await callback.message.edit_text("Выберите трассу для удаления:", reply_markup=kb)
+    await state.set_state(TrackRemove.waiting_for_track_name)
+
+@router.callback_query(F.data.startswith("deltrack_"), TrackRemove.waiting_for_track_name)
+async def remove_track_delete(callback: CallbackQuery, state: FSMContext):
+    _, discipline, track_name = callback.data.split("_", 2)
+    await remove_track(discipline, track_name)
+    await callback.message.edit_text(f"✅ Трасса «{track_name}» удалена из дисциплины «{discipline}».")
+    await state.clear()
+
+# ======================== УВЕДОМЛЕНИЯ ========================
+async def send_notifications(bot, old_positions, new_positions, medals, discipline,
+                             new_username, lap_text, selected_tid, new_rows, track, group_id):
+    for uname, old_i in old_positions.items():
+        if uname not in new_positions:
+            pilot = await get_pilot_by_username(uname)
+            if pilot:
+                try:
+                    await bot.send_message(pilot[1],
+                        f"⚠️ Ваш рекорд в {discipline} выбит из ТОП‑3!\nНовый рекорд: @{new_username} – {lap_text}\n\n"
+                        f"Забронировать платформу вы можете по тел. 89939501251 или написав в тг: @ValevoRostov")
+                except Exception as e:
+                    logger.warning(f"Не удалось уведомить {uname}: {e}")
+        else:
+            new_i = new_positions[uname]
+            if new_i > old_i:
+                pilot = await get_pilot_by_username(uname)
+                if pilot:
+                    try:
+                        await bot.send_message(pilot[1],
+                            f"⚠️ Ваше место в {discipline} изменено: {medals[old_i]} → {medals[new_i]}\n"
+                            f"Вас обогнал: @{new_username} – {lap_text}\n\n"
+                            f"Забронировать платформу вы можете по тел. 89939501251 или написав в тг: @ValevoRostov")
+                    except Exception as e:
+                        logger.warning(f"Не удалось уведомить {uname}: {e}")
+
+    if selected_tid:
+        pilot_username = new_username
+        if pilot_username in new_positions:
+            place = new_positions[pilot_username] + 1
+            place_text = f"Вы попали на {place} место!"
+        else:
+            place_text = "Ваше время записано, но вы не попали в топ-3."
+        notify_text = (
+            f"🏁 Администратор зафиксировал ваше новое время:\n"
+            f"{discipline} | {track} | {lap_text}\n\n{place_text}")
+        try: await bot.send_message(selected_tid, notify_text)
+        except Exception as e: logger.warning(f"Не удалось уведомить пилота {selected_tid}: {e}")
+
+    if group_id:
+        leaderboard = await build_leaderboard()
+        group_msg = f"🔥 Новый результат!\n🏆 {discipline}\n👤 @{new_username}\n🗺 {track}\n⏱ {lap_text}"
+        try:
+            await bot.send_message(group_id, group_msg)
+            await bot.send_message(group_id, leaderboard)
+        except Exception as e: logger.warning(f"Ошибка отправки в группу: {e}")
+
+def is_weekcup_close_button(text: str | None) -> bool:
+    if not text:
+        return False
+
+    t = text.lower().replace("ё", "е").strip()
+
+    return (
+        "закрыть" in t
+        and (
+            "week" in t
+            or "cup" in t
+            or "вик" in t
+            or "кап" in t
+            or "недель" in t
+        )
+    )
+
+
+@router.message(F.text.func(is_weekcup_close_button))
+async def admin_close_weekcup_button(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Доступ запрещён")
+        return
+
+    await state.clear()
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, закрыть Week CUP",
+                    callback_data="admin_close_weekcup_yes"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена",
+                    callback_data="admin_close_weekcup_cancel"
+                )
+            ]
+        ]
+    )
+
+    await message.answer(
+        "⚠️ <b>Закрыть Week CUP?</b>\n\n"
+        "Будет выполнено:\n"
+        "1. Зафиксирован TOP-3.\n"
+        "2. 1 месту уйдёт сообщение про суперприз.\n"
+        "3. 2 месту будет начислено 1000 ₽.\n"
+        "4. 3 месту будет начислено 750 ₽.\n"
+        "5. Таблица Week CUP будет очищена.\n\n"
+        "Остальные дисциплины не будут затронуты.",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data == "admin_close_weekcup_cancel")
+async def admin_close_weekcup_cancel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text("❌ Закрытие Week CUP отменено.")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_close_weekcup_yes")
+async def admin_close_weekcup_yes(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    await callback.message.edit_text("⏳ Закрываю Week CUP...")
+
+    try:
+        report = await close_weekcup(callback.bot)
+        await callback.message.answer(report)
+        await callback.answer("Week CUP закрыт")
+    except Exception as exc:
+        logger.exception("Ошибка при закрытии Week CUP")
+
+        await callback.message.answer(
+            "❌ <b>Ошибка при закрытии Week CUP</b>\n\n"
+            f"<code>{exc}</code>"
+        )
+
+        await callback.answer("Ошибка", show_alert=True)

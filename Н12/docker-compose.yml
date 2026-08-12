@@ -1,0 +1,12 @@
+services:
+  valevo-bot:
+    build: .
+    container_name: valevo-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./valevo.db:/app/valevo.db
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    stop_grace_period: 30s
