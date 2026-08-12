@@ -75,28 +75,49 @@ async def create_booking(
         await db.commit()
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import aiosqlite
 
-from config import DB_NAME
+from config import DB_NAME, MOSCOW_TZ
+
+TZ = ZoneInfo(MOSCOW_TZ)
+
+# Активные брони, которые ещё имеет смысл показывать администратору.
+_ACTIVE_STATUSES = ("pending_admin", "creating", "confirmed", "user_confirmed")
 
 
 async def get_future_bookings():
+    """Возвращает будущие брони из реальной таблицы бронирований (booking_requests_v2).
+
+    Поля переименованы под старый формат (booking_time/service_name/staff_name/
+    pilot_telegram_id), который уже понимает handlers/bookings_admin.py.
+    """
+    now_iso = datetime.now(TZ).isoformat()
+    status_placeholders = ",".join("?" for _ in _ACTIVE_STATUSES)
 
     async with aiosqlite.connect(DB_NAME) as db:
 
         db.row_factory = aiosqlite.Row
 
         cursor = await db.execute(
-            '''
-            SELECT *
-            FROM bookings
-            WHERE booking_time > ?
-            ORDER BY booking_time ASC
+            f'''
+            SELECT
+                br.id AS id,
+                br.telegram_id AS pilot_telegram_id,
+                br.phone AS phone,
+                br.start_at AS booking_time,
+                br.duration_minutes AS duration_minutes,
+                CASE WHEN br.place_type = 'static' THEN 'Статика' ELSE 'Подвижка' END AS service_name,
+                GROUP_CONCAT(bi.place_title, ', ') AS staff_name
+            FROM booking_requests_v2 br
+            JOIN booking_items_v2 bi ON bi.booking_id = br.id
+            WHERE br.start_at > ?
+              AND br.status IN ({status_placeholders})
+            GROUP BY br.id
+            ORDER BY br.start_at ASC
             ''',
-            (
-                datetime.now().isoformat(),
-            )
+            (now_iso, *_ACTIVE_STATUSES),
         )
 
         rows = await cursor.fetchall()

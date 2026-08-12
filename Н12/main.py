@@ -1,17 +1,18 @@
 import asyncio
+import html
 import logging
-import pytz
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
 from handlers import booking, time_requests
 
-from config import BOT_TOKEN, MOSCOW_TZ, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
+from config import ADMIN_IDS, BOT_TOKEN, MOSCOW_TZ, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
 from database.db import init_db
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
@@ -51,7 +52,31 @@ def _register_routers(dp: Dispatcher) -> None:
     dp.include_router(common.router)
 
 
-async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> None:
+def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
+    """Ловит необработанные исключения хендлеров, чтобы они не терялись молча
+    и админы узнавали о проблеме сразу, а не из жалоб пользователей."""
+
+    @dp.errors()
+    async def _on_error(event: ErrorEvent) -> bool:
+        update_id = event.update.update_id if event.update else "?"
+        logger.error(
+            "Необработанная ошибка при обработке update_id=%s", update_id,
+            exc_info=event.exception,
+        )
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"⚠️ Необработанная ошибка в боте (update_id={update_id}):\n"
+                    f"<code>{html.escape(type(event.exception).__name__)}: "
+                    f"{html.escape(str(event.exception))}</code>",
+                )
+            except Exception:
+                logger.warning("Не удалось уведомить админа %s об ошибке", admin_id)
+        return True
+
+
+async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[asyncio.Task]:
     moscow_tz = timezone(MOSCOW_TZ)
     now = datetime.now(moscow_tz)
 
@@ -118,14 +143,18 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> None:
         scheduler.start()
 
     # Автосинхронизация не должна блокировать запуск бота.
-    asyncio.create_task(auto_sync_all_pilots(bot, notify_admin=True))
-    asyncio.create_task(process_pending_yclients_operations(bot))
-    asyncio.create_task(expire_season_bonuses(bot))
-    asyncio.create_task(booking.process_booking_reminders(bot))
+    background_tasks = [
+        asyncio.create_task(auto_sync_all_pilots(bot, notify_admin=True)),
+        asyncio.create_task(process_pending_yclients_operations(bot)),
+        asyncio.create_task(expire_season_bonuses(bot)),
+        asyncio.create_task(booking.process_booking_reminders(bot)),
+    ]
 
     if now.day == 15 and now.hour >= 14:
         logger.info("15-е число после 14:00 — проверяю ежемесячные начисления при старте.")
         await perform_monthly_reset(bot)
+
+    return background_tasks
 
 
 async def main() -> None:
@@ -140,15 +169,17 @@ async def main() -> None:
 
     _register_middlewares(dp)
     _register_routers(dp)
-    await _run_startup_jobs(bot, scheduler)
-
-    completed_bookings_task = asyncio.create_task(process_completed_bookings(bot))
+    _register_error_handler(dp, bot)
+    background_tasks = await _run_startup_jobs(bot, scheduler)
+    background_tasks.append(asyncio.create_task(process_completed_bookings(bot)))
 
     logger.info("Бот запущен")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
-        completed_bookings_task.cancel()
+        for task in background_tasks:
+            task.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
         if scheduler.running:
             scheduler.shutdown(wait=False)
         await bot.session.close()

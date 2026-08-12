@@ -2,11 +2,12 @@ import asyncio
 import logging
 from datetime import datetime
 
-import aiosqlite
-
-from database.experience import add_experience
-from database.db import update_pilot_rating
-from config import DB_NAME
+from handlers.booking import (
+    TZ,
+    claim_booking_experience,
+    ensure_booking_schema,
+    get_bookings_pending_experience,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,63 +27,53 @@ def _played_hour_rating(minutes: int | None) -> tuple[int, int]:
 
 
 async def process_completed_bookings(bot):
+    """Раз в 5 минут находит подтверждённые брони (booking_requests_v2), чьё
+    время уже прошло, и начисляет пилоту опыт/рейтинг за отыгранную сессию."""
+    await ensure_booking_schema()
+
     while True:
         try:
-            now = datetime.now()
+            now = datetime.now(TZ)
+            rows = await get_bookings_pending_experience(now.isoformat())
 
-            async with aiosqlite.connect(DB_NAME) as db:
-                cursor = await db.execute(
-                    '''
-                    SELECT *
-                    FROM bookings
-                    WHERE completed = 0
-                    '''
+            for row in rows:
+                booking_id = row["id"]
+                telegram_id = row["telegram_id"]
+                duration_minutes = row["duration_minutes"] or 0
+
+                full_hours, rating_delta = _played_hour_rating(duration_minutes)
+
+                claimed = await claim_booking_experience(
+                    booking_id, telegram_id, duration_minutes, rating_delta
                 )
-                rows = await cursor.fetchall()
+                if not claimed:
+                    # Уже обработано другим проходом — не начисляем повторно.
+                    continue
 
-                for row in rows:
-                    booking_time = datetime.fromisoformat(row[6])
+                if rating_delta > 0:
+                    logger.info(
+                        "Пилот %s получил +%s рейтинга за %s полных отыгранных часов (booking #%s)",
+                        telegram_id, rating_delta, full_hours, booking_id,
+                    )
 
-                    if now > booking_time:
-                        telegram_id = row[1]
-                        duration_minutes = row[7] or 0
-
-                        await add_experience(telegram_id, duration_minutes)
-
-                        full_hours, rating_delta = _played_hour_rating(duration_minutes)
-                        if rating_delta > 0:
-                            await update_pilot_rating(telegram_id, rating_delta)
-                            logger.info(
-                                "Пилот %s получил +%s рейтинга за %s полных отыгранных часов",
-                                telegram_id, rating_delta, full_hours
-                            )
-
-                        await db.execute(
-                            '''
-                            UPDATE bookings
-                            SET completed = 1
-                            WHERE id = ?
-                            ''',
-                            (row[0],)
-                        )
-                        await db.commit()
-
-                        try:
-                            rating_text = (
-                                f"\n📈 Рейтинг: +{rating_delta} за {full_hours} ч"
-                                if rating_delta > 0 else ""
-                            )
-                            await bot.send_message(
-                                telegram_id,
-                                (
-                                    "🔥 Сессия завершена!\n\n"
-                                    f"➕ Опыт: +{duration_minutes} мин\n"
-                                    f"🏎 Сессия: {row[4]}"
-                                    f"{rating_text}"
-                                )
-                            )
-                        except Exception as e:
-                            logger.warning("Не удалось отправить уведомление о завершении сессии %s: %s", row[0], e)
+                try:
+                    rating_text = (
+                        f"\n📈 Рейтинг: +{rating_delta} за {full_hours} ч"
+                        if rating_delta > 0 else ""
+                    )
+                    await bot.send_message(
+                        telegram_id,
+                        (
+                            "🔥 Сессия завершена!\n\n"
+                            f"➕ Опыт: +{duration_minutes} мин"
+                            f"{rating_text}"
+                        ),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Не удалось отправить уведомление о завершении сессии %s: %s",
+                        booking_id, e,
+                    )
 
         except Exception:
             logger.exception("Ошибка обработки завершённых бронирований")

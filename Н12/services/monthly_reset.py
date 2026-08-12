@@ -8,13 +8,10 @@ from database.db import (
     get_top3,
     get_pilot_by_username,
     get_season_participant_ids,
-    has_season_award,
-    mark_season_award,
+    get_season_award,
+    claim_season_award,
     update_season_award_yclients,
-    update_pilot_rating,
-    update_pilot_bonus,
     clear_all_laps,
-    add_bonus_wallet_entry,
     create_pending_yclients_operation,
 )
 from services.yclients_service import issue_season_cashback
@@ -101,30 +98,52 @@ async def perform_monthly_reset(bot):
             pilot_data = {"telegram_id": tid, "yclients_client_id": yclients_client_id}
             if tid in awarded_pilots:
                 continue
-            if await has_season_award(season_key, tid, "podium"):
-                logger.info("Пилот %s уже получал podium-награду за сезон %s", tid, season_key)
-                awarded_pilots.add(tid)
-                continue
 
             bonus_hours = BONUS_HOURS[index]
             rating_delta = RATING_POINTS[index]
             bonus_rub = season_bonus_rub(bonus_hours)
 
             # Локальные бонусные часы больше не начисляем: фактическая награда — Valevo Bonus в рублях.
-            await update_pilot_rating(tid, rating_delta)
-            await mark_season_award(
-                season_key,
-                tid,
-                index,
-                bonus_hours,
-                rating_delta,
-                "podium",
-                yclients_bonus_rub=bonus_rub,
-                yclients_status="pending",
-            )
-            awarded_pilots.add(tid)
+            existing_award = await get_season_award(season_key, tid, "podium")
+            if existing_award is not None:
+                awarded_pilots.add(tid)
+                if existing_award.get("yclients_status") != "pending":
+                    logger.info("Пилот %s уже получал podium-награду за сезон %s", tid, season_key)
+                    continue
+                # Рейтинг и бонусный кошелёк уже были применены атомарно ранее (claim прошёл),
+                # но процесс, судя по всему, упал до попытки списания через YCLIENTS — повторяем только её.
+                bonus_hours = int(existing_award.get("bonus_hours") or bonus_hours)
+                bonus_rub = float(existing_award.get("yclients_bonus_rub") or bonus_rub)
+            else:
+                expires_at = (datetime.now(timezone(MOSCOW_TZ)) + timedelta(days=SEASON_BONUS_EXPIRE_DAYS)).isoformat()
+                claimed = await claim_season_award(
+                    season_key,
+                    tid,
+                    index,
+                    bonus_hours,
+                    rating_delta,
+                    "podium",
+                    yclients_bonus_rub=bonus_rub,
+                    wallet_entry={
+                        "yclients_client_id": yclients_client_id,
+                        "amount": bonus_rub,
+                        "expires_at": expires_at,
+                        "reason": f"{season_key}:place:{index}",
+                    },
+                )
+                awarded_pilots.add(tid)
+                if not claimed:
+                    # Кто-то другой (параллельный запуск) уже застолбил эту награду.
+                    continue
 
-            yclients_result = await _issue_yclients_bonus_for_pilot(pilot_data, bonus_hours, season_key, index)
+            try:
+                yclients_result = await _issue_yclients_bonus_for_pilot(pilot_data, bonus_hours, season_key, index)
+            except Exception:
+                # Локальная награда (рейтинг/кошелёк) уже зафиксирована атомарно выше — эта
+                # ошибка не должна прерывать обработку остальных пилотов. Статус останется
+                # 'pending' и будет обработан повторно при следующем запуске.
+                logger.exception("Не удалось выдать Valevo Bonus через YCLIENTS для %s", tid)
+                continue
             y_status = yclients_result.get("status", "unknown")
             y_error = None if yclients_result.get("ok") else yclients_result.get("message")
             y_card_id = yclients_result.get("card_id")
@@ -139,16 +158,6 @@ async def perform_monthly_reset(bot):
                 card_id=y_card_id,
             )
 
-            expires_at = (datetime.now(timezone(MOSCOW_TZ)) + timedelta(days=SEASON_BONUS_EXPIRE_DAYS)).isoformat()
-            await add_bonus_wallet_entry(
-                telegram_id=tid,
-                yclients_client_id=yclients_client_id,
-                source="season_award",
-                amount=bonus_rub,
-                expires_at=expires_at,
-                reason=f"{season_key}:place:{index}",
-                yclients_status=y_status,
-            )
             if not yclients_result.get("ok"):
                 await create_pending_yclients_operation(
                     telegram_id=tid,
@@ -194,12 +203,8 @@ async def perform_monthly_reset(bot):
     for tid in participant_ids:
         if tid in awarded_pilots:
             continue
-        if await has_season_award(season_key, tid, "participation"):
-            logger.info("Пилот %s уже получал participation-награду за сезон %s", tid, season_key)
-            continue
 
-        await update_pilot_rating(tid, SEASON_PARTICIPATION_RATING)
-        await mark_season_award(
+        claimed = await claim_season_award(
             season_key,
             tid,
             None,
@@ -209,6 +214,9 @@ async def perform_monthly_reset(bot):
             yclients_bonus_rub=0,
             yclients_status="not_required",
         )
+        if not claimed:
+            logger.info("Пилот %s уже получал participation-награду за сезон %s", tid, season_key)
+            continue
         try:
             await bot.send_message(
                 tid,

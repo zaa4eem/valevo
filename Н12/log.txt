@@ -1,5 +1,0 @@
-2026-05-12|16:43:51|INFO|Бот запущен
-2026-05-12|16:44:04|INFO|Проверка меню: user_id=..., current=None, target=2
-2026-05-12|16:44:06|INFO|Проверка меню: user_id=..., current=2, target=2
-2026-05-12|16:44:14|ERROR|Failed to fetch updates - TelegramNetworkError: HTTP Client says - ServerDisconnectedError: Server disconnected
-2026-05-12|16:44:14|WARNING|Sleep for 1.000000 seconds and try again... (tryings = 0, bot id = 8236812230)
