@@ -73,6 +73,58 @@ def format_hours(hours: float | int | None) -> str:
         total_minutes = 0
     return format_minutes(total_minutes)
 
+
+def format_phone_display(phone: str | None) -> str:
+    """Красиво форматирует номер телефона: 89991234567 -> +7 999 123-45-67."""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) == 11 and digits[0] in "78":
+        return f"+7 {digits[1:4]} {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+    return str(phone) if phone else "—"
+
+
+# ---------- Ранги пилота ----------
+# (порог рейтинга, эмодзи, название ранга)
+PILOT_RANKS: list[tuple[int, str, str]] = [
+    (0, "🔰", "Новичок"),
+    (20, "🏎", "Гонщик"),
+    (50, "🥉", "Профи"),
+    (100, "🥈", "Ас трассы"),
+    (200, "🥇", "Чемпион"),
+    (400, "💎", "Легенда VALEVO"),
+]
+
+
+def pilot_rank_info(rating: int | float | None) -> tuple[tuple[int, str, str], tuple[int, str, str] | None]:
+    """Возвращает (текущий_ранг, следующий_ранг) по рейтингу пилота."""
+    rating_value = max(0, int(rating or 0))
+    current = PILOT_RANKS[0]
+    next_rank: tuple[int, str, str] | None = None
+    for index, rank in enumerate(PILOT_RANKS):
+        if rating_value >= rank[0]:
+            current = rank
+            next_rank = PILOT_RANKS[index + 1] if index + 1 < len(PILOT_RANKS) else None
+        else:
+            break
+    return current, next_rank
+
+
+def pilot_rank_progress_bar(rating: int | float | None, width: int = 10) -> str:
+    """Прогресс-бар до следующего ранга: ▰▰▰▰▰▱▱▱▱▱."""
+    rating_value = max(0, int(rating or 0))
+    current, next_rank = pilot_rank_info(rating_value)
+
+    if next_rank is None:
+        return "▰" * width + " (макс. уровень)"
+
+    span = next_rank[0] - current[0]
+    done = rating_value - current[0]
+    fraction = max(0.0, min(1.0, done / span)) if span > 0 else 1.0
+    filled = round(fraction * width)
+
+    bar = "▰" * filled + "▱" * (width - filled)
+    points_left = next_rank[0] - rating_value
+    return f"{bar}  ещё {points_left} до «{next_rank[1]} {next_rank[2]}»"
+
 def _registration_phone_keyboard() -> ReplyKeyboardMarkup:
     """Кнопка Telegram-контакта; ручной ввод номера тоже остаётся доступен."""
     return ReplyKeyboardMarkup(
@@ -229,9 +281,11 @@ async def registration_phone(message: Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        "✅ <b>Вы успешно зарегистрированы!</b>\n\n"
-        f"📱 Телефон: <code>{phone_bot}</code>\n"
-        "🔄 Связь с клубной системой YCLIENTS выполняется автоматически.",
+        "🏁 <b>Добро пожаловать в VALEVO!</b>\n\n"
+        "Вы успешно зарегистрированы как пилот.\n"
+        f"📱 Телефон: <code>{format_phone_display(phone_bot)}</code>\n\n"
+        "🔄 Профиль синхронизируется с клубной системой автоматически — "
+        "загляните в «👤 Профиль» через минуту.",
         reply_markup=get_menu(message.from_user.id),
     )
 
@@ -245,8 +299,8 @@ async def registration_phone(message: Message, state: FSMContext):
     )
 
 
-# ---------- Leaderboard ----------
-@router.message(F.text == "🏆 Leaderboard")
+# ---------- Таблица лидеров ----------
+@router.message(F.text == "🏆 Таблица лидеров")
 async def leaderboard_button(message: Message):
     try:
         text = await build_leaderboard()
@@ -258,118 +312,152 @@ async def leaderboard_button(message: Message):
 # ---------- Профиль ----------
 from services.yclients_service import get_client, get_client_total_hours, get_valevo_bonus_balance
 
+DIVIDER = "━━━━━━━━━━━━━━━━━━"
+
+
+async def _build_profile_text(user_id: int, fallback_username: str | None) -> str | None:
+    pilot = await get_pilot_by_telegram_id(user_id)
+    if not pilot:
+        return None
+
+    username = pilot.get("username") or fallback_username or "—"
+    display_name = pilot.get("display_name") or f"@{username}"
+    pilot_number = pilot.get("pilot_number")
+    rating = pilot.get("rating") or 0
+
+    history = await get_pilot_history_stats(telegram_id=user_id, username=username)
+
+    rank, _ = pilot_rank_info(rating)
+    rank_emoji, rank_title = rank[1], rank[2]
+
+    header = (
+        f"{rank_emoji} <b>{html.escape(display_name)}</b>"
+        + (f"  <code>#{pilot_number}</code>" if pilot_number else "")
+        + f"\n{rank_title} · рейтинг <b>{rating}</b>\n"
+        f"{pilot_rank_progress_bar(rating)}"
+    )
+
+    identity = (
+        f"{DIVIDER}\n"
+        f"🆔 Username: @{html.escape(username)}\n"
+        f"📱 Телефон: <code>{format_phone_display(pilot.get('phone'))}</code>"
+    )
+
+    # Ошибка YCLIENTS больше не скрывает локальную историю и достижения.
+    if pilot.get("yclients_client_id"):
+        try:
+            yclients_data = await get_client(pilot["yclients_client_id"])
+            total_hours = await get_client_total_hours(pilot["yclients_client_id"])
+            bonus_balance = await get_valevo_bonus_balance(pilot["yclients_client_id"])
+            visits = yclients_data.get("visits", 0) if isinstance(yclients_data, dict) else 0
+            club_block = (
+                f"\n\n{DIVIDER}\n"
+                "🏟 <b>КЛУБ</b>\n"
+                f"📅 Визитов: <b>{visits}</b>\n"
+                f"⏱ Время в клубе: <b>{format_hours(total_hours)}</b>\n"
+                f"💎 Бонусный счёт: <b>{bonus_balance:.2f} ₽</b>"
+            )
+        except Exception as exc:
+            logger.warning("YCLIENTS profile data unavailable for %s: %s", user_id, exc)
+            club_block = (
+                f"\n\n{DIVIDER}\n"
+                "🏟 <b>КЛУБ</b>\n"
+                "🔄 Клубные данные временно недоступны."
+            )
+    else:
+        club_block = (
+            f"\n\n{DIVIDER}\n"
+            "🏟 <b>КЛУБ</b>\n"
+            "🔄 Профиль синхронизируется с клубной системой автоматически."
+        )
+
+    achievements_lines = [
+        f"{DIVIDER}",
+        "🏆 <b>ДОСТИЖЕНИЯ</b>",
+        (
+            f"🥇 <b>{history['gold']}</b>   🥈 <b>{history['silver']}</b>   "
+            f"🥉 <b>{history['bronze']}</b>   ·   {history['podiums']} на подиуме"
+        ),
+        f"📝 Результатов: <b>{history['total_results']}</b> в <b>{history['disciplines_count']}</b> дисциплинах",
+    ]
+
+    if history["favorite_discipline"]:
+        achievements_lines.append(
+            f"❤️ Любимая дисциплина: <b>{html.escape(str(history['favorite_discipline']))}</b> "
+            f"({history['favorite_discipline_count']} рез.)"
+        )
+    if history["favorite_track"]:
+        achievements_lines.append(
+            f"🗺 Любимая трасса: <b>{html.escape(str(history['favorite_track']))}</b> "
+            f"({history['favorite_track_count']} рез.)"
+        )
+
+    last_result = history.get("last_result")
+    if last_result:
+        last_date = str(last_result.get("created_at") or "")[:10]
+        details = " · ".join(
+            html.escape(value) for value in (
+                str(last_result.get("discipline") or "").strip(),
+                str(last_result.get("track") or "").strip(),
+                str(last_result.get("lap_time_text") or "").strip(),
+            ) if value
+        )
+        suffix = f" ({last_date})" if last_date else ""
+        achievements_lines.append(f"🕘 Последний результат: <b>{details or '—'}</b>{suffix}")
+    else:
+        achievements_lines.append("🏁 Первый принятый круг станет началом истории пилота.")
+
+    return "\n".join([header, identity + club_block, "\n".join(achievements_lines)])
+
+
 @router.message(F.text == "👤 Профиль")
 async def profile(message: Message, state: FSMContext):
     try:
-        pilot = await get_pilot_by_telegram_id(message.from_user.id)
-        if not pilot:
+        text = await _build_profile_text(message.from_user.id, message.from_user.username)
+        if text is None:
             await message.answer("❌ Профиль не найден. Используйте /start.")
             return
-
-        username = pilot.get("username") or message.from_user.username or "—"
-        history = await get_pilot_history_stats(
-            telegram_id=message.from_user.id,
-            username=username,
-        )
-
-        text = (
-            "👤 <b>ПРОФИЛЬ ПИЛОТА</b>\n\n"
-            f"🏁 Username: @{username}\n"
-            f"👤 Имя: {pilot.get('display_name') or 'Не задано'}\n"
-            f"#️⃣ Номер пилота: {pilot.get('pilot_number') or '—'}\n"
-            f"📱 Телефон: {pilot.get('phone') or '—'}\n"
-        )
-
-        # Ошибка YCLIENTS больше не скрывает локальную историю и достижения.
-        if pilot.get("yclients_client_id"):
-            try:
-                yclients_data = await get_client(pilot["yclients_client_id"])
-                total_hours = await get_client_total_hours(pilot["yclients_client_id"])
-                bonus_balance = await get_valevo_bonus_balance(pilot["yclients_client_id"])
-                visits = yclients_data.get("visits", 0) if isinstance(yclients_data, dict) else 0
-                text += (
-                    f"\n📊 <b>СТАТИСТИКА КЛУБА</b>\n"
-                    f"📅 Визитов: {visits}\n"
-                    f"⏱ Общий опыт: {format_hours(total_hours)}\n"
-                    f"🎁 Бонусный счёт: {bonus_balance:.2f} 💎\n"
-                )
-            except Exception as exc:
-                logger.warning("YCLIENTS profile data unavailable for %s: %s", message.from_user.id, exc)
-                text += (
-                    "\n📊 <b>СТАТИСТИКА КЛУБА</b>\n"
-                    "🔄 Клубные данные временно недоступны. История результатов сохранена ниже.\n"
-                )
-        else:
-            text += (
-                "\n📊 <b>СТАТИСТИКА КЛУБА</b>\n"
-                "🔄 Профиль синхронизируется с клубной системой автоматически.\n"
-            )
-
-        text += "\n🏎 <b>ИСТОРИЯ ПИЛОТА</b>\n"
-        text += f"📝 Записано результатов: <b>{history['total_results']}</b>\n"
-        text += f"🎮 Дисциплин опробовано: <b>{history['disciplines_count']}</b>\n"
-
-        if history["favorite_discipline"]:
-            text += (
-                f"❤️ Любимая дисциплина: <b>{history['favorite_discipline']}</b> "
-                f"({history['favorite_discipline_count']} результатов)\n"
-            )
-        else:
-            text += "❤️ Любимая дисциплина: пока не определена\n"
-
-        if history["favorite_track"]:
-            text += (
-                f"🗺 Любимая трасса: <b>{history['favorite_track']}</b> "
-                f"({history['favorite_track_count']} результатов)\n"
-            )
-
-        last_result = history.get("last_result")
-        if last_result:
-            last_date = str(last_result.get("created_at") or "")[:10]
-            details = " · ".join(
-                value for value in (
-                    str(last_result.get("discipline") or "").strip(),
-                    str(last_result.get("track") or "").strip(),
-                    str(last_result.get("lap_time_text") or "").strip(),
-                ) if value
-            )
-            text += f"🕘 Последний результат: <b>{details or '—'}</b>"
-            if last_date:
-                text += f" ({last_date})"
-            text += "\n"
-        else:
-            text += "🏁 Первый принятый круг станет началом истории пилота.\n"
-
-        text += (
-            "\n🏆 <b>ДОСТИЖЕНИЯ</b>\n"
-            f"🏅 Подиумов: <b>{history['podiums']}</b>\n"
-            f"   🥇 — {history['gold']}\n"
-            f"   🥈 — {history['silver']}\n"
-            f"   🥉 — {history['bronze']}\n"
-            f"📈 Рейтинг: <b>{pilot.get('rating', 0)}</b>\n"
-        )
-
         await message.answer(text, reply_markup=profile_menu)
-
     except Exception as e:
         logger.exception("Profile error: %s", e)
         await message.answer("❌ Ошибка при загрузке профиля.")
+
+
+@router.callback_query(F.data == "refresh_profile")
+async def refresh_profile(callback: CallbackQuery):
+    try:
+        text = await _build_profile_text(callback.from_user.id, callback.from_user.username)
+        if text is None:
+            await callback.answer("Профиль не найден", show_alert=True)
+            return
+        try:
+            await callback.message.edit_text(text, reply_markup=profile_menu)
+            await callback.answer("Обновлено")
+        except Exception:
+            # Текст не изменился с прошлого обновления — Telegram запрещает
+            # редактирование сообщения "в то же самое".
+            await callback.answer("Данные актуальны")
+    except Exception as e:
+        logger.exception("Refresh profile error: %s", e)
+        await callback.answer("Не удалось обновить профиль", show_alert=True)
 
 # ---------- Информация ----------
 @router.message(F.text == "❓ Информация")
 async def info(message: Message):
     text = (
-        "🏁 <b>ВАЛЕВО сим рейсинг клуб</b>\n\n"
-        "📌 <b>Основная информация:</b>\n"
-        "Клуб автосимуляторов, где вы можете оказаться\n"
-        "за рулём любого автомобиля и ощутить\n"
-        "максимально реалистичные эмоции!!!\n\n"
-        "📘 <b>Контакты:</b>\n"
-        "тел. 89939501251\n"
-        "тг: @ValevoRostov\n"
-        "тг канал: @ValevoRND\n"
-        "Запретграм: @valovo_simclub\n\n"
-        "📍 <b>Адрес:</b> ул. Баумана 72"
+        "🏁 <b>ВАЛЕВО сим рейсинг клуб</b>\n"
+        f"{DIVIDER}\n\n"
+        "Клуб автосимуляторов, где вы можете оказаться за рулём "
+        "любого автомобиля и ощутить максимально реалистичные эмоции!\n\n"
+        f"{DIVIDER}\n"
+        "📘 <b>КОНТАКТЫ</b>\n"
+        "☎️ <code>+7 993 950-12-51</code>\n"
+        "✈️ Telegram: @ValevoRostov\n"
+        "📢 Канал: @ValevoRND\n"
+        "📸 Запретграм: @valovo_simclub\n\n"
+        f"{DIVIDER}\n"
+        "📍 <b>АДРЕС</b>\n"
+        "ул. Баумана, 72"
     )
     await message.answer(text)
 
@@ -383,8 +471,6 @@ async def leaderboard_cmd(message: Message):
 async def change_nick(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ChangeNick.nickname)
     await callback.message.edit_text("✏️ Введите новый ник:")
-
-import re
 
 BAD_NICK_PARTS = [
     "http", "https", "www", ".ru", ".com", ".gg", ".net",
@@ -483,14 +569,16 @@ async def top10(message: Message):
     try:
         pilots = await get_top10_pilots()
         if not pilots:
-            await message.answer("В клубе ещё нет пилотов.")
+            await message.answer("🏆 В клубе ещё нет пилотов с рейтингом.")
             return
-        text = "🏆 <b>ТОП-10 ПИЛОТОВ</b>\n\n"
-        medals = ["🥇", "🥈", "🥉"] + ["▫️"] * 7
+
+        medals = ["🥇", "🥈", "🥉"] + [f"{i}." for i in range(4, 11)]
+        lines = [f"🏆 <b>ТОП-10 ПИЛОТОВ</b>", DIVIDER, ""]
         for i, p in enumerate(pilots):
-            name = p["display_name"] or f'@{p["username"]}'
-            text += f"{medals[i]} {name} — рейтинг {p['rating']}\n"
-        await message.answer(text)
+            name = html.escape(p["display_name"] or f'@{p["username"]}')
+            number = f" <code>#{p['pilot_number']}</code>" if p.get("pilot_number") else ""
+            lines.append(f"{medals[i]} <b>{name}</b>{number} — <b>{p['rating']}</b>")
+        await message.answer("\n".join(lines))
     except Exception as e:
         logger.error(f"Ошибка ТОП-10: {e}")
         await message.answer("❌ Не удалось загрузить рейтинг.")

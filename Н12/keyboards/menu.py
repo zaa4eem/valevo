@@ -10,18 +10,18 @@ def get_menu(user_id):
 
     keyboard = [
         [
-            KeyboardButton(text="🏆 Leaderboard"),
-            KeyboardButton(text="🏆 ТОП-10")
-        ],
-        [
             KeyboardButton(text="🎟 Забронировать"),
             KeyboardButton(text="👤 Профиль")
         ],
         [
+            KeyboardButton(text="🏆 Таблица лидеров"),
+            KeyboardButton(text="🏆 ТОП-10")
+        ],
+        [KeyboardButton(text="⏱ Установить время")],
+        [
             KeyboardButton(text="❓ Информация"),
             KeyboardButton(text="📩 Сообщить в поддержку")
         ],
-        [KeyboardButton(text="⏱ Установить время")],
     ]
 
     # Кнопка только админам
