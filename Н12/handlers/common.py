@@ -470,6 +470,10 @@ async def leaderboard_cmd(message: Message):
 @router.callback_query(F.data == "change_nick")
 async def change_nick(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ChangeNick.nickname)
+    await state.update_data(
+        prompt_chat_id=callback.message.chat.id,
+        prompt_message_id=callback.message.message_id,
+    )
     await callback.message.edit_text("✏️ Введите новый ник:")
 
 BAD_NICK_PARTS = [
@@ -508,10 +512,29 @@ def sanitize_pilot_name(name: str) -> str | None:
 
 @router.message(ChangeNick.nickname)
 async def set_nick(message: Message, state: FSMContext):
+    data = await state.get_data()
+    prompt_chat_id = data.get("prompt_chat_id")
+    prompt_message_id = data.get("prompt_message_id")
+    await state.clear()
+
+    async def show(text: str, reply_markup=None) -> None:
+        if prompt_chat_id and prompt_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    text,
+                    chat_id=prompt_chat_id,
+                    message_id=prompt_message_id,
+                    reply_markup=reply_markup,
+                )
+                return
+            except Exception:
+                pass
+        await message.answer(text, reply_markup=reply_markup)
+
     nickname = sanitize_pilot_name(message.text)
 
     if not nickname:
-        await message.answer(
+        await show(
             "❌ Некорректный ник.\n\n"
             "Разрешены только буквы, цифры, пробел, дефис и нижнее подчёркивание.\n"
             "Ссылки, реклама, emoji и спецсимволы запрещены."
@@ -521,11 +544,14 @@ async def set_nick(message: Message, state: FSMContext):
     success = await update_display_name(message.from_user.id, nickname)
 
     if not success:
-        await message.answer("❌ Этот никнейм уже занят другим пилотом.")
-    else:
-        await message.answer("✅ Никнейм обновлён!")
+        await show("❌ Этот никнейм уже занят другим пилотом.")
+        return
 
-    await state.clear()
+    text = await _build_profile_text(message.from_user.id, message.from_user.username)
+    if text is None:
+        await show("✅ Никнейм обновлён!")
+    else:
+        await show(text, profile_menu)
 
 # ---------- Поддержка ----------
 @router.message(F.text == "📩 Сообщить в поддержку")

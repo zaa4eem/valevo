@@ -23,6 +23,7 @@ from services.yclients_auto import auto_sync_all_pilots, process_pending_yclient
 from services.bonus_expiration import expire_season_bonuses
 from utils.log_config import LoggingMiddleware, setup_logging
 from utils.menu_updater_middleware import MenuUpdaterMiddleware
+from utils.chat_hygiene import ChatHygieneMiddleware
 
 
 setup_logging()
@@ -32,6 +33,7 @@ logger = logging.getLogger(__name__)
 def _register_middlewares(dp: Dispatcher) -> None:
     dp.update.outer_middleware(LoggingMiddleware())
     updater = MenuUpdaterMiddleware()
+    hygiene = ChatHygieneMiddleware()
 
     for router in (
         booking.router,
@@ -43,6 +45,7 @@ def _register_middlewares(dp: Dispatcher) -> None:
     ):
         router.message.outer_middleware(updater)
         router.callback_query.outer_middleware(updater)
+        router.message.outer_middleware(hygiene)
 
 
 def _register_routers(dp: Dispatcher) -> None:
