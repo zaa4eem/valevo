@@ -3,14 +3,19 @@ import asyncio
 import html
 from aiogram import Router, F
 from aiogram.filters import Command, StateFilter
-from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton,
+    InlineKeyboardMarkup, InlineKeyboardButton,
+)
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 
-from config import SUPPORT_CHAT_ID
+from config import SUPPORT_CHAT_ID, ADMIN_IDS
 from database.db import (
     create_pilot, get_pilot_by_telegram_id, get_pilot_history_stats, update_display_name,
-    get_top10_pilots
+    get_top10_pilots,
+    create_support_message, get_support_message, claim_support_message_for_reply,
+    release_support_message, complete_support_message,
 )
 from services.leaderboard import build_leaderboard
 from keyboards.menu import get_menu
@@ -28,6 +33,9 @@ class ChangeNick(StatesGroup):
     nickname = State()
 
 class SupportMessage(StatesGroup):
+    waiting_for_text = State()
+
+class SupportReply(StatesGroup):
     waiting_for_text = State()
 
 def _plural_ru(value: int, one: str, few: str, many: str) -> str:
@@ -568,13 +576,33 @@ async def support_start(message: Message, state: FSMContext):
         reply_markup=kb
     )
 
+def _support_admin_keyboard(support_message_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✉️ Ответить", callback_data=f"support:reply:{support_message_id}")]
+        ]
+    )
+
+
+def _support_reply_prompt_keyboard(support_message_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отмена", callback_data=f"support:cancel:{support_message_id}")]
+        ]
+    )
+
+
 @router.message(SupportMessage.waiting_for_text, F.text != "🔙 Назад")
 async def handle_support_message(message: Message, state: FSMContext, bot):
-    user_info = f"Обращение от @{message.from_user.username or 'нет юзернейма'} (ID: {message.from_user.id})"
+    text = message.text or ""
+    username = message.from_user.username
+    user_info = f"Обращение от @{username or 'нет юзернейма'} (ID: {message.from_user.id})"
     try:
+        support_message_id = await create_support_message(message.from_user.id, username, text)
         await bot.send_message(
             SUPPORT_CHAT_ID,
-            f"{user_info}\n\n{html.escape(message.text or '')}"
+            f"{user_info}\n\n{html.escape(text)}",
+            reply_markup=_support_admin_keyboard(support_message_id),
         )
         await message.answer("✅ Ваше обращение отправлено разработчику. Спасибо!")
     except Exception as e:
@@ -588,6 +616,127 @@ async def handle_support_message(message: Message, state: FSMContext, bot):
 async def support_back(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("Главное меню:", reply_markup=get_menu(message.from_user.id))
+
+
+# ---------- Ответ разработчика на обращение (анонимно) ----------
+@router.callback_query(F.data.startswith("support:reply:"))
+async def support_reply_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    support_message_id = int(callback.data.rsplit(":", 1)[1])
+    if not await claim_support_message_for_reply(support_message_id, callback.from_user.id):
+        await callback.answer("Уже отвечает другой администратор", show_alert=True)
+        return
+
+    await callback.answer()
+    original_chat_id = callback.message.chat.id
+    original_message_id = callback.message.message_id
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    prompt = await callback.message.answer(
+        "✏️ Напишите ответ клиенту — он придёт от имени поддержки ВАЛЕВО, без вашего имени.",
+        reply_markup=_support_reply_prompt_keyboard(support_message_id),
+    )
+    await state.set_state(SupportReply.waiting_for_text)
+    await state.update_data(
+        support_message_id=support_message_id,
+        prompt_chat_id=prompt.chat.id,
+        prompt_message_id=prompt.message_id,
+        original_chat_id=original_chat_id,
+        original_message_id=original_message_id,
+    )
+
+
+def _support_original_text(support_message: dict) -> str:
+    username = support_message.get("username")
+    header = f"Обращение от @{username or 'нет юзернейма'} (ID: {support_message['telegram_id']})"
+    return f"{header}\n\n{html.escape(support_message.get('message_text') or '')}"
+
+
+@router.callback_query(F.data.startswith("support:cancel:"))
+async def support_reply_cancel(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+
+    support_message_id = int(callback.data.rsplit(":", 1)[1])
+    data = await state.get_data()
+    original_chat_id = data.get("original_chat_id")
+    original_message_id = data.get("original_message_id")
+
+    await release_support_message(support_message_id)
+    await state.clear()
+    await callback.answer("Отменено")
+    try:
+        await callback.message.edit_text("Ответ отменён.")
+    except Exception:
+        pass
+
+    if original_chat_id and original_message_id:
+        try:
+            await callback.bot.edit_message_reply_markup(
+                chat_id=original_chat_id,
+                message_id=original_message_id,
+                reply_markup=_support_admin_keyboard(support_message_id),
+            )
+        except Exception:
+            pass
+
+
+@router.message(SupportReply.waiting_for_text)
+async def support_reply_text(message: Message, state: FSMContext):
+    data = await state.get_data()
+    support_message_id = data.get("support_message_id")
+    prompt_chat_id = data.get("prompt_chat_id")
+    prompt_message_id = data.get("prompt_message_id")
+    original_chat_id = data.get("original_chat_id")
+    original_message_id = data.get("original_message_id")
+    await state.clear()
+
+    async def show(text: str) -> None:
+        if prompt_chat_id and prompt_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    text, chat_id=prompt_chat_id, message_id=prompt_message_id, reply_markup=None,
+                )
+                return
+            except Exception:
+                pass
+        await message.answer(text)
+
+    support_message = await get_support_message(support_message_id) if support_message_id else None
+    if not support_message:
+        await show("❌ Заявка не найдена — возможно, её уже удалили.")
+        return
+
+    reply_text = message.text or ""
+    try:
+        await message.bot.send_message(
+            support_message["telegram_id"],
+            "💬 <b>Ответ от поддержки ВАЛЕВО</b>\n" + DIVIDER + "\n\n" + html.escape(reply_text),
+        )
+    except Exception as exc:
+        logger.warning("Не удалось отправить ответ клиенту %s: %s", support_message["telegram_id"], exc)
+        await show("❌ Не удалось доставить ответ клиенту (возможно, он заблокировал бота).")
+        return
+
+    await complete_support_message(support_message_id, message.from_user.id, reply_text)
+    await show("✅ Ответ отправлен клиенту.")
+
+    if original_chat_id and original_message_id:
+        try:
+            await message.bot.edit_message_text(
+                _support_original_text(support_message) + "\n\n✅ <b>Отвечено</b>",
+                chat_id=original_chat_id,
+                message_id=original_message_id,
+            )
+        except Exception:
+            pass
 
 # ---------- ТОП-10 ----------
 @router.message(F.text == "🏆 ТОП-10")

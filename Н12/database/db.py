@@ -110,6 +110,20 @@ async def init_db():
     """)
 
     await db.execute("""
+        CREATE TABLE IF NOT EXISTS support_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            username TEXT,
+            message_text TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            admin_id INTEGER,
+            reply_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            answered_at TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_time_requests_user_status
         ON time_requests(telegram_id, status)
     """)
@@ -1700,6 +1714,81 @@ async def complete_time_request(
         (status, admin_id, lap_id, request_id)
     )
 
+    await db.commit()
+    await db.close()
+
+
+async def create_support_message(telegram_id: int, username: str | None, message_text: str) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        INSERT INTO support_messages(telegram_id, username, message_text)
+        VALUES (?, ?, ?)
+        """,
+        (telegram_id, username, message_text),
+    )
+    message_id = cursor.lastrowid
+    await db.commit()
+    await db.close()
+    return message_id
+
+
+async def get_support_message(message_id: int):
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM support_messages WHERE id = ?",
+        (message_id,),
+    )
+    row = await cursor.fetchone()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return dict(zip(columns, row)) if row else None
+
+
+async def claim_support_message_for_reply(message_id: int, admin_id: int) -> bool:
+    """Атомарно закрепляет заявку за админом, который начал печатать ответ,
+    чтобы два администратора не отправили клиенту два разных ответа."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'answering', admin_id = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (admin_id, message_id),
+    )
+    changed = cursor.rowcount == 1
+    await db.commit()
+    await db.close()
+    return changed
+
+
+async def release_support_message(message_id: int) -> None:
+    """Возвращает заявку в pending, если админ отменил ответ."""
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'pending', admin_id = NULL
+        WHERE id = ? AND status = 'answering'
+        """,
+        (message_id,),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def complete_support_message(message_id: int, admin_id: int, reply_text: str) -> None:
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'answered', admin_id = ?, reply_text = ?, answered_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (admin_id, reply_text, message_id),
+    )
     await db.commit()
     await db.close()
 
