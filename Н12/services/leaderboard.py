@@ -1,9 +1,9 @@
 import html
 
 from database.db import get_leaderboard_data, get_pilot_by_username
+from utils.message_style import DIVIDER
 
 MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-DIVIDER = "━━━━━━━━━━━━━━━━━━"
 
 
 async def build_leaderboard() -> str:

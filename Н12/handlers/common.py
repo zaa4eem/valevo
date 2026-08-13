@@ -22,6 +22,7 @@ from keyboards.menu import get_menu
 from keyboards.profile_menu import profile_menu
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.yclients_auto import auto_sync_pilot_with_yclients
+from utils.message_style import DIVIDER
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -320,7 +321,6 @@ async def leaderboard_button(message: Message):
 # ---------- Профиль ----------
 from services.yclients_service import get_client, get_client_total_hours, get_valevo_bonus_balance
 
-DIVIDER = "━━━━━━━━━━━━━━━━━━"
 
 
 async def _build_profile_text(user_id: int, fallback_username: str | None) -> str | None:
@@ -570,9 +570,9 @@ async def support_start(message: Message, state: FSMContext):
         resize_keyboard=True
     )
     await message.answer(
-        "🏁 ВАЛЕВО автоответчик приветствует вас!\n\n"
-        "📤 Что бы передать информацию о баге или предложение для улучшения работы бота напишите это в чат.\n\n"
-        "Разработчик обязательно заедет на пит-стоп и проанализирует ваше обращение! 🤝",
+        f"📩 <b>ПОДДЕРЖКА ВАЛЕВО</b>\n{DIVIDER}\n\n"
+        "Напишите о баге или предложении по работе бота одним сообщением.\n\n"
+        "Разработчик обязательно заедет на пит-стоп и разберётся с вашим обращением! 🤝",
         reply_markup=kb
     )
 

@@ -42,6 +42,7 @@ from database.db import (
 
 from handlers.admin import send_notifications
 from keyboards.menu import get_menu
+from utils.message_style import DIVIDER, header
 from utils.time_parser import time_to_ms
 
 
@@ -124,7 +125,7 @@ async def check_request_allowed(
     if requests_are_closed():
         return (
             False,
-            "🌙 <b>Приём заявок сейчас закрыт.</b>\n\n"
+            "🌙 <b>Приём заявок сейчас закрыт</b>.\n\n"
             "Запросить установку времени можно ежедневно:\n"
             "🕛 с <b>12:00</b> до <b>01:00</b> по московскому времени.\n\n"
             "Ограничение введено, чтобы ночью администраторам "
@@ -138,7 +139,7 @@ async def check_request_allowed(
     if pending:
         return (
             False,
-            "⏳ <b>У вас уже есть заявка на проверке.</b>\n\n"
+            "⏳ <b>У вас уже есть заявка на проверке</b>.\n\n"
             f"Дисциплина: <b>{html.escape(str(pending['discipline']))}</b>\n"
             f"Трасса: <b>{html.escape(str(pending['track']))}</b>\n"
             f"Время: <b>{html.escape(str(pending['lap_time_text']))}</b>\n\n"
@@ -153,7 +154,7 @@ async def check_request_allowed(
     if cooldown > 0:
         return (
             False,
-            "⏱ <b>Слишком частая отправка заявок.</b>\n\n"
+            "⏱ <b>Слишком частая отправка заявок</b>.\n\n"
             f"Повторить попытку можно примерно через "
             f"<b>{format_cooldown(cooldown)}</b>."
         )
@@ -232,7 +233,7 @@ def request_caption(
     )
 
     return (
-        "🏁 <b>НОВАЯ ЗАЯВКА НА ФИКСАЦИЮ ВРЕМЕНИ</b>\n\n"
+        header("🏁", "Новая заявка на фиксацию времени") + "\n\n"
         f"🆔 Заявка: <b>#{request_id}</b>\n"
         f"👤 Пилот: <b>{safe_name}</b>\n"
         f"#️⃣ Номер пилота: <b>{number_text}</b>\n"
@@ -252,12 +253,12 @@ async def edit_admin_request_message(
 
     # Чтобы при повторном редактировании статусы не дублировались.
     base_caption = old_caption.split(
-        "\n\n━━━━━━━━━━━━━━━━━━\n"
+        f"\n\n{DIVIDER}\n"
     )[0]
 
     new_caption = (
         f"{base_caption}\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
+        f"{DIVIDER}\n"
         f"{status_text}"
     )
 
@@ -476,7 +477,7 @@ async def user_time_request_lap_time(
     await state.set_state(TimeRequestForm.proof)
 
     await message.answer(
-        "📸 <b>Теперь отправьте фотографию результата.</b>\n\n"
+        "📸 <b>Теперь отправьте фотографию результата</b>.\n\n"
         "На фотографии должны быть отчётливо видны:\n"
         "• итоговое время;\n"
         "• выбранная трасса или экран результата.\n\n"
@@ -617,7 +618,7 @@ async def user_time_request_proof(
         return
 
     await message.answer(
-        "✅ <b>Заявка отправлена администрации.</b>\n\n"
+        "✅ <b>Заявка отправлена администрации</b>.\n\n"
         f"🏆 Дисциплина: <b>{html.escape(discipline)}</b>\n"
         f"🗺 Трасса: <b>{html.escape(track)}</b>\n"
         f"⏱ Время: <b>{html.escape(lap_time_text)}</b>\n\n"
@@ -961,8 +962,8 @@ async def admin_reject_time_request(
         try:
             await callback.bot.send_message(
                 request["telegram_id"],
-                "❌ <b>Администратор отклонил вашу заявку "
-                "на установку времени.</b>\n\n"
+                "❌ <b>Администратор отклонил вашу заявку</b> "
+                "на установку времени.\n\n"
                 f"🏆 Дисциплина: "
                 f"<b>{html.escape(str(request['discipline']))}</b>\n"
                 f"🗺 Трасса: "

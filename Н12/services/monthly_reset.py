@@ -15,6 +15,7 @@ from database.db import (
     create_pending_yclients_operation,
 )
 from services.yclients_service import issue_season_cashback
+from utils.message_style import DIVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def perform_monthly_reset(bot):
                 )
                 await bot.send_message(
                     tid,
-                    f"🏁 <b>Сезон подошёл к концу!</b>\n\n"
+                    f"🏁 <b>СЕЗОН ПОДОШЁЛ К КОНЦУ</b>\n{DIVIDER}\n\n"
                     f"Вы заняли <b>{index} место</b> в дисциплине «{discipline}».\n\n"
                     f"📈 Рейтинг/репутация: <b>+{rating_delta}</b>"
                     f"{yclients_line}\n"
@@ -220,7 +221,7 @@ async def perform_monthly_reset(bot):
         try:
             await bot.send_message(
                 tid,
-                f"🏁 <b>Сезон завершён!</b>\n\n"
+                f"🏁 <b>СЕЗОН ЗАВЕРШЁН</b>\n{DIVIDER}\n\n"
                 f"Вы получаете <b>+{SEASON_PARTICIPATION_RATING}</b> рейтинга/репутации за участие.\n\n"
                 "Продолжайте улучшать результаты! 💪",
             )

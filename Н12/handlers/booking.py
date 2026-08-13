@@ -28,6 +28,7 @@ from database.db import get_db, get_pilot_by_telegram_id
 from keyboards.menu import get_menu
 from services.yclients_service import BASE_URL, REQUEST_TIMEOUT, _request, get_headers, normalize_phone
 from utils.chat_hygiene import schedule_fade_delete
+from utils.message_style import DIVIDER, header
 
 router = Router(name="booking")
 logger = logging.getLogger(__name__)
@@ -753,7 +754,7 @@ def _format_booking(booking: dict[str, Any]) -> str:
     places = ", ".join(_h(item["place_title"]) for item in booking.get("items", []))
     username = _h(booking.get("username"))
     return (
-        f"🎟 <b>Бронирование #{int(booking['id'])}</b>\n\n"
+        header("🎟", f"Бронирование #{int(booking['id'])}") + "\n\n"
         f"👤 {_h(booking.get('display_name'))}"
         + (f" (@{username})" if username else "")
         + f"\n📱 {_h(booking.get('phone'))}\n"
@@ -769,7 +770,7 @@ def _selection_summary(data: dict[str, Any]) -> str:
     end_at = datetime.fromisoformat(data["end_at"]).astimezone(TZ)
     places = ", ".join(BOOKING_PLACES[key]["title"] for key in data["selected_places"])
     return (
-        "📋 <b>ПРОВЕРЬТЕ ЗАЯВКУ</b>\n\n"
+        header("📋", "Проверьте заявку") + "\n\n"
         f"🖥 Места: <b>{places}</b>\n"
         f"📅 Дата: <b>{start_at.strftime('%d.%m.%Y')}</b>\n"
         f"⏰ Время: <b>{start_at.strftime('%H:%M')}–{end_at.strftime('%H:%M')}</b>\n"
@@ -838,7 +839,7 @@ async def booking_start(message: Message, state: FSMContext) -> None:
     old_message_id = old_data.get("flow_message_id")
 
     await state.clear()
-    sent = await message.answer("Что хотите забронировать?", reply_markup=_type_keyboard())
+    sent = await message.answer("🎟 <b>Что хотите забронировать?</b>", reply_markup=_type_keyboard())
     await state.update_data(flow_chat_id=sent.chat.id, flow_message_id=sent.message_id)
 
     if old_chat_id and old_message_id:
@@ -856,7 +857,7 @@ async def booking_choose_type(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
 
     text = (
-        "Выберите конкретные места.\n"
+        "🖥 <b>Выберите конкретные места.</b>\n"
         f"Можно выбрать от 1 до {MAX_PLACES_PER_BOOKING}.\n\n"
         "На карте клуба номера должны совпадать с кнопками ниже."
     )
@@ -914,7 +915,7 @@ async def booking_places_done(callback: CallbackQuery, state: FSMContext) -> Non
     await callback.answer()
     await _replace_flow_message(
         callback.bot, state, callback.message.chat.id,
-        text="Выберите дату:", reply_markup=_date_keyboard(),
+        text="📅 <b>Выберите дату:</b>", reply_markup=_date_keyboard(),
     )
 
 
@@ -934,7 +935,7 @@ async def booking_choose_date(callback: CallbackQuery, state: FSMContext) -> Non
     await state.set_state(BookingFlow.entering_time)
     await callback.answer()
     await callback.message.edit_text(
-        "Выберите время или напишите его вручную в формате <b>18:35</b>.\n"
+        "🕐 Выберите время или напишите его вручную в формате <b>18:35</b>.\n"
         "Клуб работает с 12:00 до 00:00.",
         reply_markup=_time_keyboard(selected_date),
     )
@@ -1031,7 +1032,7 @@ async def _accept_time(raw: str, state: FSMContext, bot: Bot) -> None:
 
     await state.update_data(start_at=start_at.isoformat())
     await state.set_state(BookingFlow.choosing_duration)
-    await _edit_flow_message(state, bot, "Выберите длительность:", _duration_keyboard())
+    await _edit_flow_message(state, bot, "⌛ <b>Выберите длительность:</b>", _duration_keyboard())
 
 
 @router.callback_query(BookingFlow.entering_time, F.data.startswith("bk:time:"))

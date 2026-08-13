@@ -16,6 +16,7 @@ from aiogram.types import (
 )
 
 from config import ADMIN_IDS, GROUP_ID
+from utils.message_style import DIVIDER, header
 from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
 from keyboards.menu import get_menu
@@ -111,7 +112,8 @@ async def clear_table_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id): return
     await state.set_state(ClearTableConfirm.wait)
     await message.answer(
-        "⚠️ Вы уверены, что хотите удалить ВСЕ круги из таблицы?\n"
+        f"{header('⚠️', 'Очистка таблицы')}\n\n"
+        "Вы уверены, что хотите удалить ВСЕ круги из таблицы?\n"
         "Напишите в точности: Я уверен что я делаю\n\n"
         "Для отмены нажмите '🔙 Назад'."
     )
@@ -144,7 +146,8 @@ async def broadcast_start(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "📢 Отправьте сообщение для рассылки.\n\n"
+        f"{header('📢', 'Рассылка')}\n\n"
+        "Отправьте сообщение для рассылки.\n\n"
         "Поддерживается:\n"
         "• текст\n"
         "• фото\n"
@@ -169,7 +172,7 @@ async def broadcast_text(message: Message, state: FSMContext):
         )
 
         preview = (
-            "🖼 Предпросмотр рассылки\n\n"
+            f"{header('🖼', 'Предпросмотр рассылки')}\n\n"
             f"{message.caption or '(без подписи)'}"
         )
 
@@ -179,7 +182,7 @@ async def broadcast_text(message: Message, state: FSMContext):
         )
 
         preview = (
-            "📝 Предпросмотр рассылки\n\n"
+            f"{header('📝', 'Предпросмотр рассылки')}\n\n"
             f"{message.text.strip()}"
         )
 
@@ -245,7 +248,7 @@ async def broadcast_send(message: Message, state: FSMContext):
             failed += 1
 
     await message.answer(
-        f"✅ Рассылка завершена.\n\n"
+        f"{header('✅', 'Рассылка завершена')}\n\n"
         f"Отправлено: {sent}\n"
         f"Не удалось отправить: {failed}",
         reply_markup=admin_menu
@@ -302,7 +305,7 @@ async def save_new_number(message: Message, state: FSMContext):
     await message.answer(f"✅ Номер пилота обновлён: #{num}")
     try:
         await message.bot.send_message(tid,
-            f"🎱 <b>ВАШ НОМЕР ПИЛОТА ОБНОВЛЁН!!!</b>\n\n🏁 ВАЛЕВО сим рейсинг присвоил вам новый уникальный номер: <b>{num}</b>")
+            f"{header('🎱', 'Ваш номер пилота обновлён!!!')}\n\n🏁 ВАЛЕВО сим рейсинг присвоил вам новый уникальный номер: <b>{num}</b>")
     except Exception as e:
         logger.warning(f"Не удалось отправить уведомление о смене номера: {e}")
     await state.clear()
@@ -331,7 +334,8 @@ async def search_pilot_by_number(message: Message, state: FSMContext):
     )
 
     text = (
-        f"👤 {name}\n"
+        f"{header('👤', 'Профиль пилота')}\n\n"
+        f"<b>{name}</b>\n"
         f"🏎 Номер: #{pilot['pilot_number']}\n"
         f"📱 {pilot['phone']}\n"
         f"📈 Рейтинг: {pilot['rating']}\n"
@@ -481,7 +485,7 @@ async def finish_lap(message: Message, state: FSMContext):
     undo_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Отменить (30 сек)", callback_data=f"undo_lap:{undo_data}")]
     ])
-    text = f"✅ Круг засчитан!\n🏆 {discipline}\n👤 @{username}\n🗺 {track}\n⏱ {lap_text}"
+    text = f"{header('✅', 'Круг засчитан!')}\n\n🏆 {discipline}\n👤 @{username}\n🗺 {track}\n⏱ {lap_text}"
     bot_msg = data.get("bot_message_id")
     if bot_msg:
         try:
@@ -553,7 +557,7 @@ async def _build_pilots_stats() -> tuple[str, InlineKeyboardMarkup]:
     finally:
         await db.close()
     text = (
-        f"📊 <b>СТАТИСТИКА КЛУБА</b>\n\n"
+        f"{header('📊', 'Статистика клуба')}\n\n"
         f"👥 Пользователей: <b>{total_pilots}</b>\n"
         f"🏎 Всего кругов: <b>{total_laps}</b>\n"
         f"📚 Дисциплин: <b>{total_disciplines}</b>\n"
@@ -583,7 +587,8 @@ async def pilot_card(callback: CallbackQuery):
     name = pilot.get("display_name") or pilot["username"]
     bonus_balance = await get_bonus_balance(pilot['yclients_client_id']) if pilot.get('yclients_client_id') else 0.0
     text = (
-        f"👤 {name}\n"
+        f"{header('👤', 'Профиль пилота')}\n\n"
+        f"<b>{name}</b>\n"
         f"🏎 Номер: #{pilot.get('pilot_number', '—')}\n"
         f"📱 {pilot.get('phone', '—')}\n"
         f"📈 Рейтинг: {pilot.get('rating', 0)}\n"
@@ -608,7 +613,7 @@ async def show_pilots_list(callback: CallbackQuery):
     if not pilots:
         await callback.message.answer("В клубе ещё нет пилотов."); return
     lines = [f"@{p['username']} #{p.get('pilot_number', '—')}" for p in pilots]
-    await callback.message.answer("📋 <b>СПИСОК ПИЛОТОВ</b>\n\n" + "\n".join(lines))
+    await callback.message.answer(f"{header('📋', 'Список пилотов')}\n\n" + "\n".join(lines))
 
 # ======================== РЕЙТИНГ ========================
 @router.callback_query(F.data.startswith("rating_plus_"))
@@ -643,7 +648,7 @@ async def change_rating(callback: CallbackQuery):
     old = pilot["rating"]
     await update_pilot_rating(tid, amount)
     name = pilot.get("display_name") or pilot["username"]
-    await callback.message.edit_text(f"✅ Рейтинг обновлён\n👤 {name}\n📈 Новый рейтинг: {old + amount}")
+    await callback.message.edit_text(f"{header('✅', 'Рейтинг обновлён')}\n\n👤 {name}\n📈 Новый рейтинг: {old + amount}")
 
 # ======================== БАЛАНС (YCLIENTS) ========================
 async def get_balance(client_id: int) -> float:
@@ -724,7 +729,7 @@ async def balance_amount(message: Message, state: FSMContext):
 
     if result.get("ok"):
         await message.answer(
-            f"✅ Бонусный счёт обновлён.\n"
+            f"{header('✅', 'Бонусный счёт обновлён')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
             f"Операция: {operation} {abs(delta):.2f} ₽\n"
             f"Текущий бонусный счёт: {float(result.get('balance') or 0):.2f} ₽"
@@ -745,7 +750,7 @@ async def balance_amount(message: Message, state: FSMContext):
                 logger.warning("Не удалось отправить уведомление пилоту %s: %s", tid, exc)
     elif result.get("status") == "queued":
         await message.answer(
-            f"⚠️ Операция поставлена в очередь автосинхронизации.\n"
+            f"{header('⚠️', 'Операция в очереди')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
             f"Сумма: {delta:+.2f} ₽\n"
             f"Причина: {result.get('message', 'карта/синхронизация пока недоступна')}\n\n"
@@ -825,7 +830,7 @@ async def _show_delete_results(callback: CallbackQuery, discipline_id: int, page
     page = max(0, min(page, total_pages - 1))
 
     await callback.message.edit_text(
-        "🗑 <b>Удаление времени</b>\n\n"
+        f"{header('🗑', 'Удаление времени')}\n\n"
         f"🏆 Дисциплина: <b>{discipline}</b>\n"
         f"🗺 Актуальная трасса: <b>{track}</b>\n"
         f"👥 Всего мест: <b>{len(results)}</b>\n\n"
@@ -859,7 +864,7 @@ async def delete_result_start(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "🗑 <b>Удаление времени из таблицы</b>\n\n"
+        f"{header('🗑', 'Удаление времени из таблицы')}\n\n"
         "Сначала выберите дисциплину. После этого выберите нужное",
         reply_markup=keyboard
     )
@@ -928,7 +933,7 @@ async def delete_result_preview(callback: CallbackQuery):
     )
 
     await callback.message.edit_text(
-        "⚠️ <b>Подтвердите удаление</b>\n\n"
+        f"{header('⚠️', 'Подтвердите удаление')}\n\n"
         f"🏆 Дисциплина: <b>{row['discipline']}</b>\n"
         f"🗺 Трасса: <b>{row['track']}</b>\n"
         f"📍 Место сейчас: <b>{row['place']}</b>\n"
@@ -1009,7 +1014,7 @@ async def delete_result_confirm(callback: CallbackQuery):
         )
 
     await callback.message.edit_text(
-        "✅ <b>Время удалено</b>\n\n"
+        f"{header('✅', 'Время удалено')}\n\n"
         f"🏆 {selected['discipline']}\n"
         f"🗺 {selected['track']}\n"
         f"👤 {selected['display_name']}\n"
@@ -1145,7 +1150,7 @@ async def send_notifications(bot, old_positions, new_positions, medals, discipli
 
     if group_id:
         leaderboard = await build_leaderboard()
-        group_msg = f"🔥 Новый результат!\n🏆 {discipline}\n👤 @{new_username}\n🗺 {track}\n⏱ {lap_text}"
+        group_msg = f"{header('🔥', 'Новый результат!')}\n\n🏆 {discipline}\n👤 @{new_username}\n🗺 {track}\n⏱ {lap_text}"
         try:
             await bot.send_message(group_id, group_msg)
             await bot.send_message(group_id, leaderboard)
@@ -1195,7 +1200,7 @@ async def admin_close_weekcup_button(message: Message, state: FSMContext):
     )
 
     await message.answer(
-        "⚠️ <b>Закрыть Week CUP?</b>\n\n"
+        f"{header('⚠️', 'Закрыть Week CUP?')}\n\n"
         "Будет выполнено:\n"
         "1. Зафиксирован TOP-3.\n"
         "2. 1 месту уйдёт сообщение про суперприз.\n"
@@ -1233,7 +1238,7 @@ async def admin_close_weekcup_yes(callback: CallbackQuery):
         logger.exception("Ошибка при закрытии Week CUP")
 
         await callback.message.answer(
-            "❌ <b>Ошибка при закрытии Week CUP</b>\n\n"
+            f"{header('❌', 'Ошибка при закрытии Week CUP')}\n\n"
             f"<code>{exc}</code>"
         )
 
