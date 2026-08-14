@@ -23,8 +23,6 @@ from config import ADMIN_IDS, GROUP_ID, MOSCOW_TZ
 from database.db import (
     add_lap,
     delete_lap,
-    get_top3,
-    get_pilot_by_username,
     get_pilot_by_telegram_id,
     get_all_disciplines,
     get_tracks_for_discipline,
@@ -743,9 +741,6 @@ async def admin_approve_time_request(
         lap_time_text = request["lap_time_text"]
         lap_time_ms = request["lap_time_ms"]
 
-        old_top = await get_top3()
-        old_rows = old_top.get(discipline, [])
-
         lap_id = await add_lap(
             discipline=discipline,
             username=username,
@@ -763,57 +758,9 @@ async def admin_approve_time_request(
         except Exception:
             logger.exception("Ошибка турнирного движка после круга (заявка #%s)", request_id)
 
-        new_top = await get_top3()
-        new_rows = new_top.get(discipline, [])
-
-        old_positions = {
-            row["username"]: index
-            for index, row in enumerate(old_rows)
-        }
-        new_positions = {
-            row["username"]: index
-            for index, row in enumerate(new_rows)
-        }
-
-        medals = ["🥇", "🥈", "🥉"]
-        rating_values = [20, 15, 10]
-
-        # Та же логика рейтинга, что используется
-        # при ручной установке времени администратором.
-        for uname, new_index in new_positions.items():
-            old_index = old_positions.get(uname, 999)
-
-            if new_index < old_index and new_index < 3:
-                old_rating_value = (
-                    rating_values[old_index]
-                    if old_index < 3
-                    else 0
-                )
-
-                delta = (
-                    rating_values[new_index]
-                    - old_rating_value
-                )
-
-                if delta <= 0:
-                    continue
-
-                pilot = await get_pilot_by_username(uname)
-
-                if not pilot:
-                    continue
-
-                pilot_tid = pilot[1]
-
-                await update_pilot_rating(
-                    pilot_tid,
-                    delta
-                )
-
-                rating_changes[pilot_tid] = (
-                    rating_changes.get(pilot_tid, 0)
-                    + delta
-                )
+        # Рейтинг теперь начисляется только турнирным движком (переходы/ачивки) —
+        # старое начисление за топ-3 лучшего времени за всё время убрано.
+        # rating_changes остаётся пустым — откат ниже по коду безопасен как есть.
 
         await complete_time_request(
             request_id=request_id,
@@ -829,19 +776,13 @@ async def admin_approve_time_request(
             "Результат добавлен в таблицу."
         )
 
-        # Используется существующая система:
-        # уведомление пилоту, изменения позиций и сообщение в группу.
         try:
             await send_notifications(
                 bot=callback.bot,
-                old_positions=old_positions,
-                new_positions=new_positions,
-                medals=medals,
                 discipline=discipline,
                 new_username=username,
                 lap_text=lap_time_text,
                 selected_tid=selected_tid,
-                new_rows=new_rows,
                 track=track,
                 group_id=GROUP_ID,
             )

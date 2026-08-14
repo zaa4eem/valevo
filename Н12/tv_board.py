@@ -34,11 +34,15 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# Обновлено под лестницу турнира v2 (MX-5 -> BTCC -> GT500 -> GT3). Состав и
+# количество пунктов (1 фиксированный + 4 в карусели) оставлены как раньше —
+# CSS-анимация карусели ниже настроена именно на 4 карусельных пункта, менять
+# их число без пересчёта keyframes нельзя.
 DISPLAY_ORDER = [
-    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "spa-francorchamps"},
-    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "red bull ring"},
-    {"key": "F1", "aliases": ["F1", "FORMULA", "FORMULA 1"], "title": "F1", "subtitle": "sochi gp"},
-    {"key": "DTM", "aliases": ["DTM", "AKAGI", "АКАГИ"], "title": "DTM", "subtitle": "Tsukuba"},
+    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP"},
+    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West"},
+    {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "Silverstone"},
+    {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": ""},
     {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP", "subtitle": "LMU | Hyper BMW | Sebring circuit"},
 ]
 

@@ -32,7 +32,7 @@ from keyboards.admin_pilots import (
     bonus_minutes_keyboard,
 )
 from database.db import (
-    add_lap, delete_lap, get_top3, get_pilot_by_username, get_all_pilots,
+    add_lap, delete_lap, get_pilot_by_username, get_all_pilots,
     get_pilot_by_telegram_id, get_pilot_by_number,
     update_pilot_rating, update_pilot_number,
     clear_all_laps, get_db,
@@ -459,8 +459,6 @@ async def finish_lap(message: Message, state: FSMContext):
             await message.answer("❌ Неверный формат времени\nПример: 01:18.565")
         return
 
-    old_top = await get_top3()
-    old_rows = old_top.get(discipline, [])
     lap_id = await add_lap(
         discipline=discipline,
         username=username,
@@ -478,27 +476,10 @@ async def finish_lap(message: Message, state: FSMContext):
     except Exception:
         logger.exception("Ошибка турнирного движка после круга (admin, lap_id=%s)", lap_id)
 
-    new_top = await get_top3()
-    new_rows = new_top.get(discipline, [])
-
-    old_positions = {r["username"]: i for i, r in enumerate(old_rows)}
-    new_positions = {r["username"]: i for i, r in enumerate(new_rows)}
-    medals = ["🥇", "🥈", "🥉"]
-    rating_values = [20, 15, 10]
-    rating_changes = {}
-
-    for uname, new_i in new_positions.items():
-        old_i = old_positions.get(uname, 999)
-        if new_i < old_i and new_i < 3:
-            delta = rating_values[new_i] - (rating_values[old_i] if old_i < 3 else 0)
-            if delta > 0:
-                pilot = await get_pilot_by_username(uname)
-                if pilot:
-                    tid = pilot[1]
-                    await update_pilot_rating(tid, delta)
-                    rating_changes[tid] = rating_changes.get(tid, 0) + delta
-
-    undo_data = json.dumps({"lap_id": lap_id, "changes": rating_changes}, ensure_ascii=False)
+    # Рейтинг теперь начисляется только турнирным движком (переходы/ачивки) —
+    # старое начисление за топ-3 лучшего времени за всё время убрано, чтобы
+    # не было двух конкурирующих систем очков.
+    undo_data = json.dumps({"lap_id": lap_id, "changes": {}}, ensure_ascii=False)
     undo_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Отменить (30 сек)", callback_data=f"undo_lap:{undo_data}")]
     ])
@@ -520,14 +501,10 @@ async def finish_lap(message: Message, state: FSMContext):
 
     asyncio.create_task(send_notifications(
         bot=message.bot,
-        old_positions=old_positions,
-        new_positions=new_positions,
-        medals=medals,
         discipline=discipline,
         new_username=username,
         lap_text=lap_text,
         selected_tid=selected_tid,
-        new_rows=new_rows,
         track=track,
         group_id=GROUP_ID,
     ))
@@ -1248,43 +1225,22 @@ async def benchmark_enter_time(message: Message, state: FSMContext):
 
 
 # ======================== УВЕДОМЛЕНИЯ ========================
-async def send_notifications(bot, old_positions, new_positions, medals, discipline,
-                             new_username, lap_text, selected_tid, new_rows, track, group_id):
-    for uname, old_i in old_positions.items():
-        if uname not in new_positions:
-            pilot = await get_pilot_by_username(uname)
-            if pilot:
-                try:
-                    await bot.send_message(pilot[1],
-                        f"⚠️ Ваш рекорд в {discipline} выбит из ТОП‑3!\nНовый рекорд: @{new_username} – {lap_text}\n\n"
-                        f"Забронировать платформу вы можете по тел. 89939501251 или написав в тг: @ValevoRostov")
-                except Exception as e:
-                    logger.warning(f"Не удалось уведомить {uname}: {e}")
-        else:
-            new_i = new_positions[uname]
-            if new_i > old_i:
-                pilot = await get_pilot_by_username(uname)
-                if pilot:
-                    try:
-                        await bot.send_message(pilot[1],
-                            f"⚠️ Ваше место в {discipline} изменено: {medals[old_i]} → {medals[new_i]}\n"
-                            f"Вас обогнал: @{new_username} – {lap_text}\n\n"
-                            f"Забронировать платформу вы можете по тел. 89939501251 или написав в тг: @ValevoRostov")
-                    except Exception as e:
-                        logger.warning(f"Не удалось уведомить {uname}: {e}")
+async def send_notifications(bot, discipline, new_username, lap_text, selected_tid, track, group_id):
+    """Уведомляет пилота о зафиксированном времени и публикует результат в группу.
 
+    Раньше здесь же сравнивались топ-3 лучшего времени за всё время и
+    начислялся отдельный рейтинг — это убрано: турнирный движок (переходы
+    классов и ачивки) теперь единственный источник рейтинга.
+    """
     if selected_tid:
-        pilot_username = new_username
-        if pilot_username in new_positions:
-            place = new_positions[pilot_username] + 1
-            place_text = f"Вы попали на {place} место!"
-        else:
-            place_text = "Ваше время записано, но вы не попали в топ-3."
         notify_text = (
             f"🏁 Администратор зафиксировал ваше новое время:\n"
-            f"{discipline} | {track} | {lap_text}\n\n{place_text}")
-        try: await bot.send_message(selected_tid, notify_text)
-        except Exception as e: logger.warning(f"Не удалось уведомить пилота {selected_tid}: {e}")
+            f"{discipline} | {track} | {lap_text}"
+        )
+        try:
+            await bot.send_message(selected_tid, notify_text)
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить пилота {selected_tid}: {e}")
 
     if group_id:
         leaderboard = await build_leaderboard()
