@@ -11,14 +11,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import BASE_DIR, DB_NAME
-from services.tournament import (
-    live_class_score,
-    month_bounds,
-    month_participant_ids,
-    rank_month_overall,
-)
-from data.tournament import CLASS_LADDER
-from database.db import get_all_class_benchmarks, get_pilot_by_telegram_id
+from services.tournament import month_bounds, rank_month_overall
+from database.db import get_pilot_by_telegram_id
 
 # Используем те же пути, что и основной бот (config.py), а не путь относительно
 # текущей рабочей директории — иначе TV-board, запущенный из другой папки/сервиса,
@@ -34,10 +28,11 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Обновлено под лестницу турнира v2 (MX-5 -> BTCC -> GT500 -> GT3). Состав и
-# количество пунктов (1 фиксированный + 4 в карусели) оставлены как раньше —
-# CSS-анимация карусели ниже настроена именно на 4 карусельных пункта, менять
-# их число без пересчёта keyframes нельзя.
+# Обновлено под лестницу турнира v2 (MX-5 -> BTCC -> GT500 -> GT3). Все 5
+# пунктов теперь крутятся в общей карусели (фиксированную левую колонку
+# занимает не одна из дисциплин, а общий зачёт турнира — см. FIXED_TOP_ITEM
+# и renderBoard). Меняя количество пунктов здесь, обязательно пересчитай
+# @keyframes carouselStep и --cycle-time ниже — они настроены именно на 5 шагов.
 DISPLAY_ORDER = [
     {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP"},
     {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West"},
@@ -46,17 +41,10 @@ DISPLAY_ORDER = [
     {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP", "subtitle": "LMU | Hyper BMW | Sebring circuit"},
 ]
 
-FIXED_KEY = "GT3"
-
 CAROUSEL_DUPLICATES = 4
 CAROUSEL_HOLD_MS = 10000
 CAROUSEL_MOVE_MS = 1200
 DATA_REFRESH_MS = 30000
-
-# Панель турнира v2 (живой рейтинг классов + общий зачёт месяца) —
-# отдельная, независимая от карусели best-lap ротация слайдов, чтобы
-# не трогать тонко настроенные CSS keyframes основной карусели.
-TOURNAMENT_ROTATE_MS = 8000
 
 
 HTML_TEMPLATE = r"""
@@ -212,7 +200,7 @@ body::after{
     flex:1 1 auto;
     min-height:0;
     display:grid;
-    grid-template-columns:54px minmax(260px,28%) minmax(0,1fr) minmax(280px,27%);
+    grid-template-columns:54px minmax(260px,28%) minmax(0,1fr);
     gap:10px;
     align-items:start;
     position:relative;
@@ -311,7 +299,7 @@ body::after{
 
 .carousel-track{
     --col-w:370px;
-    --cycle-time:44.8s;
+    --cycle-time:56s;
 
     height:100%;
     display:flex;
@@ -353,58 +341,22 @@ body::after{
         inset 0 1px 0 rgba(255,255,255,.08);
 }
 
-/* ========== ТУРНИР v2: живой рейтинг классов + общий зачёт ========== */
-/* Отдельная панель, не завязанная на CSS keyframes основной карусели —
-   слайды переключаются через JS setInterval (TOURNAMENT_ROTATE_MS). */
+/* ========== ОБЩИЙ ЗАЧЁТ (фиксированная левая колонка) ========== */
+/* Золотой акцент — чтобы главная, всегда видимая колонка выделялась среди
+   карусели дисциплин. */
 
-.tour-col{
-    min-width:0;
-}
-
-.tour-viewport{
-    min-width:0;
-    height:624px;
-    overflow:hidden;
-    position:relative;
-}
-
-.tour-viewport .col{
-    width:100%;
-    max-width:none;
-    min-width:0;
-    height:100%;
+.fixed-col .col{
     border:3px solid rgba(255,204,51,.55);
-    border-radius:20px;
     background:linear-gradient(180deg,rgba(18,14,2,.88),rgba(1,5,6,.84));
     box-shadow:
         0 0 30px rgba(255,204,51,.10),
         inset 0 0 30px rgba(255,204,51,.05),
         inset 0 1px 0 rgba(255,255,255,.08);
-    opacity:0;
-    animation:tourSlideIn .55s ease forwards;
 }
 
-.tour-viewport .head{
+.fixed-col .head{
     border-bottom:3px solid rgba(255,204,51,.55);
     background:linear-gradient(180deg,rgba(255,204,51,.14),rgba(0,0,0,.23));
-}
-
-.tour-viewport .pending .name{
-    color:rgba(244,241,232,.5);
-}
-
-.tour-viewport .pending .time{
-    color:rgba(244,241,232,.5);
-    text-shadow:none;
-}
-
-@keyframes tourSlideIn{
-    0%{opacity:0;transform:translateY(8px)}
-    100%{opacity:1;transform:translateY(0)}
-}
-
-@media(max-width:1400px){
-    .tour-viewport{height:560px}
 }
 
 .head{
@@ -697,20 +649,27 @@ body::after{
 .ticker b{color:var(--cyan)}
 .gold{color:var(--gold2)}
 
+/* 5 карусельных пунктов (GT3, MX-5, BTCC, GT500, Week CUP) — каждый занимает
+   1/5 цикла: держит кадр CAROUSEL_HOLD_MS, затем едет CAROUSEL_MOVE_MS.
+   Если поменяешь состав/число пунктов DISPLAY_ORDER — пересчитай проценты
+   здесь и --cycle-time выше (сейчас 5 * (10000+1200)мс = 56с). */
 @keyframes carouselStep{
     0%{transform:translate3d(0,0,0)}
-    22.321%{transform:translate3d(0,0,0)}
+    17.857%{transform:translate3d(0,0,0)}
 
-    25%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
-    47.321%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    20%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    37.857%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
 
-    50%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
-    72.321%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    40%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    57.857%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
 
-    75%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
-    97.321%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    60%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    77.857%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
 
-    100%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    80%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    97.857%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+
+    100%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
 }
 
 @keyframes ticker{
@@ -823,9 +782,6 @@ body::after{
         <div class="carousel-viewport">
             <div class="carousel-track" id="carousel-track"></div>
         </div>
-        <div class="tour-col">
-            <div class="tour-viewport" id="tour-viewport"></div>
-        </div>
     </div>
 
     <div class="ticker-wrap">
@@ -847,21 +803,16 @@ body::after{
 
 <script>
 let DISPLAY_ORDER = {display_order_json};
-const FIXED_KEY = "{fixed_key}";
 const CAROUSEL_HOLD_MS = {carousel_hold_ms};
 const CAROUSEL_MOVE_MS = {carousel_move_ms};
 const DATA_REFRESH_MS = {data_refresh_ms};
 const CAROUSEL_DUPLICATES = {carousel_duplicates};
-const TOURNAMENT_ROTATE_MS = {tournament_rotate_ms};
 
 let state = null;
 let refreshLock = false;
 let carouselIndex = 0;
 let carouselTimer = null;
 let pendingData = null;
-
-let tourSlides = [];
-let tourIndex = 0;
 
 function escapeHtml(value){
     return String(value ?? "")
@@ -955,66 +906,6 @@ function makeColumn(item, pilots, oldGroups){
     return col;
 }
 
-function buildTourSlides(data){
-    const tournament = data && data.tournament;
-    if (!tournament) return [];
-
-    const slides = [];
-
-    slides.push({
-        key:"TOUR_OVERALL",
-        title:"Общий зачёт",
-        subtitle: tournament.month_key ? `месяц ${tournament.month_key} · приз клуба` : "приз клуба",
-        pilots: tournament.overall || [],
-    });
-
-    (tournament.classes || []).forEach(cls => {
-        const pilots = (cls.qualifying || []).concat(cls.pending || []);
-        slides.push({
-            key:`TOUR_${cls.key}`,
-            title:`${cls.title} · live`,
-            subtitle: cls.track ? `эталон: ${cls.track}` : "живой рейтинг месяца",
-            pilots: pilots,
-            pendingFrom: (cls.qualifying || []).length,
-        });
-    });
-
-    return slides;
-}
-
-function renderTourSlide(){
-    const viewport = document.getElementById("tour-viewport");
-    if (!viewport) return;
-
-    if (!tourSlides.length){
-        viewport.innerHTML = "";
-        return;
-    }
-
-    if (tourIndex >= tourSlides.length) tourIndex = 0;
-    const slide = tourSlides[tourIndex];
-
-    viewport.innerHTML = "";
-    const col = makeColumn(slide, slide.pilots, null);
-
-    if (typeof slide.pendingFrom === "number"){
-        const rows = col.querySelectorAll(".row");
-        rows.forEach((row, i) => {
-            if (i >= slide.pendingFrom && i < slide.pilots.length){
-                row.classList.add("pending");
-            }
-        });
-    }
-
-    viewport.appendChild(col);
-}
-
-function advanceTourSlide(){
-    if (!tourSlides.length) return;
-    tourIndex = (tourIndex + 1) % tourSlides.length;
-    renderTourSlide();
-}
-
 function showLeaderOverlay(item, pilot){
     if (!item || !pilot) return;
 
@@ -1042,7 +933,7 @@ function showLeaderOverlay(item, pilot){
 }
 
 function carouselItems(){
-    return DISPLAY_ORDER.filter(i => i.key !== FIXED_KEY);
+    return DISPLAY_ORDER;
 }
 
 function renderBoard(data, animate=true){
@@ -1056,12 +947,15 @@ function renderBoard(data, animate=true){
     if (!fixedRoot || !carousel) return;
 
     const oldGroups = state ? state.groups : null;
+    const oldOverall = state && state.tournament ? state.tournament.overall : null;
 
     fixedRoot.innerHTML = "";
     carousel.innerHTML = "";
 
-    const fixedItem = DISPLAY_ORDER.find(i => i.key === FIXED_KEY);
-    fixedRoot.appendChild(makeColumn(fixedItem, data.groups[FIXED_KEY] || [], animate ? oldGroups : null));
+    const topItem = {key:"TOP", title:"Общий зачёт", subtitle:""};
+    const topPilots = (data.tournament && data.tournament.overall) || [];
+    const topOldGroups = animate && oldOverall ? {TOP: oldOverall} : null;
+    fixedRoot.appendChild(makeColumn(topItem, topPilots, topOldGroups));
 
     const items = carouselItems();
 
@@ -1098,9 +992,6 @@ function renderBoard(data, animate=true){
     if (ticker) ticker.innerHTML = data.ticker;
 
     state = data;
-
-    tourSlides = buildTourSlides(data);
-    renderTourSlide();
 
     if (leaderEvent){
         showLeaderOverlay(leaderEvent.item, leaderEvent.pilot);
@@ -1150,10 +1041,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Просто заранее подготавливаем свежие данные, но не перерисовываем экран посреди движения.
     setInterval(refreshBoard, DATA_REFRESH_MS);
-
-    // Ротация слайдов панели турнира (общий зачёт + каждый живой класс) —
-    // независима от карусели best-lap, поэтому свой собственный таймер.
-    setInterval(advanceTourSlide, TOURNAMENT_ROTATE_MS);
 });
 </script>
 </body>
@@ -1241,27 +1128,10 @@ def clean_number(value) -> str:
     return value
 
 
-def format_ms(value) -> str:
-    """мм:сс.ммм из миллисекунд. Используется только для отображения эталона
-    турнира — сами очки/лучший круг пилота считает services.tournament."""
-    try:
-        ms = int(value)
-    except (TypeError, ValueError):
-        return "--:--.---"
-
-    if ms < 0:
-        return "--:--.---"
-
-    minutes, rest_ms = divmod(ms, 60000)
-    seconds, millis = divmod(rest_ms, 1000)
-    return f"{minutes}:{seconds:02d}.{millis:03d}"
-
-
 async def load_tournament_data() -> dict:
     """
-    Живые данные турнира v2 для ТВ-табло: по каждому классу с выставленным
-    на этот месяц эталоном — рейтинг участников (в зачёте / пока нет), плюс
-    общий взвешенный зачёт месяца (кто сейчас лидирует за призы клуба).
+    Общий взвешенный зачёт месяца турнира v2 для фиксированной колонки
+    ТВ-табло ("Общий зачёт" — кто сейчас лидирует за призы клуба).
 
     Ничего не пишет в БД, только читает — использует те же async-функции,
     что и сам бот (services.tournament / database.db), поэтому цифры на
@@ -1270,93 +1140,19 @@ async def load_tournament_data() -> dict:
     month_key, start_iso, end_iso = month_bounds()
 
     try:
-        benchmarks = await get_all_class_benchmarks(month_key)
-    except Exception:
-        logging.exception("TV board: не удалось загрузить эталоны месяца")
-        benchmarks = {}
-
-    try:
-        participant_ids = await month_participant_ids(start_iso, end_iso)
-    except Exception:
-        logging.exception("TV board: не удалось загрузить участников месяца")
-        participant_ids = set()
-
-    pilot_cache: dict[int, dict] = {}
-
-    async def pilot_label(telegram_id: int) -> tuple[str, str]:
-        if telegram_id not in pilot_cache:
-            try:
-                pilot_cache[telegram_id] = await get_pilot_by_telegram_id(telegram_id) or {}
-            except Exception:
-                pilot_cache[telegram_id] = {}
-        pilot = pilot_cache[telegram_id]
-        name = clean_name(pilot.get("display_name"), pilot.get("username"))
-        number = clean_number(pilot.get("pilot_number"))
-        return name, number
-
-    classes = []
-
-    for class_name in CLASS_LADDER:
-        benchmark = benchmarks.get(class_name)
-        if not benchmark:
-            continue
-
-        qualifying = []
-        pending = []
-
-        for telegram_id in participant_ids:
-            try:
-                result = await live_class_score(telegram_id, class_name, month_key, start_iso, end_iso)
-            except Exception:
-                logging.exception(
-                    "TV board: live_class_score сломался (%s, %s)", telegram_id, class_name
-                )
-                continue
-
-            if not result.get("starts"):
-                continue
-
-            name, number = await pilot_label(telegram_id)
-
-            if result["qualifies"] and result["score"] is not None:
-                qualifying.append({
-                    "name": name,
-                    "num": number,
-                    "time": str(result["score"]),
-                })
-            else:
-                min_starts = result.get("min_starts") or 5
-                pending.append({
-                    "name": f'{name} · не в зачёте',
-                    "num": number,
-                    "time": f'{result["starts"]}/{min_starts}',
-                    "starts": result["starts"],
-                })
-
-        qualifying.sort(key=lambda entry: int(entry["time"]), reverse=True)
-        pending.sort(key=lambda entry: entry["starts"], reverse=True)
-        for entry in pending:
-            entry.pop("starts", None)
-
-        classes.append({
-            "key": class_name,
-            "title": class_name,
-            "track": str(benchmark.get("track") or ""),
-            "benchmark_time": format_ms(benchmark.get("benchmark_ms")),
-            "qualifying": qualifying,
-            "pending": pending,
-        })
-
-    overall = []
-
-    try:
         ranking = await rank_month_overall(month_key, start_iso, end_iso)
     except Exception:
         logging.exception("TV board: не удалось загрузить общий зачёт месяца")
         ranking = []
 
+    overall = []
     for row in ranking:
-        name, number = await pilot_label(row["telegram_id"])
+        try:
+            pilot = await get_pilot_by_telegram_id(row["telegram_id"]) or {}
+        except Exception:
+            pilot = {}
+        name = clean_name(pilot.get("display_name"), pilot.get("username"))
+        number = clean_number(pilot.get("pilot_number"))
         overall.append({
             "name": name,
             "num": number,
@@ -1365,7 +1161,6 @@ async def load_tournament_data() -> dict:
 
     return {
         "month_key": month_key,
-        "classes": classes,
         "overall": overall,
     }
 
@@ -1495,12 +1290,10 @@ async def index():
     page = page.replace("{ranks}", "".join(f'<div class="rank">{i}</div>' for i in range(1, 11)))
     page = page.replace("{ticker}", data["ticker"])
     page = page.replace("{display_order_json}", json.dumps(data["display_order"], ensure_ascii=False))
-    page = page.replace("{fixed_key}", FIXED_KEY)
     page = page.replace("{carousel_hold_ms}", str(CAROUSEL_HOLD_MS))
     page = page.replace("{carousel_move_ms}", str(CAROUSEL_MOVE_MS))
     page = page.replace("{data_refresh_ms}", str(DATA_REFRESH_MS))
     page = page.replace("{carousel_duplicates}", str(CAROUSEL_DUPLICATES))
-    page = page.replace("{tournament_rotate_ms}", str(TOURNAMENT_ROTATE_MS))
     page = page.replace("{initial_json}", json.dumps(data, ensure_ascii=False))
     return page
 
