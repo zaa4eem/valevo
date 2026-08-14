@@ -147,6 +147,8 @@ echo [5/7] Собираю EXE бота...
  --onefile ^
  --noconsole ^
  --name "%BOT_BUILD_NAME%" ^
+ --collect-all apscheduler ^
+ --collect-all pytz ^
  main.py
 
 if errorlevel 1 (
@@ -177,6 +179,7 @@ if exist "static" (
      --onefile ^
      --noconsole ^
      --name "%TV_BUILD_NAME%" ^
+     --collect-all pytz ^
      --add-data "static;static" ^
      tv_board.py
 ) else (
@@ -184,6 +187,7 @@ if exist "static" (
      --onefile ^
      --noconsole ^
      --name "%TV_BUILD_NAME%" ^
+     --collect-all pytz ^
      tv_board.py
 )
 
