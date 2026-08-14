@@ -32,14 +32,14 @@ def season_bonus_rub(bonus_hours: int) -> float:
 def current_season_key(now: datetime | None = None) -> str:
     """Ключ сезона по фактическому моменту закрытия.
 
-    Закрытие происходит 15 числа в 14:00 МСК. Ключ фиксируется по месяцу закрытия,
+    Закрытие происходит 20 числа в 18:01 МСК. Ключ фиксируется по месяцу закрытия,
     чтобы повторный запуск в этот же день не начислил награды повторно.
     """
     moscow_tz = timezone(MOSCOW_TZ)
     now = now or datetime.now(moscow_tz)
     if now.tzinfo is None:
         now = moscow_tz.localize(now)
-    return now.astimezone(moscow_tz).strftime("%Y-%m-15-14")
+    return now.astimezone(moscow_tz).strftime("%Y-%m-20-18")
 
 
 async def _notify_admin(bot, text: str) -> None:

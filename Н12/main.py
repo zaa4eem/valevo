@@ -89,7 +89,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.get_job("monthly_reset"):
         scheduler.add_job(
             perform_monthly_reset,
-            CronTrigger(day=16, hour=18, minute=30, timezone=moscow_tz),
+            CronTrigger(day=20, hour=18, minute=1, timezone=moscow_tz),
             args=[bot],
             id="monthly_reset",
             replace_existing=True,
@@ -155,8 +155,8 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(booking.process_booking_reminders(bot)),
     ]
 
-    if now.day == 15 and now.hour >= 14:
-        logger.info("15-е число после 14:00 — проверяю ежемесячные начисления при старте.")
+    if now.day == 20 and now.hour >= 18:
+        logger.info("20-е число после 18:01 — проверяю ежемесячные начисления при старте.")
         await perform_monthly_reset(bot)
 
     return background_tasks
