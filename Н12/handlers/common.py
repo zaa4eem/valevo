@@ -16,12 +16,17 @@ from database.db import (
     get_top10_pilots,
     create_support_message, get_support_message, claim_support_message_for_reply,
     release_support_message, complete_support_message,
+    get_pilot_class, get_pilot_achievements,
 )
 from services.leaderboard import build_leaderboard
 from keyboards.menu import get_menu
 from keyboards.profile_menu import profile_menu
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.yclients_auto import auto_sync_pilot_with_yclients
+from services.levels import pilot_rank_info, pilot_rank_progress_bar, pilot_level, pilot_level_progress_bar
+from services.tournament import month_bounds, live_class_score
+from data.tournament import CLASS_LADDER, next_main_class
+from services.achievements import CATALOG
 from utils.message_style import DIVIDER
 
 router = Router()
@@ -90,49 +95,6 @@ def format_phone_display(phone: str | None) -> str:
         return f"+7 {digits[1:4]} {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
     return str(phone) if phone else "—"
 
-
-# ---------- Ранги пилота ----------
-# (порог рейтинга, эмодзи, название ранга)
-PILOT_RANKS: list[tuple[int, str, str]] = [
-    (0, "🔰", "Новичок"),
-    (20, "🏎", "Гонщик"),
-    (50, "🥉", "Профи"),
-    (100, "🥈", "Ас трассы"),
-    (200, "🥇", "Чемпион"),
-    (400, "💎", "Легенда VALEVO"),
-]
-
-
-def pilot_rank_info(rating: int | float | None) -> tuple[tuple[int, str, str], tuple[int, str, str] | None]:
-    """Возвращает (текущий_ранг, следующий_ранг) по рейтингу пилота."""
-    rating_value = max(0, int(rating or 0))
-    current = PILOT_RANKS[0]
-    next_rank: tuple[int, str, str] | None = None
-    for index, rank in enumerate(PILOT_RANKS):
-        if rating_value >= rank[0]:
-            current = rank
-            next_rank = PILOT_RANKS[index + 1] if index + 1 < len(PILOT_RANKS) else None
-        else:
-            break
-    return current, next_rank
-
-
-def pilot_rank_progress_bar(rating: int | float | None, width: int = 10) -> str:
-    """Прогресс-бар до следующего ранга: ▰▰▰▰▰▱▱▱▱▱."""
-    rating_value = max(0, int(rating or 0))
-    current, next_rank = pilot_rank_info(rating_value)
-
-    if next_rank is None:
-        return "▰" * width + " (макс. уровень)"
-
-    span = next_rank[0] - current[0]
-    done = rating_value - current[0]
-    fraction = max(0.0, min(1.0, done / span)) if span > 0 else 1.0
-    filled = round(fraction * width)
-
-    bar = "▰" * filled + "▱" * (width - filled)
-    points_left = next_rank[0] - rating_value
-    return f"{bar}  ещё {points_left} до «{next_rank[1]} {next_rank[2]}»"
 
 def _registration_phone_keyboard() -> ReplyKeyboardMarkup:
     """Кнопка Telegram-контакта; ручной ввод номера тоже остаётся доступен."""
@@ -341,8 +303,9 @@ async def _build_profile_text(user_id: int, fallback_username: str | None) -> st
     header = (
         f"{rank_emoji} <b>{html.escape(display_name)}</b>"
         + (f"  <code>#{pilot_number}</code>" if pilot_number else "")
-        + f"\n{rank_title} · рейтинг <b>{rating}</b>\n"
-        f"{pilot_rank_progress_bar(rating)}"
+        + f"\n{rank_title} · рейтинг <b>{rating}</b> · уровень <b>{pilot_level(rating)}</b>/80\n"
+        f"{pilot_rank_progress_bar(rating)}\n"
+        f"{pilot_level_progress_bar(rating)}"
     )
 
     identity = (
@@ -415,7 +378,70 @@ async def _build_profile_text(user_id: int, fallback_username: str | None) -> st
     else:
         achievements_lines.append("🏁 Первый принятый круг станет началом истории пилота.")
 
-    return "\n".join([header, identity + club_block, "\n".join(achievements_lines)])
+    # ---------- Турнирная система v2: текущий класс и живой балл месяца ----------
+    def _format_class_progress(result: dict) -> str:
+        class_name = result["class_name"]
+        threshold = CLASS_LADDER.get(class_name, {}).get("threshold")
+        if not result["qualifies"]:
+            return (
+                f"🏎 <b>{html.escape(class_name)}</b>: {result['starts']}/{result['min_starts']} стартов"
+            )
+        score = result["score"]
+        if threshold is not None and score is not None and score >= threshold:
+            return f"🏎 <b>{html.escape(class_name)}</b>: <b>{score}</b> баллов — готов к переходу! 🚀"
+        if threshold is not None:
+            return f"🏎 <b>{html.escape(class_name)}</b>: <b>{score}</b> баллов (нужно {threshold} для перехода)"
+        return f"🏎 <b>{html.escape(class_name)}</b>: <b>{score}</b> баллов"
+
+    current_class = await get_pilot_class(user_id)
+    month_key, start_iso, end_iso = month_bounds()
+    class_result = await live_class_score(user_id, current_class, month_key, start_iso, end_iso)
+
+    side_class = next(
+        (name for name, cfg in CLASS_LADDER.items() if cfg.get("side_of") == current_class),
+        None,
+    )
+
+    class_lines = [
+        f"{DIVIDER}",
+        "🏎 <b>ТЕКУЩИЙ КЛАСС</b>",
+        _format_class_progress(class_result),
+    ]
+
+    if side_class:
+        side_result = await live_class_score(user_id, side_class, month_key, start_iso, end_iso)
+        class_lines.append(_format_class_progress(side_result))
+
+    next_class = next_main_class(current_class)
+    if next_class:
+        class_lines.append(f"➡️ Следующий класс: <b>{html.escape(next_class)}</b>")
+    else:
+        class_lines.append("🏁 Максимальный класс")
+
+    # ---------- Достижения турнирной системы v2 ----------
+    unlocked_codes = await get_pilot_achievements(user_id)
+    achievements2_lines = [f"{DIVIDER}", "🎖 <b>ДОСТИЖЕНИЯ</b>"]
+    if unlocked_codes:
+        badge_labels = [
+            f"{emoji} {html.escape(title)}"
+            for code, (emoji, title, _desc, _reward) in CATALOG.items()
+            if code in unlocked_codes
+        ]
+        achievements2_lines.append(f"Открыто: <b>{len(badge_labels)}/{len(CATALOG)}</b>")
+        grouped_labels = [
+            "   ".join(badge_labels[i:i + 2]) for i in range(0, len(badge_labels), 2)
+        ]
+        achievements2_lines.append("\n".join(grouped_labels))
+    else:
+        achievements2_lines.append("Пока нет открытых достижений — начните с первого заезда!")
+
+    return "\n".join([
+        header,
+        identity + club_block,
+        "\n".join(achievements_lines),
+        "\n".join(class_lines),
+        "\n".join(achievements2_lines),
+    ])
 
 
 @router.message(F.text == "👤 Профиль")

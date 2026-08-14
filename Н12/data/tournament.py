@@ -1,0 +1,92 @@
+"""Статическая конфигурация турнирной системы v2 (живой рейтинг по эталону).
+
+Числа (веса/пороги) — рабочие ориентиры под ~20 активных пилотов, взяты из
+концепт-документа клуба. Не сакральные — можно поправить после первого
+проведённого месяца без изменения самой механики.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from pytz import timezone
+
+MIN_STARTS_PER_MONTH = 5
+
+# Доля нижних мест в классе, понижаемых по итогам месяца (кроме входного класса
+# и кроме тех, кто перешёл в этот класс в этом же месяце).
+RELEGATION_BOTTOM_SHARE = 0.15
+
+# Бонус за первый календарный месяц участия в MX-5.
+NEWCOMER_BONUS_POINTS = 15
+
+# (класс, вес в общем зачёте, порог перехода выше; None — финальный класс без порога,
+#  side_of — если это доп.дисциплина, к какому основному классу она привязана)
+CLASS_LADDER: dict[str, dict] = {
+    "MX-5":  {"weight": 1.0, "threshold": 80,  "side_of": None},
+    "BTCC":  {"weight": 1.4, "threshold": 100, "side_of": None},
+    "DTM":   {"weight": 1.7, "threshold": 110, "side_of": "BTCC"},
+    "GT500": {"weight": 2.0, "threshold": 120, "side_of": None},
+    "Touge": {"weight": 1.2, "threshold": 90,  "side_of": "GT500"},
+    "GT3":   {"weight": 2.4, "threshold": None, "side_of": None},
+}
+
+# Порядок основных (не доп.) ступеней лестницы — по нему определяется, что
+# открывается следующим при переходе.
+MAIN_SEQUENCE = ["MX-5", "BTCC", "GT500", "GT3"]
+
+# Доп.дисциплины, сгруппированные по тому основному классу, который они помогают пройти.
+SIDE_DISCIPLINES: dict[str, list[str]] = {}
+for _name, _cfg in CLASS_LADDER.items():
+    if _cfg["side_of"]:
+        SIDE_DISCIPLINES.setdefault(_cfg["side_of"], []).append(_name)
+
+
+def next_main_class(current_class: str) -> str | None:
+    """Следующая основная ступень после current_class (или доп., привязанной к ней)."""
+    main = CLASS_LADDER.get(current_class, {}).get("side_of") or current_class
+    if main not in MAIN_SEQUENCE:
+        return None
+    index = MAIN_SEQUENCE.index(main)
+    if index + 1 >= len(MAIN_SEQUENCE):
+        return None
+    return MAIN_SEQUENCE[index + 1]
+
+
+def classes_gating_promotion(current_class: str) -> list[str]:
+    """Все дисциплины (основная + доп.), любая из которых может открыть следующую ступень."""
+    return [current_class] + SIDE_DISCIPLINES.get(current_class, [])
+
+
+def month_bounds(now: datetime | None = None, moscow_tz_name: str = "Europe/Moscow") -> tuple[str, str, str]:
+    """(ключ_месяца, начало_ISO, начало_следующего_месяца_ISO) по московскому времени.
+
+    Принимает имя таймзоны параметром, а не читает config напрямую, чтобы этот
+    модуль оставался чистой конфигурацией без зависимости от config/БД.
+    """
+    moscow_tz = timezone(moscow_tz_name)
+    now = now or datetime.now(moscow_tz)
+    if now.tzinfo is None:
+        now = moscow_tz.localize(now)
+    now = now.astimezone(moscow_tz)
+
+    month_key = now.strftime("%Y-%m")
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if now.month == 12:
+        end = start.replace(year=now.year + 1, month=1)
+    else:
+        end = start.replace(month=now.month + 1)
+    return month_key, start.isoformat(), end.isoformat()
+
+
+def class_score(personal_best_ms: int, benchmark_ms: int) -> int:
+    """Баллы класса по личному лучшему кругу месяца относительно эталона.
+
+    Точное попадание в эталон = 100. Каждый процент быстрее = +5, медленнее = -5.
+    Диапазон 0–130.
+    """
+    if not benchmark_ms:
+        return 0
+    gap_percent = (personal_best_ms - benchmark_ms) / benchmark_ms * 100
+    score = 100 - 5 * gap_percent
+    return max(0, min(130, round(score)))

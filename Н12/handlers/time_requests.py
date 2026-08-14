@@ -42,6 +42,8 @@ from database.db import (
 
 from handlers.admin import send_notifications
 from keyboards.menu import get_menu
+from services.tournament import check_and_process_promotion
+from services.achievements import check_achievements_after_lap
 from utils.message_style import DIVIDER, header
 from utils.time_parser import time_to_ms
 
@@ -752,6 +754,14 @@ async def admin_approve_time_request(
             lap_time_text=lap_time_text,
             lap_time_ms=lap_time_ms,
         )
+
+        try:
+            await check_and_process_promotion(selected_tid, discipline, callback.bot)
+            await check_achievements_after_lap(
+                selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
+            )
+        except Exception:
+            logger.exception("Ошибка турнирного движка после круга (заявка #%s)", request_id)
 
         new_top = await get_top3()
         new_rows = new_top.get(discipline, [])

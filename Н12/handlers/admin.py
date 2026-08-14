@@ -17,8 +17,11 @@ from aiogram.types import (
 
 from config import ADMIN_IDS, GROUP_ID
 from utils.message_style import DIVIDER, header
+from services.tournament import check_and_process_promotion, month_bounds
+from services.achievements import check_achievements_after_lap
 from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
+from data.tournament import CLASS_LADDER
 from keyboards.menu import get_menu
 from keyboards.disciplines import get_disciplines_keyboard
 from keyboards.tracks import get_tracks_keyboard
@@ -35,7 +38,8 @@ from database.db import (
     clear_all_laps, get_db,
     add_track, remove_track, get_all_disciplines, get_tracks_for_discipline,
     get_disciplines_with_current_results, get_current_discipline_results,
-    get_current_ranked_lap
+    get_current_ranked_lap,
+    get_class_benchmark, get_all_class_benchmarks, set_class_benchmark,
 )
 from services.leaderboard import build_leaderboard
 from services.yclients_service import (
@@ -93,6 +97,10 @@ class TrackAdd(StatesGroup):
 class TrackRemove(StatesGroup):
     waiting_for_discipline = State()
     waiting_for_track_name = State()
+
+class BenchmarkSet(StatesGroup):
+    waiting_for_track = State()
+    waiting_for_time = State()
 
 # ======================== АДМИН-МЕНЮ ========================
 @router.message(F.text == "🛠 Панель администратора")
@@ -461,6 +469,15 @@ async def finish_lap(message: Message, state: FSMContext):
         lap_time_text=lap_text,
         lap_time_ms=lap_ms,
     )
+
+    try:
+        await check_and_process_promotion(selected_tid, discipline, message.bot)
+        await check_achievements_after_lap(
+            selected_tid, discipline, message.bot, track=track, lap_time_ms=lap_ms,
+        )
+    except Exception:
+        logger.exception("Ошибка турнирного движка после круга (admin, lap_id=%s)", lap_id)
+
     new_top = await get_top3()
     new_rows = new_top.get(discipline, [])
 
@@ -1108,6 +1125,127 @@ async def remove_track_delete(callback: CallbackQuery, state: FSMContext):
     await remove_track(discipline, track_name)
     await callback.message.edit_text(f"✅ Трасса «{track_name}» удалена из дисциплины «{discipline}».")
     await state.clear()
+
+# ======================== ЭТАЛОНЫ МЕСЯЦА (ТУРНИР v2) ========================
+def _format_benchmark_ms(ms: int) -> str:
+    minutes = ms // 60000
+    seconds = (ms % 60000) // 1000
+    millis = ms % 1000
+    return f"{minutes}:{seconds:02d}.{millis:03d}"
+
+
+async def _build_benchmarks_screen() -> tuple[str, InlineKeyboardMarkup]:
+    month_key = month_bounds()[0]
+    benchmarks = await get_all_class_benchmarks(month_key)
+
+    lines = []
+    keyboard = []
+    for class_name, cfg in CLASS_LADDER.items():
+        side_of = cfg.get("side_of")
+        role = f"доп. для {side_of}" if side_of else "основной класс"
+        bench = benchmarks.get(class_name)
+        if bench:
+            track = bench.get("track") or "—"
+            time_text = _format_benchmark_ms(bench["benchmark_ms"])
+            status = f"🗺 {track} — ⏱ {time_text}"
+        else:
+            status = "не задан"
+        lines.append(f"🏁 <b>{class_name}</b> ({role})\n{status}")
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"{class_name} {'✅' if bench else '⚙️'}",
+                callback_data=f"benchmark_class:{class_name}"
+            )
+        ])
+
+    text = (
+        f"{header('🎯', 'Эталоны месяца')}\n\n"
+        + "\n\n".join(lines)
+        + "\n\nВыберите класс, чтобы установить или обновить эталон:"
+    )
+    return text, InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+@router.message(F.text == "🎯 Эталоны месяца")
+async def benchmarks_list(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    text, kb = await _build_benchmarks_screen()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("benchmark_class:"))
+async def benchmark_choose_class(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
+    class_name = callback.data.split(":", 1)[1]
+    if class_name not in CLASS_LADDER:
+        await callback.message.answer("❌ Неизвестный класс.")
+        return
+    await state.update_data(benchmark_class=class_name)
+    await state.set_state(BenchmarkSet.waiting_for_track)
+    await callback.message.answer(
+        f"🗺 Введите название трассы для класса «{class_name}»\n"
+        "(или отправьте «-», чтобы оставить без трассы):"
+    )
+
+
+@router.message(BenchmarkSet.waiting_for_track)
+async def benchmark_enter_track(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    track_text = (message.text or "").strip()
+    track = None if track_text in ("", "-") else track_text
+    await state.update_data(benchmark_track=track)
+    await state.set_state(BenchmarkSet.waiting_for_time)
+    await message.answer("⏱ Введите эталонное время круга:\nПример: 01:18.565")
+
+
+@router.message(BenchmarkSet.waiting_for_time)
+async def benchmark_enter_time(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    time_text = (message.text or "").strip()
+    try:
+        benchmark_ms = time_to_ms(time_text)
+    except Exception as e:
+        logger.warning(f"Неверный формат эталонного времени: {time_text} ({e})")
+        await message.answer("❌ Неверный формат времени\nПример: 01:18.565")
+        return
+
+    data = await state.get_data()
+    class_name = data.get("benchmark_class")
+    track = data.get("benchmark_track")
+    if not class_name or class_name not in CLASS_LADDER:
+        await message.answer("❌ Данные установки эталона потеряны. Начните заново через «🎯 Эталоны месяца».")
+        await state.clear()
+        return
+
+    month_key = month_bounds()[0]
+    await set_class_benchmark(
+        class_name=class_name,
+        month_key=month_key,
+        track=track,
+        benchmark_ms=benchmark_ms,
+        admin_id=message.from_user.id,
+    )
+    await state.clear()
+
+    await message.answer(
+        f"{header('✅', 'Эталон обновлён')}\n\n"
+        f"🏁 {class_name}\n"
+        f"🗺 {track or '—'}\n"
+        f"⏱ {time_text}"
+    )
+
+    text, kb = await _build_benchmarks_screen()
+    await message.answer(text, reply_markup=kb)
+
 
 # ======================== УВЕДОМЛЕНИЯ ========================
 async def send_notifications(bot, old_positions, new_positions, medals, discipline,
