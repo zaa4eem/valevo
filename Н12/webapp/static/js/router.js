@@ -115,7 +115,12 @@ function updateChrome() {
     const stack = stacks.get(activeTabId) || [];
     const atRoot = stack.length <= 1;
 
-    document.body.classList.toggle("has-tabbar", true);
+    // has-tabbar mirrors whether the tab bar is actually visible right now
+    // (root of a tab), not just "the app has started" — a pushed screen
+    // hides the tab bar (see .tabbar.hidden) and reserving its height in
+    // #view's padding too would double up with body.has-mainbutton's own
+    // reserved space, since MainButton screens are always pushed screens.
+    document.body.classList.toggle("has-tabbar", atRoot);
     if (tabbarEl) tabbarEl.classList.toggle("hidden", !atRoot);
 
     setBackButtonVisible(!(activeTabId === "profile" && atRoot));
@@ -133,7 +138,11 @@ function renderCurrent() {
     updateChrome();
 
     clear(viewEl);
-    viewEl.scrollTop = 0;
+    // The page itself scrolls (not #view — it grows with its content; only
+    // the tab bar is position:fixed over it), so resetting scroll position
+    // on navigation means scrolling the window, not the (never-scrolling)
+    // container element.
+    window.scrollTo(0, 0);
 
     const renderFn = screens.get(top.screen);
     if (!renderFn) {

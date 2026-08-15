@@ -15,7 +15,12 @@ import { haptic, openLink } from "../telegram.js";
 
 let activeSubTab = "info";
 
-const BTN_RESET = "background:transparent;border:none;appearance:none;-webkit-appearance:none;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;";
+// .info-row only defines border-BOTTOM at the class level (for the
+// divider-list look). Turning it into a <button>/<a> needs an explicit
+// reset of the other three UA-default border sides without touching
+// border-bottom — an inline `border:none` shorthand would win over the
+// class (inline always does) and wipe the divider out too.
+const BTN_RESET = "background:transparent;border-top:none;border-left:none;border-right:none;border-radius:0;appearance:none;-webkit-appearance:none;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%;";
 
 function toTelegramLink(value) {
     const v = String(value || "").trim();

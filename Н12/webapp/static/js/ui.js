@@ -187,6 +187,21 @@ export function confirmDialog({ title, text, confirmText = "Подтвердит
     });
 }
 
+/* ------------------------------------------------------------------ */
+/* Small shared composites                                              */
+/* ------------------------------------------------------------------ */
+
+/** Full-width tappable row: icon + title (+ optional subtitle) + chevron. Fires a light selection haptic on tap. */
+export function optionTile(icon, title, sub, onClick) {
+    return el("button", { class: "option-tile", onClick: () => { haptic("selection"); onClick(); } }, [
+        el("div", {}, [
+            el("div", {}, `${icon} ${title}`),
+            sub ? el("div", { class: "field-hint", style: "margin-top:4px;font-weight:600;" }, sub) : null,
+        ]),
+        el("span", { class: "opt-arrow" }, "›"),
+    ]);
+}
+
 export function openImageSheet(src, alt = "") {
     const body = el("div", { style: "text-align:center;" }, [
         el("img", { src, alt, style: "max-width:100%;border-radius:14px;border:1px solid var(--border);" }),
