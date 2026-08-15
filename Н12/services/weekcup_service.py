@@ -68,6 +68,15 @@ async def _close_weekcup_locked(bot):
     all_results = await get_weekcup_all_results()
     log_path = await save_weekcup_log(top3, all_results)
 
+    # Резервируем закрытие Week CUP (очищаем круги) ДО начисления призов.
+    # Если очистить после начисления, падение процесса между выдачей приза
+    # 2/3 месту и очисткой привело бы к тому, что повторный запуск close_weekcup
+    # (например, повторное нажатие администратором после сбоя) увидел бы тот же
+    # top3 и начислил бонусы ещё раз. Очистка первой гарантирует, что при сбое
+    # максимум "потеряется" остаток начислений (восстановимо вручную по логу),
+    # но никогда не произойдёт задвоение выплаты.
+    deleted_count = await clear_weekcup_laps()
+
     report_lines = [
         "🏆 <b>Week CUP закрыт</b>",
         "",
@@ -164,8 +173,6 @@ async def _close_weekcup_locked(bot):
                     )
                 except Exception as exc:
                     logger.warning("Не удалось написать 3 месту Week CUP %s: %s", telegram_id, exc)
-
-    deleted_count = await clear_weekcup_laps()
 
     report_lines.extend([
         "",

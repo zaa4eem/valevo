@@ -201,6 +201,42 @@ async def _claim_for_admin(booking_id: int, admin_id: int) -> bool:
     return changed
 
 
+async def _reject_if_pending(booking_id: int, admin_id: int) -> bool:
+    """Атомарно отклоняет заявку только если она ещё pending_admin —
+    чтобы отклонение не могло затереть заявку, которую параллельно
+    уже подтверждает другой администратор."""
+    db = await get_db()
+    cur = await db.execute(
+        """
+        UPDATE booking_requests_v2
+        SET status = 'rejected', admin_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'pending_admin'
+        """,
+        (admin_id, booking_id),
+    )
+    changed = cur.rowcount == 1
+    await db.commit()
+    await db.close()
+    return changed
+
+
+async def _clear_yclients_record(item_id: int) -> None:
+    """Сбрасывает ссылку на удалённую в YCLIENTS запись, чтобы позже
+    (повторное подтверждение или отмена) не пытались удалить/использовать
+    уже несуществующую запись."""
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE booking_items_v2
+        SET yclients_record_id = NULL, yclients_status = 'pending'
+        WHERE id = ?
+        """,
+        (item_id,),
+    )
+    await db.commit()
+    await db.close()
+
+
 async def _local_conflicts(
     staff_ids: list[int],
     start_at: datetime,
@@ -1183,9 +1219,14 @@ async def admin_reject_booking(callback: CallbackQuery) -> None:
     if not booking or booking["status"] != "pending_admin":
         await callback.answer("Заявка уже обработана", show_alert=True)
         return
-    await _set_booking_status(booking_id, "rejected", admin_id=callback.from_user.id)
+    if not await _reject_if_pending(booking_id, callback.from_user.id):
+        await callback.answer("Заявка уже обрабатывается или обработана", show_alert=True)
+        return
     await callback.answer("Отклонено")
-    await callback.message.edit_text(_message_html(callback.message) + "\n\n❌ <b>Отклонено</b>")
+    try:
+        await callback.message.edit_text(_message_html(callback.message) + "\n\n❌ <b>Отклонено</b>")
+    except Exception:
+        pass
     try:
         await callback.bot.send_message(
             booking["telegram_id"],
@@ -1243,9 +1284,11 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
 
     if failure:
         rollback_errors = []
-        for _, record_id in created:
+        for item_id, record_id in created:
             ok, delete_error = await _delete_yclients_record(record_id)
-            if not ok:
+            if ok:
+                await _clear_yclients_record(item_id)
+            else:
                 rollback_errors.append(delete_error or str(record_id))
         full_error = failure
         if rollback_errors:
@@ -1257,7 +1300,10 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
     await _set_booking_status(booking_id, "confirmed", admin_id=callback.from_user.id)
     booking = await _fetch_booking(booking_id)
     await callback.answer("Подтверждено")
-    await callback.message.edit_text(_message_html(callback.message) + "\n\n✅ <b>Подтверждено и создано в Сервисе</b>")
+    try:
+        await callback.message.edit_text(_message_html(callback.message) + "\n\n✅ <b>Подтверждено и создано в Сервисе</b>")
+    except Exception:
+        pass
     if booking:
         try:
             await callback.bot.send_message(

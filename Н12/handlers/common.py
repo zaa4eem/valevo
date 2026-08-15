@@ -32,6 +32,12 @@ from utils.message_style import DIVIDER
 router = Router()
 logger = logging.getLogger(__name__)
 
+# asyncio.create_task() не хранит сильную ссылку сама — без неё задача может
+# быть собрана сборщиком мусора до завершения (см. предупреждение в
+# документации asyncio.create_task), и синхронизация с YCLIENTS после
+# регистрации молча не выполнится.
+_background_tasks: set[asyncio.Task] = set()
+
 class Registration(StatesGroup):
     phone = State()
 
@@ -261,13 +267,15 @@ async def registration_phone(message: Message, state: FSMContext):
     )
 
     # В YCLIENTS передаём нормализованный 7XXXXXXXXXX.
-    asyncio.create_task(
+    sync_task = asyncio.create_task(
         _sync_new_pilot_with_yclients(
             telegram_id=message.from_user.id,
             phone_yclients=phone_yclients,
             username=username,
         )
     )
+    _background_tasks.add(sync_task)
+    sync_task.add_done_callback(_background_tasks.discard)
 
 
 # ---------- Таблица лидеров ----------
@@ -393,47 +401,67 @@ async def _build_profile_text(user_id: int, fallback_username: str | None) -> st
             return f"🏎 <b>{html.escape(class_name)}</b>: <b>{score}</b> баллов (нужно {threshold} для перехода)"
         return f"🏎 <b>{html.escape(class_name)}</b>: <b>{score}</b> баллов"
 
-    current_class = await get_pilot_class(user_id)
-    month_key, start_iso, end_iso = month_bounds()
-    class_result = await live_class_score(user_id, current_class, month_key, start_iso, end_iso)
+    # Класс/балл считаются на лету из таблиц laps/class_benchmarks — если у
+    # пилота ещё нет класса, месяц ещё не начался или таблицы пусты, это не
+    # должно ронять весь профиль (единственную команду, которой пользуются
+    # все), поэтому секция деградирует отдельно от остального профиля.
+    try:
+        current_class = await get_pilot_class(user_id)
+        month_key, start_iso, end_iso = month_bounds()
+        class_result = await live_class_score(user_id, current_class, month_key, start_iso, end_iso)
 
-    side_class = next(
-        (name for name, cfg in CLASS_LADDER.items() if cfg.get("side_of") == current_class),
-        None,
-    )
+        side_class = next(
+            (name for name, cfg in CLASS_LADDER.items() if cfg.get("side_of") == current_class),
+            None,
+        )
 
-    class_lines = [
-        f"{DIVIDER}",
-        "🏎 <b>ТЕКУЩИЙ КЛАСС</b>",
-        _format_class_progress(class_result),
-    ]
+        class_lines = [
+            f"{DIVIDER}",
+            "🏎 <b>ТЕКУЩИЙ КЛАСС</b>",
+            _format_class_progress(class_result),
+        ]
 
-    if side_class:
-        side_result = await live_class_score(user_id, side_class, month_key, start_iso, end_iso)
-        class_lines.append(_format_class_progress(side_result))
+        if side_class:
+            side_result = await live_class_score(user_id, side_class, month_key, start_iso, end_iso)
+            class_lines.append(_format_class_progress(side_result))
 
-    next_class = next_main_class(current_class)
-    if next_class:
-        class_lines.append(f"➡️ Следующий класс: <b>{html.escape(next_class)}</b>")
-    else:
-        class_lines.append("🏁 Максимальный класс")
+        next_class = next_main_class(current_class)
+        if next_class:
+            class_lines.append(f"➡️ Следующий класс: <b>{html.escape(next_class)}</b>")
+        else:
+            class_lines.append("🏁 Максимальный класс")
+    except Exception:
+        logger.exception("Не удалось построить блок турнирного класса для %s", user_id)
+        class_lines = [
+            f"{DIVIDER}",
+            "🏎 <b>ТЕКУЩИЙ КЛАСС</b>",
+            "🔄 Данные временно недоступны.",
+        ]
 
     # ---------- Достижения турнирной системы v2 ----------
-    unlocked_codes = await get_pilot_achievements(user_id)
-    achievements2_lines = [f"{DIVIDER}", "🎖 <b>ДОСТИЖЕНИЯ</b>"]
-    if unlocked_codes:
-        badge_labels = [
-            f"{emoji} {html.escape(title)}"
-            for code, (emoji, title, _desc, _reward) in CATALOG.items()
-            if code in unlocked_codes
+    try:
+        unlocked_codes = await get_pilot_achievements(user_id)
+        achievements2_lines = [f"{DIVIDER}", "🎖 <b>ДОСТИЖЕНИЯ</b>"]
+        if unlocked_codes:
+            badge_labels = [
+                f"{emoji} {html.escape(title)}"
+                for code, (emoji, title, _desc, _reward) in CATALOG.items()
+                if code in unlocked_codes
+            ]
+            achievements2_lines.append(f"Открыто: <b>{len(badge_labels)}/{len(CATALOG)}</b>")
+            grouped_labels = [
+                "   ".join(badge_labels[i:i + 2]) for i in range(0, len(badge_labels), 2)
+            ]
+            achievements2_lines.append("\n".join(grouped_labels))
+        else:
+            achievements2_lines.append("Пока нет открытых достижений — начните с первого заезда!")
+    except Exception:
+        logger.exception("Не удалось построить блок достижений v2 для %s", user_id)
+        achievements2_lines = [
+            f"{DIVIDER}",
+            "🎖 <b>ДОСТИЖЕНИЯ</b>",
+            "🔄 Данные временно недоступны.",
         ]
-        achievements2_lines.append(f"Открыто: <b>{len(badge_labels)}/{len(CATALOG)}</b>")
-        grouped_labels = [
-            "   ".join(badge_labels[i:i + 2]) for i in range(0, len(badge_labels), 2)
-        ]
-        achievements2_lines.append("\n".join(grouped_labels))
-    else:
-        achievements2_lines.append("Пока нет открытых достижений — начните с первого заезда!")
 
     return "\n".join([
         header,
@@ -691,6 +719,23 @@ async def support_reply_cancel(callback: CallbackQuery, state: FSMContext):
         return
 
     support_message_id = int(callback.data.rsplit(":", 1)[1])
+
+    # FSMContext здесь скоупится по (админ, чат) — у другого админа, увидевшего
+    # эту же клавиатуру в общем чате поддержки, будет свой (пустой) стейт.
+    # Без явной проверки владельца claim'а он мог бы чужим кликом "Отмена"
+    # снять чужую атомарную блокировку прямо во время набора ответа.
+    support_message = await get_support_message(support_message_id)
+    if (
+        not support_message
+        or support_message.get("status") != "answering"
+        or support_message.get("admin_id") != callback.from_user.id
+    ):
+        await callback.answer(
+            "Эту заявку отменить может только администратор, который начал отвечать",
+            show_alert=True,
+        )
+        return
+
     data = await state.get_data()
     original_chat_id = data.get("original_chat_id")
     original_message_id = data.get("original_message_id")
@@ -738,6 +783,17 @@ async def support_reply_text(message: Message, state: FSMContext):
     support_message = await get_support_message(support_message_id) if support_message_id else None
     if not support_message:
         await show("❌ Заявка не найдена — возможно, её уже удалили.")
+        return
+
+    # Атомарный claim гарантирует, что начать отвечать может только один админ,
+    # но само отправление ответа должно ещё раз проверить, что claim не был
+    # отменён/переоформлен за то время, пока этот админ печатал текст —
+    # иначе клиент может получить два разных ответа от двух админов.
+    if (
+        support_message.get("status") != "answering"
+        or support_message.get("admin_id") != message.from_user.id
+    ):
+        await show("❌ Эта заявка уже обработана или ответ был отменён другим администратором.")
         return
 
     reply_text = message.text or ""

@@ -728,7 +728,13 @@ async def admin_approve_time_request(
         )
         return
 
-    await callback.answer("Обрабатываю заявку...")
+    try:
+        await callback.answer("Обрабатываю заявку...")
+    except Exception:
+        logger.warning(
+            "Не удалось ответить на callback заявки #%s (early answer)",
+            request_id,
+        )
 
     lap_id = None
     rating_changes: dict[int, int] = {}
@@ -796,10 +802,21 @@ async def admin_approve_time_request(
             # Сам результат уже успешно записан,
             # поэтому откатывать его из-за Telegram-уведомления нельзя.
 
-        await callback.answer(
-            "Время зафиксировано",
-            show_alert=False
-        )
+        # Callback уже был отвечен выше ("Обрабатываю заявку...") — Telegram
+        # позволяет ответить на callback только один раз, поэтому повторный
+        # answer здесь не должен приводить к откату уже выполненной заявки
+        # (удалению круга и возврату в pending), если он не удастся.
+        try:
+            await callback.answer(
+                "Время зафиксировано",
+                show_alert=False
+            )
+        except Exception:
+            logger.warning(
+                "Не удалось повторно ответить на callback заявки #%s "
+                "после успешного принятия",
+                request_id,
+            )
 
     except Exception as exc:
         logger.exception(
@@ -932,9 +949,16 @@ async def admin_reject_time_request(
                 exc,
             )
 
-        await callback.answer(
-            "Заявка отклонена"
-        )
+        try:
+            await callback.answer(
+                "Заявка отклонена"
+            )
+        except Exception:
+            logger.warning(
+                "Не удалось ответить на callback заявки #%s "
+                "после успешного отклонения",
+                request_id,
+            )
 
     except Exception as exc:
         logger.exception(

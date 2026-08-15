@@ -63,6 +63,16 @@ def month_bounds(now: datetime | None = None, moscow_tz_name: str = "Europe/Mosc
 
     Принимает имя таймзоны параметром, а не читает config напрямую, чтобы этот
     модуль оставался чистой конфигурацией без зависимости от config/БД.
+
+    Границы отдаются как naive UTC "YYYY-MM-DD HH:MM:SS" — ровно в том виде,
+    в котором SQLite хранит laps.created_at (DEFAULT CURRENT_TIMESTAMP, тоже
+    naive UTC). Раньше здесь отдавался ISO с московским оффсетом
+    ("...T00:00:00+03:00") — все вызывающие сравнивают его строкой прямо в SQL
+    (created_at >= ? AND created_at < ?), а строковое сравнение "2026-08-01
+    05:00:00" (created_at) и "2026-08-01T00:00:00+03:00" (граница) расходится
+    на первом же несовпадающем символе — разделителе ' ' против 'T' — раньше,
+    чем на значащих цифрах времени. Из-за этого круги в первые/последние часы
+    суток на границе месяца тихо попадали не в тот календарный месяц.
     """
     moscow_tz = timezone(moscow_tz_name)
     now = now or datetime.now(moscow_tz)
@@ -76,7 +86,12 @@ def month_bounds(now: datetime | None = None, moscow_tz_name: str = "Europe/Mosc
         end = start.replace(year=now.year + 1, month=1)
     else:
         end = start.replace(month=now.month + 1)
-    return month_key, start.isoformat(), end.isoformat()
+
+    utc = timezone("UTC")
+    fmt = "%Y-%m-%d %H:%M:%S"
+    start_utc = start.astimezone(utc).strftime(fmt)
+    end_utc = end.astimezone(utc).strftime(fmt)
+    return month_key, start_utc, end_utc
 
 
 def class_score(personal_best_ms: int, benchmark_ms: int) -> int:

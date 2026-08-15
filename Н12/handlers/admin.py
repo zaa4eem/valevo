@@ -133,7 +133,10 @@ async def clear_table_cancel(message: Message, state: FSMContext):
 
 @router.message(ClearTableConfirm.wait)
 async def clear_table_confirm(message: Message, state: FSMContext):
-    if message.text.strip() == "Я уверен что я делаю":
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    if (message.text or "").strip() == "Я уверен что я делаю":
         await clear_all_laps()
         await message.answer("✅ Таблица рекордов полностью очищена. Рейтинг пилотов сохранён.", reply_markup=admin_menu)
     else:
@@ -167,6 +170,9 @@ async def broadcast_start(message: Message, state: FSMContext):
 
 @router.message(Broadcast.waiting_for_text)
 async def broadcast_text(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
 
     if message.text == "❌ Отменить":
         await state.clear()
@@ -216,6 +222,9 @@ async def broadcast_text(message: Message, state: FSMContext):
 
 @router.message(Broadcast.confirm, F.text == "✅ Отправить")
 async def broadcast_send(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
 
     data = await state.get_data()
 
@@ -290,7 +299,11 @@ async def save_new_number(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     data = await state.get_data()
-    tid = data["change_number_user"]
+    tid = data.get("change_number_user")
+    if tid is None:
+        await message.answer("❌ Данные смены номера потеряны. Откройте профиль пилота заново.")
+        await state.clear()
+        return
     try:
         num = int(message.text)
     except (TypeError, ValueError):
@@ -369,6 +382,9 @@ async def addlap_start(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("discipline_"))
 async def choose_discipline(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     await callback.answer()
     discipline = callback.data.split("_", 1)[1]
     await state.update_data(discipline=discipline)
@@ -394,6 +410,9 @@ async def choose_discipline(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("track_"))
 async def choose_track(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     await callback.answer()
     track = callback.data.split("_", 1)[1]
     await state.update_data(track=track)
@@ -410,6 +429,9 @@ async def choose_track(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AddLap.pilot_number, F.text.regexp(r'^\d+$'))
 async def enter_pilot_number(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
     number = int(message.text.strip())
     pilot = await get_pilot_by_number(number)
     if not pilot:
@@ -429,8 +451,11 @@ async def pilot_number_invalid(message: Message):
 
 @router.message(AddLap.lap_time)
 async def finish_lap(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
     data = await state.get_data()
-    lap_text = message.text.strip()
+    lap_text = (message.text or "").strip()
     asyncio.create_task(delete_later(message, 1))
 
     discipline = data.get("discipline")
@@ -513,6 +538,9 @@ async def finish_lap(message: Message, state: FSMContext):
 # ======================== ОТМЕНА УСТАНОВКИ ВРЕМЕНИ ========================
 @router.callback_query(F.data.startswith("undo_lap:"))
 async def undo_last_lap(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     await callback.answer()
     payload = callback.data.split(":", 1)[1]
     try:
@@ -683,7 +711,7 @@ async def balance_amount(message: Message, state: FSMContext):
         await state.clear()
         return
     try:
-        amount = float(message.text.strip().replace(",", "."))
+        amount = float((message.text or "").strip().replace(",", "."))
         if amount <= 0:
             raise ValueError
     except ValueError:
@@ -691,8 +719,12 @@ async def balance_amount(message: Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    tid = data["balance_tid"]
-    action = data["balance_action"]
+    tid = data.get("balance_tid")
+    action = data.get("balance_action")
+    if tid is None or action is None:
+        await message.answer("❌ Данные операции потеряны. Откройте профиль пилота заново.")
+        await state.clear()
+        return
 
     pilot = await get_pilot_by_telegram_id(tid)
     if not pilot:
@@ -1044,6 +1076,9 @@ async def add_track_start(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("addtrack_"), TrackAdd.waiting_for_discipline)
 async def add_track_choose_discipline(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     discipline = callback.data.split("_", 1)[1]
     await state.update_data(discipline=discipline)
     await callback.message.edit_text(f"Введите название трассы для дисциплины «{discipline}»:")
@@ -1054,8 +1089,15 @@ MAX_TRACK_NAME_LENGTH = 24
 
 @router.message(TrackAdd.waiting_for_track_name)
 async def add_track_save(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
     data = await state.get_data()
-    discipline = data["discipline"]
+    discipline = data.get("discipline")
+    if not discipline:
+        await message.answer("❌ Данные добавления трассы потеряны. Начните заново через «➕ Добавить трассу».")
+        await state.clear()
+        return
     track_name = (message.text or "").strip()
     if not track_name:
         await message.answer("❌ Введите название трассы текстом.")
@@ -1086,6 +1128,9 @@ async def remove_track_start(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("removetrack_"), TrackRemove.waiting_for_discipline)
 async def remove_track_choose_discipline(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     discipline = callback.data.split("_", 1)[1]
     tracks = await get_tracks_for_discipline(discipline)
     if not tracks:
@@ -1098,6 +1143,9 @@ async def remove_track_choose_discipline(callback: CallbackQuery, state: FSMCont
 
 @router.callback_query(F.data.startswith("deltrack_"), TrackRemove.waiting_for_track_name)
 async def remove_track_delete(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
     _, discipline, track_name = callback.data.split("_", 2)
     await remove_track(discipline, track_name)
     await callback.message.edit_text(f"✅ Трасса «{track_name}» удалена из дисциплины «{discipline}».")

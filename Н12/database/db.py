@@ -463,23 +463,29 @@ async def update_pilot_number(telegram_id, number):
         await db.close()
 
 async def update_display_name(telegram_id, new_display_name):
-    """Возвращает True, если ник обновлён, иначе False (если ник занят)."""
+    """Возвращает True, если ник обновлён, иначе False (если ник занят).
+
+    Может выбросить sqlite3.IntegrityError, если такой же ник заняли параллельно
+    между проверкой ниже и этим UPDATE (уникальный индекс idx_pilots_display_name) —
+    вызывающий код должен обработать это как "ник уже занят".
+    """
     db = await get_db()
-    # Проверяем, не занято ли такое же имя другим пилотом (игнорируя себя)
-    cursor = await db.execute(
-        "SELECT telegram_id FROM pilots WHERE display_name = ? AND telegram_id != ?",
-        (new_display_name, telegram_id)
-    )
-    if await cursor.fetchone():
+    try:
+        # Проверяем, не занято ли такое же имя другим пилотом (игнорируя себя)
+        cursor = await db.execute(
+            "SELECT telegram_id FROM pilots WHERE display_name = ? AND telegram_id != ?",
+            (new_display_name, telegram_id)
+        )
+        if await cursor.fetchone():
+            return False
+        await db.execute(
+            "UPDATE pilots SET display_name = ? WHERE telegram_id = ?",
+            (new_display_name, telegram_id)
+        )
+        await db.commit()
+        return True
+    finally:
         await db.close()
-        return False
-    await db.execute(
-        "UPDATE pilots SET display_name = ? WHERE telegram_id = ?",
-        (new_display_name, telegram_id)
-    )
-    await db.commit()
-    await db.close()
-    return True
 
 async def sync_pilot_menu_version(telegram_id: int, target_version: int) -> bool:
     """Обновляет сохранённую версию reply-меню пилота, если она отстала от текущей.

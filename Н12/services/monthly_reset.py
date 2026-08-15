@@ -105,7 +105,27 @@ async def perform_monthly_reset(bot):
 
         existing_award = await get_season_award(season_key, tid, "podium")
         if existing_award is not None:
-            if existing_award.get("yclients_status") != "pending":
+            award_status = existing_award.get("yclients_status")
+            if award_status == "issuing":
+                # Прошлый запуск успел уйти в YCLIENTS-вызов, но не дошёл до записи
+                # результата (падение между "запрос отправлен" и "статус сохранён").
+                # Мы не знаем, прошло ли списание — повторный вызов рискует
+                # начислить бонус второй раз за то же место. Не трогаем деньги
+                # автоматически, зовём админа разобраться руками.
+                logger.warning(
+                    "Пилот %s: статус YCLIENTS-выплаты за %s остался 'issuing' — "
+                    "не повторяем автоматически, требуется ручная проверка", tid, season_key,
+                )
+                await _notify_admin(
+                    bot,
+                    "⚠️ <b>Неизвестный статус выплаты Valevo Bonus</b>\n\n"
+                    f"Пилот: {tid}\nСезон: {season_key}\n\n"
+                    "Предыдущий запуск закрытия месяца упал ровно между вызовом YCLIENTS "
+                    "и сохранением результата — неизвестно, прошло ли списание. "
+                    "Авто-выплата приостановлена, проверьте баланс Valevo Bonus вручную.",
+                )
+                continue
+            if award_status != "pending":
                 logger.info("Пилот %s уже получал podium-награду за месяц %s", tid, season_key)
                 continue
             # Рейтинг и бонусный кошелёк уже были применены атомарно ранее (claim прошёл),
@@ -133,14 +153,25 @@ async def perform_monthly_reset(bot):
                 # Кто-то другой (параллельный запуск) уже застолбил эту награду.
                 continue
 
+        # Отмечаем "issuing" непосредственно перед внешним вызовом: если процесс
+        # упадёт после того, как YCLIENTS реально списал бонус, но до того, как
+        # мы успеем сохранить результат ниже, статус останется 'issuing', а не
+        # 'pending' — и следующий запуск не станет слепо повторять списание
+        # (см. ветку award_status == "issuing" выше).
+        try:
+            await update_season_award_yclients(season_key, tid, "podium", "issuing", bonus_rub=bonus_rub)
+        except Exception:
+            logger.exception("Не удалось пометить статус 'issuing' для %s — пропускаем на этот запуск", tid)
+            continue
+
         try:
             yclients_result = await _issue_yclients_bonus_for_pilot(
                 {"telegram_id": tid, "yclients_client_id": yclients_client_id}, bonus_hours, season_key, index,
             )
         except Exception:
-            # Локальная награда (рейтинг/кошелёк) уже зафиксирована атомарно выше — эта
-            # ошибка не должна прерывать обработку остальных пилотов. Статус останется
-            # 'pending' и будет обработан повторно при следующем запуске.
+            # Неизвестно, успел ли запрос дойти до YCLIENTS перед исключением —
+            # статус уже сохранён как 'issuing' и следующий запуск потребует
+            # ручной проверки, а не слепого повтора.
             logger.exception("Не удалось выдать Valevo Bonus через YCLIENTS для %s", tid)
             continue
         y_status = yclients_result.get("status", "unknown")

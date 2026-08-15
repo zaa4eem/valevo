@@ -10,6 +10,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_FADE_DELAY = 4.0
 
+# asyncio.create_task() не хранит сильную ссылку на Task — если её нигде не
+# держать, сборщик мусора может уничтожить ещё не завершённую задачу
+# (см. предупреждение в документации asyncio.create_task). Для мидлвари,
+# висящей на КАЖДОМ сообщении бота, это означало бы, что часть отложенных
+# удалений просто никогда не выполнится — молча и без ошибки в логах.
+_background_tasks: set[asyncio.Task] = set()
+
 
 async def fade_delete(bot: Bot, chat_id: int, message_id: int, delay: float = DEFAULT_FADE_DELAY) -> None:
     """Удаляет сообщение не мгновенно, а через паузу — чтобы это не выглядело
@@ -25,7 +32,9 @@ async def fade_delete(bot: Bot, chat_id: int, message_id: int, delay: float = DE
 
 def schedule_fade_delete(bot: Bot, chat_id: int, message_id: int, delay: float = DEFAULT_FADE_DELAY) -> None:
     """Фоновая обёртка над fade_delete — не блокирует текущий хендлер."""
-    asyncio.create_task(fade_delete(bot, chat_id, message_id, delay))
+    task = asyncio.create_task(fade_delete(bot, chat_id, message_id, delay))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 class ChatHygieneMiddleware(BaseMiddleware):
