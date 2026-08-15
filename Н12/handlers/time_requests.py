@@ -756,8 +756,9 @@ async def admin_approve_time_request(
             lap_time_ms=lap_time_ms,
         )
 
+        promoted_to = None
         try:
-            await check_and_process_promotion(selected_tid, discipline, callback.bot)
+            promoted_to = await check_and_process_promotion(selected_tid, discipline, callback.bot)
             await check_achievements_after_lap(
                 selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
             )
@@ -791,6 +792,7 @@ async def admin_approve_time_request(
                 selected_tid=selected_tid,
                 track=track,
                 group_id=GROUP_ID,
+                promoted_to=promoted_to,
             )
         except Exception as exc:
             logger.exception(

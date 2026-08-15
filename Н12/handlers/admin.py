@@ -510,8 +510,9 @@ async def finish_lap(message: Message, state: FSMContext):
         lap_time_ms=lap_ms,
     )
 
+    promoted_to = None
     try:
-        await check_and_process_promotion(selected_tid, discipline, message.bot)
+        promoted_to = await check_and_process_promotion(selected_tid, discipline, message.bot)
         await check_achievements_after_lap(
             selected_tid, discipline, message.bot, track=track, lap_time_ms=lap_ms,
         )
@@ -549,6 +550,7 @@ async def finish_lap(message: Message, state: FSMContext):
         selected_tid=selected_tid,
         track=track,
         group_id=GROUP_ID,
+        promoted_to=promoted_to,
     ))
     await state.clear()
 
@@ -1311,15 +1313,25 @@ async def benchmark_enter_time(message: Message, state: FSMContext):
 
 
 # ======================== УВЕДОМЛЕНИЯ ========================
-async def _tournament_progress_line(telegram_id: int, discipline: str) -> str:
+async def _tournament_progress_line(telegram_id: int, discipline: str, promoted_to: str | None = None) -> str:
     """Строка о зачёте в турнире v2 для уведомления пилоту после засчитанного круга.
 
     Раньше после каждого круга просто писали "время зафиксировано" без единого
     слова о том, идёт ли это в зачёт (нужен минимум стартов в классе за месяц —
     свой на каждой ступени лестницы — + заданный клубом эталон) — человеку
-    неоткуда было понять, почему в общем зачёте до сих пор нет баллов."""
+    неоткуда было понять, почему в общем зачёте до сих пор нет баллов.
+
+    promoted_to передаётся, если check_and_process_promotion только что перевёл
+    пилота в новый класс по этому же кругу — без этого пилот получал два
+    сообщения подряд: "НОВЫЙ КЛАСС ОТКРЫТ! Переходите в BTCC" и following за
+    ним "В зачёте турнира: 115 баллов (порог перехода: 80)" ПРО СТАРЫЙ класс
+    (MX-5), что выглядело как противоречие — будто переход ещё не состоялся."""
     if discipline not in CLASS_LADDER:
         return ""
+    if promoted_to:
+        return (
+            f"\n\n✅ Класс <b>{discipline}</b> пройден — вы уже переведены в <b>{promoted_to}</b>."
+        )
     try:
         month_key, start_iso, end_iso = month_bounds()
         result = await live_class_score(telegram_id, discipline, month_key, start_iso, end_iso)
@@ -1339,7 +1351,7 @@ async def _tournament_progress_line(telegram_id: int, discipline: str) -> str:
     )
 
 
-async def send_notifications(bot, discipline, new_username, lap_text, selected_tid, track, group_id):
+async def send_notifications(bot, discipline, new_username, lap_text, selected_tid, track, group_id, promoted_to=None):
     """Уведомляет пилота о зафиксированном времени и публикует результат в группу.
 
     Раньше здесь же сравнивались топ-3 лучшего времени за всё время и
@@ -1351,7 +1363,7 @@ async def send_notifications(bot, discipline, new_username, lap_text, selected_t
             f"🏁 Администратор зафиксировал ваше новое время:\n"
             f"{discipline} | {track} | {lap_text}"
         )
-        notify_text += await _tournament_progress_line(selected_tid, discipline)
+        notify_text += await _tournament_progress_line(selected_tid, discipline, promoted_to)
         try:
             await bot.send_message(selected_tid, notify_text)
         except Exception as e:
