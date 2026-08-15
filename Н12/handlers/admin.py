@@ -17,7 +17,7 @@ from aiogram.types import (
 
 from config import ADMIN_IDS, GROUP_ID
 from utils.message_style import DIVIDER, header
-from services.tournament import check_and_process_promotion, month_bounds
+from services.tournament import check_and_process_promotion, month_bounds, live_class_score
 from services.achievements import check_achievements_after_lap
 from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
@@ -1196,7 +1196,12 @@ async def benchmarks_list(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.clear()
-    text, kb = await _build_benchmarks_screen()
+    try:
+        text, kb = await _build_benchmarks_screen()
+    except Exception:
+        logger.exception("Не удалось построить экран эталонов месяца")
+        await message.answer("❌ Не удалось загрузить эталоны месяца. Попробуйте ещё раз.")
+        return
     await message.answer(text, reply_markup=kb)
 
 
@@ -1252,13 +1257,29 @@ async def benchmark_enter_time(message: Message, state: FSMContext):
         return
 
     month_key = month_bounds()[0]
-    await set_class_benchmark(
-        class_name=class_name,
-        month_key=month_key,
-        track=track,
-        benchmark_ms=benchmark_ms,
-        admin_id=message.from_user.id,
-    )
+    try:
+        await set_class_benchmark(
+            class_name=class_name,
+            month_key=month_key,
+            track=track,
+            benchmark_ms=benchmark_ms,
+            admin_id=message.from_user.id,
+        )
+    except Exception:
+        # Раньше здесь не было try/except: любая ошибка записи в БД (например,
+        # блокировка файла на этапе WAL-checkpoint) обрывала хендлер до ответа —
+        # админ вводил время и не получал вообще никакой реакции бота, будто
+        # сообщение потерялось.
+        logger.exception(
+            "Не удалось сохранить эталон класса %s за %s", class_name, month_key,
+        )
+        await message.answer(
+            "❌ Не удалось сохранить эталон — сбой при записи в базу.\n"
+            "Попробуйте ещё раз через «🎯 Эталоны месяца»."
+        )
+        await state.clear()
+        return
+
     await state.clear()
 
     await message.answer(
@@ -1273,6 +1294,34 @@ async def benchmark_enter_time(message: Message, state: FSMContext):
 
 
 # ======================== УВЕДОМЛЕНИЯ ========================
+async def _tournament_progress_line(telegram_id: int, discipline: str) -> str:
+    """Строка о зачёте в турнире v2 для уведомления пилоту после засчитанного круга.
+
+    Раньше после каждого круга просто писали "время зафиксировано" без единого
+    слова о том, идёт ли это в зачёт (нужно 5 стартов + заданный клубом эталон
+    в этом месяце) — человеку неоткуда было понять, почему в общем зачёте до
+    сих пор нет баллов после первого же заезда."""
+    if discipline not in CLASS_LADDER:
+        return ""
+    try:
+        month_key, start_iso, end_iso = month_bounds()
+        result = await live_class_score(telegram_id, discipline, month_key, start_iso, end_iso)
+    except Exception:
+        logger.exception("Не удалось посчитать прогресс турнира для %s/%s", telegram_id, discipline)
+        return ""
+
+    if result["benchmark"] is None:
+        return "\n\n⚠️ На этот месяц эталон для класса пока не задан — в зачёт турнира круг не идёт, но сохранён."
+    if result["qualifies"] and result["score"] is not None:
+        threshold = CLASS_LADDER[discipline].get("threshold")
+        extra = f" (порог перехода: {threshold})" if threshold is not None else ""
+        return f"\n\n🏆 В зачёте турнира: <b>{result['score']}</b> баллов{extra}."
+    return (
+        f"\n\n📊 Зачёт турнира: {result['starts']}/{result['min_starts']} стартов в этом месяце. "
+        "Как только наберётся минимум — круг встанет в общий зачёт."
+    )
+
+
 async def send_notifications(bot, discipline, new_username, lap_text, selected_tid, track, group_id):
     """Уведомляет пилота о зафиксированном времени и публикует результат в группу.
 
@@ -1285,6 +1334,7 @@ async def send_notifications(bot, discipline, new_username, lap_text, selected_t
             f"🏁 Администратор зафиксировал ваше новое время:\n"
             f"{discipline} | {track} | {lap_text}"
         )
+        notify_text += await _tournament_progress_line(selected_tid, discipline)
         try:
             await bot.send_message(selected_tid, notify_text)
         except Exception as e:
