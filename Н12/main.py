@@ -6,13 +6,13 @@ from datetime import datetime
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import ErrorEvent
+from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
 from handlers import booking, time_requests
 
-from config import ADMIN_IDS, BOT_TOKEN, MOSCOW_TZ, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
+from config import ADMIN_IDS, BOT_TOKEN, MOSCOW_TZ, WEBAPP_BASE_URL, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
 from database.db import init_db
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
@@ -74,6 +74,24 @@ def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
             except Exception:
                 logger.warning("Не удалось уведомить админа %s об ошибке", admin_id)
         return True
+
+
+async def _configure_menu_button(bot: Bot) -> None:
+    """Делает мини-приложение основным входом в бота: кнопка меню (рядом со
+    строкой ввода) открывает Telegram Mini App вместо списка команд."""
+    if not WEBAPP_BASE_URL:
+        logger.warning(
+            "WEBAPP_BASE_URL не задан — кнопка мини-приложения не настроена, "
+            "бот работает в режиме обычного чата"
+        )
+        return
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="VALEVO", web_app=WebAppInfo(url=WEBAPP_BASE_URL))
+        )
+        logger.info("Кнопка меню настроена на мини-приложение: %s", WEBAPP_BASE_URL)
+    except Exception:
+        logger.exception("Не удалось настроить кнопку мини-приложения")
 
 
 async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[asyncio.Task]:
@@ -170,6 +188,7 @@ async def main() -> None:
     _register_middlewares(dp)
     _register_routers(dp)
     _register_error_handler(dp, bot)
+    await _configure_menu_button(bot)
     background_tasks = await _run_startup_jobs(bot, scheduler)
     background_tasks.append(asyncio.create_task(process_completed_bookings(bot)))
 

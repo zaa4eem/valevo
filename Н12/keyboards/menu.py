@@ -1,14 +1,28 @@
 from aiogram.types import (
     ReplyKeyboardMarkup,
-    KeyboardButton
+    KeyboardButton,
+    WebAppInfo,
 )
 
-from config import ADMIN_IDS
+from config import ADMIN_IDS, WEBAPP_BASE_URL
 
 
 def get_menu(user_id):
 
-    keyboard = [
+    keyboard = []
+
+    # Кнопка мини-приложения работает только в личных чатах и только с
+    # настоящим https-адресом — без WEBAPP_BASE_URL Telegram отклонит всю
+    # клавиатуру целиком, поэтому кнопку добавляем только если адрес задан.
+    if WEBAPP_BASE_URL:
+        keyboard.append([
+            KeyboardButton(
+                text="🚀 Открыть VALEVO App",
+                web_app=WebAppInfo(url=WEBAPP_BASE_URL),
+            )
+        ])
+
+    keyboard += [
         [
             KeyboardButton(text="🎟 Забронировать"),
             KeyboardButton(text="👤 Профиль")

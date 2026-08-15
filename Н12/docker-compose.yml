@@ -10,3 +10,22 @@ services:
       - ./logs:/app/logs
       - ./backups:/app/backups
     stop_grace_period: 30s
+
+  valevo-webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    container_name: valevo-webapp
+    restart: unless-stopped
+    env_file:
+      - .env
+    # Тот же bind-mount valevo.db, что и у valevo-bot — WAL-режим SQLite
+    # поддерживает несколько процессов на одном файле, но файл должен быть
+    # общим на хосте (не отдельным volume на контейнер).
+    volumes:
+      - ./valevo.db:/app/valevo.db
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    ports:
+      - "127.0.0.1:8020:8020"
+    stop_grace_period: 30s

@@ -1,4 +1,4 @@
-import re, logging
+import logging
 import asyncio
 import html
 from aiogram import Router, F
@@ -9,7 +9,7 @@ from aiogram.fsm.context import FSMContext
 
 from config import SUPPORT_CHAT_ID
 from database.db import (
-    create_pilot, get_pilot_by_telegram_id, get_pilot_history_stats, update_display_name,
+    create_pilot, get_pilot_by_telegram_id, update_display_name,
     get_top10_pilots
 )
 from services.leaderboard import build_leaderboard
@@ -17,6 +17,8 @@ from keyboards.menu import get_menu
 from keyboards.profile_menu import profile_menu
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.yclients_auto import auto_sync_pilot_with_yclients
+from services.profile_service import format_phone_display, get_profile_data
+from services.nickname import sanitize_pilot_name
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -74,56 +76,14 @@ def format_hours(hours: float | int | None) -> str:
     return format_minutes(total_minutes)
 
 
-def format_phone_display(phone: str | None) -> str:
-    """Красиво форматирует номер телефона: 89991234567 -> +7 999 123-45-67."""
-    digits = re.sub(r"\D", "", str(phone or ""))
-    if len(digits) == 11 and digits[0] in "78":
-        return f"+7 {digits[1:4]} {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
-    return str(phone) if phone else "—"
-
-
-# ---------- Ранги пилота ----------
-# (порог рейтинга, эмодзи, название ранга)
-PILOT_RANKS: list[tuple[int, str, str]] = [
-    (0, "🔰", "Новичок"),
-    (20, "🏎", "Гонщик"),
-    (50, "🥉", "Профи"),
-    (100, "🥈", "Ас трассы"),
-    (200, "🥇", "Чемпион"),
-    (400, "💎", "Легенда VALEVO"),
-]
-
-
-def pilot_rank_info(rating: int | float | None) -> tuple[tuple[int, str, str], tuple[int, str, str] | None]:
-    """Возвращает (текущий_ранг, следующий_ранг) по рейтингу пилота."""
-    rating_value = max(0, int(rating or 0))
-    current = PILOT_RANKS[0]
-    next_rank: tuple[int, str, str] | None = None
-    for index, rank in enumerate(PILOT_RANKS):
-        if rating_value >= rank[0]:
-            current = rank
-            next_rank = PILOT_RANKS[index + 1] if index + 1 < len(PILOT_RANKS) else None
-        else:
-            break
-    return current, next_rank
-
-
-def pilot_rank_progress_bar(rating: int | float | None, width: int = 10) -> str:
-    """Прогресс-бар до следующего ранга: ▰▰▰▰▰▱▱▱▱▱."""
-    rating_value = max(0, int(rating or 0))
-    current, next_rank = pilot_rank_info(rating_value)
-
-    if next_rank is None:
+def _pilot_rank_progress_bar_text(rank: dict, width: int = 10) -> str:
+    """Текстовый прогресс-бар до следующего ранга: ▰▰▰▰▰▱▱▱▱▱."""
+    if rank.get("next_title") is None:
         return "▰" * width + " (макс. уровень)"
-
-    span = next_rank[0] - current[0]
-    done = rating_value - current[0]
-    fraction = max(0.0, min(1.0, done / span)) if span > 0 else 1.0
-    filled = round(fraction * width)
-
+    filled = round(rank["fraction"] * width)
     bar = "▰" * filled + "▱" * (width - filled)
-    points_left = next_rank[0] - rating_value
-    return f"{bar}  ещё {points_left} до «{next_rank[1]} {next_rank[2]}»"
+    return f"{bar}  ещё {rank['points_left']} до «{rank['next_emoji']} {rank['next_title']}»"
+
 
 def _registration_phone_keyboard() -> ReplyKeyboardMarkup:
     """Кнопка Telegram-контакта; ручной ввод номера тоже остаётся доступен."""
@@ -310,60 +270,45 @@ async def leaderboard_button(message: Message):
         await message.answer("❌ Не удалось загрузить таблицу лидеров.")
 
 # ---------- Профиль ----------
-from services.yclients_service import get_client, get_client_total_hours, get_valevo_bonus_balance
-
 DIVIDER = "━━━━━━━━━━━━━━━━━━"
 
 
 async def _build_profile_text(user_id: int, fallback_username: str | None) -> str | None:
-    pilot = await get_pilot_by_telegram_id(user_id)
-    if not pilot:
+    data = await get_profile_data(user_id, fallback_username)
+    if data is None:
         return None
 
-    username = pilot.get("username") or fallback_username or "—"
-    display_name = pilot.get("display_name") or f"@{username}"
-    pilot_number = pilot.get("pilot_number")
-    rating = pilot.get("rating") or 0
-
-    history = await get_pilot_history_stats(telegram_id=user_id, username=username)
-
-    rank, _ = pilot_rank_info(rating)
-    rank_emoji, rank_title = rank[1], rank[2]
+    rank = data["rank"]
+    history = data["history"]
 
     header = (
-        f"{rank_emoji} <b>{html.escape(display_name)}</b>"
-        + (f"  <code>#{pilot_number}</code>" if pilot_number else "")
-        + f"\n{rank_title} · рейтинг <b>{rating}</b>\n"
-        f"{pilot_rank_progress_bar(rating)}"
+        f"{rank['current_emoji']} <b>{html.escape(data['display_name'])}</b>"
+        + (f"  <code>#{data['pilot_number']}</code>" if data["pilot_number"] else "")
+        + f"\n{rank['current_title']} · рейтинг <b>{data['rating']}</b>\n"
+        f"{_pilot_rank_progress_bar_text(rank)}"
     )
 
     identity = (
         f"{DIVIDER}\n"
-        f"🆔 Username: @{html.escape(username)}\n"
-        f"📱 Телефон: <code>{format_phone_display(pilot.get('phone'))}</code>"
+        f"🆔 Username: @{html.escape(data['username'] or '—')}\n"
+        f"📱 Телефон: <code>{html.escape(data['phone_display'])}</code>"
     )
 
-    # Ошибка YCLIENTS больше не скрывает локальную историю и достижения.
-    if pilot.get("yclients_client_id"):
-        try:
-            yclients_data = await get_client(pilot["yclients_client_id"])
-            total_hours = await get_client_total_hours(pilot["yclients_client_id"])
-            bonus_balance = await get_valevo_bonus_balance(pilot["yclients_client_id"])
-            visits = yclients_data.get("visits", 0) if isinstance(yclients_data, dict) else 0
-            club_block = (
-                f"\n\n{DIVIDER}\n"
-                "🏟 <b>КЛУБ</b>\n"
-                f"📅 Визитов: <b>{visits}</b>\n"
-                f"⏱ Время в клубе: <b>{format_hours(total_hours)}</b>\n"
-                f"💎 Бонусный счёт: <b>{bonus_balance:.2f} ₽</b>"
-            )
-        except Exception as exc:
-            logger.warning("YCLIENTS profile data unavailable for %s: %s", user_id, exc)
-            club_block = (
-                f"\n\n{DIVIDER}\n"
-                "🏟 <b>КЛУБ</b>\n"
-                "🔄 Клубные данные временно недоступны."
-            )
+    club = data["club"]
+    if club["linked"] and club.get("available"):
+        club_block = (
+            f"\n\n{DIVIDER}\n"
+            "🏟 <b>КЛУБ</b>\n"
+            f"📅 Визитов: <b>{club['visits']}</b>\n"
+            f"⏱ Время в клубе: <b>{format_hours(club['total_hours'])}</b>\n"
+            f"💎 Бонусный счёт: <b>{club['bonus_balance']:.2f} ₽</b>"
+        )
+    elif club["linked"]:
+        club_block = (
+            f"\n\n{DIVIDER}\n"
+            "🏟 <b>КЛУБ</b>\n"
+            "🔄 Клубные данные временно недоступны."
+        )
     else:
         club_block = (
             f"\n\n{DIVIDER}\n"
@@ -471,40 +416,6 @@ async def leaderboard_cmd(message: Message):
 async def change_nick(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ChangeNick.nickname)
     await callback.message.edit_text("✏️ Введите новый ник:")
-
-BAD_NICK_PARTS = [
-    "http", "https", "www", ".ru", ".com", ".gg", ".net",
-    "t.me", "telegram", "discord", "vk.com", "@"
-]
-
-VALID_NICK_RE = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9_ \-]+$")
-
-def sanitize_pilot_name(name: str) -> str | None:
-
-    if not name:
-        return None
-
-    name = str(name).strip()
-
-    lower = name.lower()
-
-    for bad in BAD_NICK_PARTS:
-        if bad in lower:
-            return None
-
-    # запрет emoji / спецсимволов
-    if not VALID_NICK_RE.fullmatch(name):
-        return None
-
-    name = re.sub(r"\s+", " ", name).strip()
-
-    # длина
-    name = name[:16]
-
-    if len(name) < 2:
-        return None
-
-    return name
 
 @router.message(ChangeNick.nickname)
 async def set_nick(message: Message, state: FSMContext):

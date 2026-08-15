@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#030707">
+<title>VALEVO</title>
+<meta name="description" content="Клубная экосистема VALEVO — профиль пилота, бронирование, рейтинги и заявки на время.">
+
+<link rel="icon" href="/static/logo.png">
+<link rel="apple-touch-icon" href="/static/logo.png">
+
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/screens.css">
+
+<!-- Telegram Mini App SDK — official CDN, required to be loaded this way (not vendored). -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+
+<div id="app">
+    <main id="view" role="main"></main>
+    <nav id="tabbar" class="tabbar hidden" role="tablist" aria-label="Основная навигация"></nav>
+</div>
+
+<div id="toast-root" class="toast-root" aria-live="polite"></div>
+<div id="modal-root"></div>
+
+<noscript>
+    Для работы мини-приложения VALEVO нужен JavaScript. Включите его в настройках Telegram и откройте приложение снова.
+</noscript>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

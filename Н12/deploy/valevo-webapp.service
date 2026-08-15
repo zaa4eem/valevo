@@ -1,0 +1,20 @@
+[Unit]
+Description=Valevo Mini App Web Service (webapp_server.py)
+After=network-online.target valevo-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/valevo-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=WEBAPP_PORT=8020
+ExecStart=/opt/valevo-bot/.venv/bin/python /opt/valevo-bot/webapp_server.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+User=valevo
+Group=valevo
+
+[Install]
+WantedBy=multi-user.target

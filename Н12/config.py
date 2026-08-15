@@ -123,6 +123,11 @@ REFERRAL_BONUS_RUB = _float_env("REFERRAL_BONUS_RUB", 250.0)
 MOSCOW_TZ = os.getenv("MOSCOW_TZ", "Europe/Moscow")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 
+# Telegram Mini App (webapp/). Должен быть настоящий https-адрес — Telegram
+# не откроет мини-приложение по http:// или самоподписанному сертификату.
+WEBAPP_BASE_URL = os.getenv("WEBAPP_BASE_URL", "").strip().rstrip("/")
+WEBAPP_PORT = _int_env("WEBAPP_PORT", 8020)
+
 
 def validate_required_settings() -> None:
     missing = []

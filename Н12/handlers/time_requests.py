@@ -2,14 +2,16 @@ import asyncio
 import html
 import logging
 from datetime import datetime
+from typing import Any
 
 from pytz import timezone
 
-from aiogram import Router, F
+from aiogram import Bot, Router, F
 from aiogram.filters import BaseFilter, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
+    BufferedInputFile,
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
@@ -32,6 +34,7 @@ from database.db import (
 
     expire_old_time_requests,
     get_pending_time_request,
+    get_pending_time_requests_for_admin,
     get_time_request_cooldown_minutes,
     create_time_request,
     get_time_request,
@@ -487,7 +490,104 @@ async def user_time_request_lap_time(
 
 
 # =========================================================
-# ПОЛУЧЕНИЕ ФОТО И ОТПРАВКА АДМИНАМ
+# СОЗДАНИЕ ЗАЯВКИ (общее ядро для бота и мини-приложения)
+# =========================================================
+
+async def submit_time_request(
+    bot: Bot,
+    *,
+    pilot: dict[str, Any],
+    fallback_username: str | None,
+    discipline: str,
+    track: str,
+    lap_time_text: str,
+    photo_file_id: str | None = None,
+    photo_bytes: bytes | None = None,
+    photo_filename: str = "result.jpg",
+) -> tuple[bool, int | None, str | None]:
+    """Создаёт заявку на установку времени и уведомляет админов.
+
+    Передайте либо photo_file_id (фото уже отправлено в Telegram-чат бота),
+    либо photo_bytes (сырые байты — например, загрузка из мини-приложения).
+    """
+    try:
+        lap_time_ms = time_to_ms(lap_time_text)
+    except Exception:
+        return False, None, "Неверный формат времени. Пример: 01:18.565"
+
+    if not photo_file_id and not photo_bytes:
+        return False, None, "Нужна фотография результата"
+
+    username = (
+        pilot.get("username")
+        or fallback_username
+        or f"user_{pilot['telegram_id']}"
+    )
+    pilot_number = pilot.get("pilot_number")
+    display_name = pilot.get("display_name") or f"@{username}"
+
+    request_id: int | None = None
+    delivered = 0
+
+    for admin_id in ADMIN_IDS:
+        try:
+            if photo_file_id:
+                photo_arg = photo_file_id
+            else:
+                photo_arg = BufferedInputFile(photo_bytes, filename=photo_filename)
+
+            # Заявку в БД создаём только когда узнали настоящий file_id
+            # (фото из мини-приложения ещё не побывало в Telegram).
+            if request_id is None:
+                if not photo_file_id:
+                    # Пробное сообщение без подписи — только чтобы получить file_id.
+                    probe = await bot.send_photo(admin_id, photo=photo_arg)
+                    photo_file_id = probe.photo[-1].file_id
+                request_id = await create_time_request(
+                    telegram_id=pilot["telegram_id"],
+                    username=username,
+                    pilot_number=pilot_number,
+                    discipline=discipline,
+                    track=track,
+                    lap_time_text=lap_time_text,
+                    lap_time_ms=lap_time_ms,
+                    photo_file_id=photo_file_id,
+                )
+
+            caption = request_caption(
+                request_id=request_id,
+                pilot_name=display_name,
+                pilot_number=pilot_number,
+                discipline=discipline,
+                track=track,
+                lap_time=lap_time_text,
+            )
+            await bot.send_photo(
+                chat_id=admin_id,
+                photo=photo_file_id,
+                caption=caption,
+                reply_markup=admin_decision_keyboard(request_id),
+            )
+            delivered += 1
+            await asyncio.sleep(0.05)
+        except Exception as exc:
+            logger.warning(
+                "Не удалось отправить заявку %s администратору %s: %s",
+                request_id, admin_id, exc,
+            )
+
+    if request_id is None:
+        return False, None, "Не удалось загрузить фотографию. Попробуйте ещё раз."
+
+    if delivered == 0:
+        await complete_time_request(request_id=request_id, status="delivery_failed")
+        return False, request_id, "Не удалось доставить заявку администраторам. Попробуйте позднее."
+
+    return True, request_id, None
+
+
+# =========================================================
+# ПОЛУЧЕНИЕ ФОТО И ОТПРАВКА АДМИНАМ (из чата бота)
 # =========================================================
 
 @router.message(
@@ -528,14 +628,8 @@ async def user_time_request_proof(
     discipline = data.get("discipline")
     track = data.get("track")
     lap_time_text = data.get("lap_time_text")
-    lap_time_ms = data.get("lap_time_ms")
 
-    if not all([
-        discipline,
-        track,
-        lap_time_text,
-        lap_time_ms,
-    ]):
+    if not all([discipline, track, lap_time_text]):
         await state.clear()
         await message.answer(
             "❌ Данные заявки потеряны. Начните заново.",
@@ -543,75 +637,21 @@ async def user_time_request_proof(
         )
         return
 
-    photo_file_id = message.photo[-1].file_id
-
-    username = (
-        pilot.get("username")
-        or message.from_user.username
-        or f"user_{message.from_user.id}"
-    )
-
-    pilot_number = pilot.get("pilot_number")
-    display_name = (
-        pilot.get("display_name")
-        or f"@{username}"
-    )
-
-    request_id = await create_time_request(
-        telegram_id=message.from_user.id,
-        username=username,
-        pilot_number=pilot_number,
+    ok, request_id, error = await submit_time_request(
+        message.bot,
+        pilot=pilot,
+        fallback_username=message.from_user.username,
         discipline=discipline,
         track=track,
         lap_time_text=lap_time_text,
-        lap_time_ms=lap_time_ms,
-        photo_file_id=photo_file_id,
+        photo_file_id=message.photo[-1].file_id,
     )
-
-    caption = request_caption(
-        request_id=request_id,
-        pilot_name=display_name,
-        pilot_number=pilot_number,
-        discipline=discipline,
-        track=track,
-        lap_time=lap_time_text,
-    )
-
-    delivered = 0
-
-    for admin_id in ADMIN_IDS:
-        try:
-            await message.bot.send_photo(
-                chat_id=admin_id,
-                photo=photo_file_id,
-                caption=caption,
-                reply_markup=admin_decision_keyboard(
-                    request_id
-                )
-            )
-            delivered += 1
-            await asyncio.sleep(0.05)
-
-        except Exception as exc:
-            logger.warning(
-                "Не удалось отправить заявку #%s "
-                "администратору %s: %s",
-                request_id,
-                admin_id,
-                exc,
-            )
 
     await state.clear()
 
-    if delivered == 0:
-        await complete_time_request(
-            request_id=request_id,
-            status="delivery_failed",
-        )
-
+    if not ok:
         await message.answer(
-            "❌ Не удалось доставить заявку администраторам.\n"
-            "Попробуйте позднее или обратитесь в поддержку.",
+            f"❌ {error}",
             reply_markup=get_menu(message.from_user.id)
         )
         return
@@ -672,62 +712,19 @@ async def user_time_request_cancel(
 
 
 # =========================================================
-# ПРИНЯТИЕ ЗАЯВКИ АДМИНИСТРАТОРОМ
+# ПРИНЯТИЕ ЗАЯВКИ АДМИНИСТРАТОРОМ (общее ядро для бота и мини-приложения)
 # =========================================================
 
-@router.callback_query(
-    F.data.startswith("time_req_approve:")
-)
-async def admin_approve_time_request(
-    callback: CallbackQuery
-):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer(
-            "⛔ Доступ запрещён",
-            show_alert=True
-        )
-        return
-
-    try:
-        request_id = int(
-            callback.data.split(":", 1)[1]
-        )
-    except (ValueError, IndexError):
-        await callback.answer(
-            "Некорректный номер заявки.",
-            show_alert=True
-        )
-        return
-
+async def approve_time_request(bot: Bot, request_id: int, admin_id: int) -> tuple[bool, str | None]:
+    """Возвращает (ok, error). ok=True — время зачтено в таблицу и разосланы уведомления."""
     request = await get_time_request(request_id)
-
     if not request:
-        await callback.answer(
-            "Заявка не найдена.",
-            show_alert=True
-        )
-        return
-
+        return False, "Заявка не найдена"
     if request["status"] != "pending":
-        await callback.answer(
-            "Эта заявка уже обработана другим администратором.",
-            show_alert=True
-        )
-        return
+        return False, "Эта заявка уже обработана другим администратором"
 
-    acquired = await acquire_time_request(
-        request_id,
-        callback.from_user.id
-    )
-
-    if not acquired:
-        await callback.answer(
-            "Заявку уже обрабатывает другой администратор.",
-            show_alert=True
-        )
-        return
-
-    await callback.answer("Обрабатываю заявку...")
+    if not await acquire_time_request(request_id, admin_id):
+        return False, "Заявку уже обрабатывает другой администратор"
 
     lap_id = None
     rating_changes: dict[int, int] = {}
@@ -755,74 +752,38 @@ async def admin_approve_time_request(
         new_top = await get_top3()
         new_rows = new_top.get(discipline, [])
 
-        old_positions = {
-            row["username"]: index
-            for index, row in enumerate(old_rows)
-        }
-        new_positions = {
-            row["username"]: index
-            for index, row in enumerate(new_rows)
-        }
+        old_positions = {row["username"]: index for index, row in enumerate(old_rows)}
+        new_positions = {row["username"]: index for index, row in enumerate(new_rows)}
 
         medals = ["🥇", "🥈", "🥉"]
         rating_values = [20, 15, 10]
 
-        # Та же логика рейтинга, что используется
-        # при ручной установке времени администратором.
+        # Та же логика рейтинга, что используется при ручной установке времени администратором.
         for uname, new_index in new_positions.items():
             old_index = old_positions.get(uname, 999)
-
             if new_index < old_index and new_index < 3:
-                old_rating_value = (
-                    rating_values[old_index]
-                    if old_index < 3
-                    else 0
-                )
-
-                delta = (
-                    rating_values[new_index]
-                    - old_rating_value
-                )
-
+                old_rating_value = rating_values[old_index] if old_index < 3 else 0
+                delta = rating_values[new_index] - old_rating_value
                 if delta <= 0:
                     continue
-
                 pilot = await get_pilot_by_username(uname)
-
                 if not pilot:
                     continue
-
                 pilot_tid = pilot[1]
-
-                await update_pilot_rating(
-                    pilot_tid,
-                    delta
-                )
-
-                rating_changes[pilot_tid] = (
-                    rating_changes.get(pilot_tid, 0)
-                    + delta
-                )
+                await update_pilot_rating(pilot_tid, delta)
+                rating_changes[pilot_tid] = rating_changes.get(pilot_tid, 0) + delta
 
         await complete_time_request(
             request_id=request_id,
             status="approved",
-            admin_id=callback.from_user.id,
+            admin_id=admin_id,
             lap_id=lap_id,
         )
 
-        await edit_admin_request_message(
-            callback,
-            "✅ <b>ЗАЯВКА ПРИНЯТА</b>\n"
-            f"Администратор: <code>{callback.from_user.id}</code>\n"
-            "Результат добавлен в таблицу."
-        )
-
-        # Используется существующая система:
-        # уведомление пилоту, изменения позиций и сообщение в группу.
+        # Используется существующая система: уведомление пилоту, изменения позиций, сообщение в группу.
         try:
             await send_notifications(
-                bot=callback.bot,
+                bot=bot,
                 old_positions=old_positions,
                 new_positions=new_positions,
                 medals=medals,
@@ -834,132 +795,87 @@ async def admin_approve_time_request(
                 track=track,
                 group_id=GROUP_ID,
             )
-        except Exception as exc:
-            logger.exception(
-                "Заявка #%s принята, но ошибка уведомлений: %s",
-                request_id,
-                exc,
-            )
+        except Exception:
+            logger.exception("Заявка #%s принята, но ошибка уведомлений", request_id)
+            # Сам результат уже успешно записан, поэтому откатывать его из-за
+            # ошибки Telegram-уведомления нельзя.
 
-            # Сам результат уже успешно записан,
-            # поэтому откатывать его из-за Telegram-уведомления нельзя.
+        return True, None
 
-        await callback.answer(
-            "Время зафиксировано",
-            show_alert=False
-        )
+    except Exception:
+        logger.exception("Ошибка принятия заявки #%s", request_id)
 
-    except Exception as exc:
-        logger.exception(
-            "Ошибка принятия заявки #%s: %s",
-            request_id,
-            exc,
-        )
-
-        # Если круг успел записаться — удаляем.
         if lap_id is not None:
             try:
                 await delete_lap(lap_id)
             except Exception:
-                logger.exception(
-                    "Не удалось удалить круг %s после ошибки",
-                    lap_id
-                )
+                logger.exception("Не удалось удалить круг %s после ошибки", lap_id)
 
-        # Возвращаем начисленный рейтинг.
         for pilot_tid, delta in rating_changes.items():
             try:
-                await update_pilot_rating(
-                    pilot_tid,
-                    -delta
-                )
+                await update_pilot_rating(pilot_tid, -delta)
             except Exception:
-                logger.exception(
-                    "Не удалось вернуть рейтинг пилоту %s",
-                    pilot_tid
-                )
+                logger.exception("Не удалось вернуть рейтинг пилоту %s", pilot_tid)
 
-        await restore_time_request_pending(
-            request_id
-        )
+        await restore_time_request_pending(request_id)
+        return False, "Ошибка. Заявка возвращена на проверку."
 
-        await callback.answer(
-            "Ошибка. Заявка возвращена на проверку.",
-            show_alert=True
-        )
-
-
-# =========================================================
-# ОТКЛОНЕНИЕ ЗАЯВКИ АДМИНИСТРАТОРОМ
-# =========================================================
 
 @router.callback_query(
-    F.data.startswith("time_req_reject:")
+    F.data.startswith("time_req_approve:")
 )
-async def admin_reject_time_request(
+async def admin_approve_time_request(
     callback: CallbackQuery
 ):
     if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer(
-            "⛔ Доступ запрещён",
-            show_alert=True
-        )
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
         return
 
     try:
-        request_id = int(
-            callback.data.split(":", 1)[1]
-        )
+        request_id = int(callback.data.split(":", 1)[1])
     except (ValueError, IndexError):
-        await callback.answer(
-            "Некорректный номер заявки.",
-            show_alert=True
-        )
+        await callback.answer("Некорректный номер заявки.", show_alert=True)
         return
 
-    request = await get_time_request(request_id)
+    await callback.answer("Обрабатываю заявку...")
+    ok, error = await approve_time_request(callback.bot, request_id, callback.from_user.id)
 
-    if not request:
-        await callback.answer(
-            "Заявка не найдена.",
-            show_alert=True
-        )
+    if not ok:
+        await callback.answer(error, show_alert=True)
         return
 
-    if request["status"] != "pending":
-        await callback.answer(
-            "Эта заявка уже обработана другим администратором.",
-            show_alert=True
-        )
-        return
-
-    acquired = await acquire_time_request(
-        request_id,
-        callback.from_user.id
+    await edit_admin_request_message(
+        callback,
+        "✅ <b>ЗАЯВКА ПРИНЯТА</b>\n"
+        f"Администратор: <code>{callback.from_user.id}</code>\n"
+        "Результат добавлен в таблицу."
     )
+    await callback.answer("Время зафиксировано", show_alert=False)
 
-    if not acquired:
-        await callback.answer(
-            "Заявку уже обрабатывает другой администратор.",
-            show_alert=True
-        )
-        return
+
+# =========================================================
+# ОТКЛОНЕНИЕ ЗАЯВКИ АДМИНИСТРАТОРОМ (общее ядро для бота и мини-приложения)
+# =========================================================
+
+async def reject_time_request(bot: Bot, request_id: int, admin_id: int) -> tuple[bool, str | None]:
+    request = await get_time_request(request_id)
+    if not request:
+        return False, "Заявка не найдена"
+    if request["status"] != "pending":
+        return False, "Эта заявка уже обработана другим администратором"
+
+    if not await acquire_time_request(request_id, admin_id):
+        return False, "Заявку уже обрабатывает другой администратор"
 
     try:
         await complete_time_request(
             request_id=request_id,
             status="rejected",
-            admin_id=callback.from_user.id,
-        )
-
-        await edit_admin_request_message(
-            callback,
-            "❌ <b>ЗАЯВКА ОТКЛОНЕНА</b>\n"
-            f"Администратор: <code>{callback.from_user.id}</code>"
+            admin_id=admin_id,
         )
 
         try:
-            await callback.bot.send_message(
+            await bot.send_message(
                 request["telegram_id"],
                 "❌ <b>Администратор отклонил вашу заявку "
                 "на установку времени.</b>\n\n"
@@ -974,28 +890,42 @@ async def admin_reject_time_request(
             )
         except Exception as exc:
             logger.warning(
-                "Не удалось уведомить пилота об отклонении "
-                "заявки #%s: %s",
-                request_id,
-                exc,
+                "Не удалось уведомить пилота об отклонении заявки #%s: %s",
+                request_id, exc,
             )
 
-        await callback.answer(
-            "Заявка отклонена"
-        )
+        return True, None
 
-    except Exception as exc:
-        logger.exception(
-            "Ошибка отклонения заявки #%s: %s",
-            request_id,
-            exc,
-        )
+    except Exception:
+        logger.exception("Ошибка отклонения заявки #%s", request_id)
+        await restore_time_request_pending(request_id)
+        return False, "Ошибка. Заявка возвращена на проверку."
 
-        await restore_time_request_pending(
-            request_id
-        )
 
-        await callback.answer(
-            "Ошибка. Заявка возвращена на проверку.",
-            show_alert=True
-        )
+@router.callback_query(
+    F.data.startswith("time_req_reject:")
+)
+async def admin_reject_time_request(
+    callback: CallbackQuery
+):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    try:
+        request_id = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        await callback.answer("Некорректный номер заявки.", show_alert=True)
+        return
+
+    ok, error = await reject_time_request(callback.bot, request_id, callback.from_user.id)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+
+    await edit_admin_request_message(
+        callback,
+        "❌ <b>ЗАЯВКА ОТКЛОНЕНА</b>\n"
+        f"Администратор: <code>{callback.from_user.id}</code>"
+    )
+    await callback.answer("Заявка отклонена")

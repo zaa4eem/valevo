@@ -1452,6 +1452,41 @@ async def expire_old_time_requests():
     return changed
 
 
+async def get_pending_time_requests_for_admin(limit: int = 50):
+    """Список заявок, ожидающих решения администратора (для очереди в мини-приложении)."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT
+            id, telegram_id, username, pilot_number, discipline, track,
+            lap_time_text, lap_time_ms, photo_file_id, created_at
+        FROM time_requests
+        WHERE status = 'pending'
+        ORDER BY created_at ASC
+        LIMIT ?
+        """,
+        (limit,)
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "id": row[0],
+            "telegram_id": row[1],
+            "username": row[2],
+            "pilot_number": row[3],
+            "discipline": row[4],
+            "track": row[5],
+            "lap_time_text": row[6],
+            "lap_time_ms": row[7],
+            "photo_file_id": row[8],
+            "created_at": row[9],
+        }
+        for row in rows
+    ]
+
+
 async def get_pending_time_request(telegram_id: int):
     db = await get_db()
 

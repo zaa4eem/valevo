@@ -162,6 +162,56 @@ async def _fetch_booking(booking_id: int) -> dict[str, Any] | None:
     return result
 
 
+async def get_bookings_for_pilot(telegram_id: int, limit: int = 20) -> list[dict[str, Any]]:
+    """Брони пилота, самые новые первыми. Используется и ботом, и мини-приложением."""
+    db = await get_db()
+    db.row_factory = aiosqlite.Row
+    cur = await db.execute(
+        """
+        SELECT id FROM booking_requests_v2
+        WHERE telegram_id = ?
+        ORDER BY start_at DESC
+        LIMIT ?
+        """,
+        (telegram_id, limit),
+    )
+    ids = [int(row[0]) for row in await cur.fetchall()]
+    await cur.close()
+    await db.close()
+
+    bookings = []
+    for booking_id in ids:
+        booking = await _fetch_booking(booking_id)
+        if booking:
+            bookings.append(booking)
+    return bookings
+
+
+async def get_pending_admin_bookings(limit: int = 50) -> list[dict[str, Any]]:
+    """Заявки на брони, ожидающие решения администратора."""
+    db = await get_db()
+    db.row_factory = aiosqlite.Row
+    cur = await db.execute(
+        """
+        SELECT id FROM booking_requests_v2
+        WHERE status = 'pending_admin'
+        ORDER BY created_at ASC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    ids = [int(row[0]) for row in await cur.fetchall()]
+    await cur.close()
+    await db.close()
+
+    bookings = []
+    for booking_id in ids:
+        booking = await _fetch_booking(booking_id)
+        if booking:
+            bookings.append(booking)
+    return bookings
+
+
 async def _set_booking_status(
     booking_id: int,
     status: str,
@@ -495,6 +545,40 @@ async def _yclients_records_for_staff(staff_id: int, day: date) -> tuple[list[di
     return [], None
 
 
+def _record_interval(record: dict[str, Any]) -> tuple[datetime, datetime] | None:
+    """Разбирает запись YCLIENTS в (начало, конец). None, если запись удалена
+    или в ней нет распознаваемого времени начала."""
+    if bool(record.get("deleted")):
+        return None
+
+    start = _parse_yclients_datetime(
+        record.get("datetime")
+        or record.get("date")
+        or record.get("start_at")
+        or record.get("start")
+    )
+    if not start:
+        return None
+
+    raw_seconds = record.get("seance_length")
+    if raw_seconds in (None, ""):
+        raw_seconds = record.get("length")
+    if raw_seconds in (None, ""):
+        raw_seconds = record.get("duration")
+
+    try:
+        seconds = int(raw_seconds or 3600)
+    except (TypeError, ValueError):
+        seconds = 3600
+
+    # В некоторых ответах duration приходит в минутах.
+    if record.get("duration") not in (None, "") and record.get("seance_length") in (None, ""):
+        seconds *= 60
+
+    end = start + timedelta(seconds=max(seconds, 60))
+    return start, end
+
+
 async def _remote_conflicts(
     place_keys: list[str],
     start_at: datetime,
@@ -506,33 +590,10 @@ async def _remote_conflicts(
         if error:
             return None, error
         for record in records:
-            if bool(record.get("deleted")):
+            interval = _record_interval(record)
+            if not interval:
                 continue
-            other_start = _parse_yclients_datetime(
-                record.get("datetime")
-                or record.get("date")
-                or record.get("start_at")
-                or record.get("start")
-            )
-            if not other_start:
-                continue
-
-            raw_seconds = record.get("seance_length")
-            if raw_seconds in (None, ""):
-                raw_seconds = record.get("length")
-            if raw_seconds in (None, ""):
-                raw_seconds = record.get("duration")
-
-            try:
-                seconds = int(raw_seconds or 3600)
-            except (TypeError, ValueError):
-                seconds = 3600
-
-            # В некоторых ответах duration приходит в минутах.
-            if record.get("duration") not in (None, "") and record.get("seance_length") in (None, ""):
-                seconds *= 60
-
-            other_end = other_start + timedelta(seconds=max(seconds, 60))
+            other_start, other_end = interval
             if other_start < end_at and other_end > start_at:
                 return (
                     f"{place['title']} — занято "
@@ -544,6 +605,45 @@ async def _remote_conflicts(
     conflicts = [title for title, _ in results if title]
     errors = [error for _, error in results if error]
     return conflicts, (errors[0] if errors else None)
+
+
+async def get_booking_day_availability(day: date) -> dict[str, list[dict[str, str]]]:
+    """Занятые интервалы на весь день по каждому месту — для календаря в мини-приложении.
+
+    Объединяет локальные брони (уже созданные через бота) и брони в Сервисе
+    (например, оформленные не через бота). Ошибки Сервиса по отдельному месту
+    просто дают пустой список занятости для него — сервер всё равно перепроверит
+    занятость ещё раз при фактическом бронировании.
+    """
+    day_start = datetime.combine(day, OPEN_TIME, tzinfo=TZ)
+    day_end = datetime.combine(day + timedelta(days=1), CLOSE_TIME, tzinfo=TZ)
+
+    result: dict[str, list[dict[str, str]]] = {key: [] for key in BOOKING_PLACES}
+
+    staff_to_key = {int(place["staff_id"]): key for key, place in BOOKING_PLACES.items()}
+    local = await _local_conflicts(list(staff_to_key.keys()), day_start, day_end)
+    for conflict in local:
+        key = staff_to_key.get(int(conflict["staff_id"]))
+        if key:
+            result[key].append({
+                "start": conflict["start_at"],
+                "end": conflict["end_at"],
+            })
+
+    async def check_one(key: str) -> None:
+        place = BOOKING_PLACES[key]
+        records, error = await _yclients_records_for_staff(int(place["staff_id"]), day)
+        if error:
+            return
+        for record in records:
+            interval = _record_interval(record)
+            if not interval:
+                continue
+            start, end = interval
+            result[key].append({"start": start.isoformat(), "end": end.isoformat()})
+
+    await asyncio.gather(*(check_one(key) for key in BOOKING_PLACES))
+    return result
 
 
 async def _create_yclients_record(booking: dict[str, Any], item: dict[str, Any]) -> tuple[int | None, str | None]:
@@ -1039,6 +1139,55 @@ async def booking_choose_duration(callback: CallbackQuery, state: FSMContext) ->
     await callback.message.answer(_selection_summary(final_data), reply_markup=_confirm_keyboard())
 
 
+async def submit_booking(
+    bot: Bot,
+    *,
+    pilot: dict[str, Any],
+    username: str | None,
+    place_type: str,
+    place_keys: list[str],
+    start_at: datetime,
+    end_at: datetime,
+    duration_minutes: int,
+) -> tuple[bool, int | None, str | None]:
+    """Финальная проверка занятости + создание заявки + уведомление админов.
+
+    Общее ядро и для чат-бота, и для мини-приложения — чтобы правила проверки
+    занятости не могли разойтись между двумя интерфейсами.
+    """
+    if start_at <= datetime.now(TZ):
+        return False, None, "Выбранное время уже прошло. Создайте новую заявку."
+
+    remote, remote_error = await _remote_conflicts(place_keys, start_at, end_at)
+    if remote_error:
+        return False, None, "Не удалось проверить Сервис. Попробуйте позднее."
+    if remote:
+        return False, None, "Место уже заняли: " + ", ".join(remote)
+
+    ok, booking_id, error = await _create_pending_booking(
+        pilot=pilot,
+        username=username,
+        place_type=place_type,
+        place_keys=place_keys,
+        start_at=start_at,
+        end_at=end_at,
+        duration_minutes=duration_minutes,
+    )
+    if not ok or not booking_id:
+        return False, None, error or "Не удалось создать заявку"
+
+    booking = await _fetch_booking(booking_id)
+    if booking:
+        text = "📥 <b>Новая заявка на бронь</b>\n\n" + _format_booking(booking)
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, text, reply_markup=_admin_keyboard(booking_id))
+            except Exception as exc:
+                logger.warning("Не удалось отправить бронь админу %s: %s", admin_id, exc)
+
+    return True, booking_id, None
+
+
 @router.callback_query(BookingFlow.confirming, F.data == "bk:submit")
 async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
     pilot = await get_pilot_by_telegram_id(callback.from_user.id)
@@ -1050,21 +1199,8 @@ async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
     start_at = datetime.fromisoformat(data["start_at"]).astimezone(TZ)
     end_at = datetime.fromisoformat(data["end_at"]).astimezone(TZ)
 
-    if start_at <= datetime.now(TZ):
-        await callback.answer("Выбранное время уже прошло. Создайте новую заявку.", show_alert=True)
-        await state.clear()
-        return
-
-    # Повторная проверка перед фиксацией заявки.
-    remote, remote_error = await _remote_conflicts(selected, start_at, end_at)
-    if remote_error:
-        await callback.answer("Не удалось проверить Сервсис. Попробуйте позднее.", show_alert=True)
-        return
-    if remote:
-        await callback.answer("Место уже заняли: " + ", ".join(remote), show_alert=True)
-        return
-
-    ok, booking_id, error = await _create_pending_booking(
+    ok, booking_id, error = await submit_booking(
+        callback.bot,
         pilot=pilot,
         username=callback.from_user.username,
         place_type=data["place_type"],
@@ -1075,23 +1211,16 @@ async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
     )
     if not ok or not booking_id:
         await callback.answer(error or "Не удалось создать заявку", show_alert=True)
+        if error and "уже прошло" in error:
+            await state.clear()
         return
 
-    booking = await _fetch_booking(booking_id)
     await state.clear()
     await callback.answer("Заявка отправлена")
     await callback.message.answer(
         "✅ Заявка отправлена администратору.",
         reply_markup=_user_cancel_keyboard(booking_id),
     )
-
-    if booking:
-        text = "📥 <b>Новая заявка на бронь</b>\n\n" + _format_booking(booking)
-        for admin_id in ADMIN_IDS:
-            try:
-                await callback.bot.send_message(admin_id, text, reply_markup=_admin_keyboard(booking_id))
-            except Exception as exc:
-                logger.warning("Не удалось отправить бронь админу %s: %s", admin_id, exc)
 
 
 @router.callback_query(F.data == "bk:cancel")
@@ -1108,42 +1237,31 @@ async def booking_cancel_flow(callback: CallbackQuery, state: FSMContext) -> Non
 # ============================================================================
 # АДМИН: ПОДТВЕРЖДЕНИЕ / ОТКЛОНЕНИЕ
 # ============================================================================
-@router.callback_query(F.data.startswith("bkadm:reject:"))
-async def admin_reject_booking(callback: CallbackQuery) -> None:
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    booking_id = int(callback.data.rsplit(":", 1)[1])
+async def reject_booking(bot: Bot, booking_id: int, admin_id: int) -> tuple[bool, str | None]:
+    """Возвращает (ok, error). error=None и ok=True — заявка отклонена."""
     booking = await _fetch_booking(booking_id)
     if not booking or booking["status"] != "pending_admin":
-        await callback.answer("Заявка уже обработана", show_alert=True)
-        return
-    await _set_booking_status(booking_id, "rejected", admin_id=callback.from_user.id)
-    await callback.answer("Отклонено")
-    await callback.message.edit_text(_message_html(callback.message) + "\n\n❌ <b>Отклонено</b>")
+        return False, "Заявка уже обработана"
+
+    await _set_booking_status(booking_id, "rejected", admin_id=admin_id)
     try:
-        await callback.bot.send_message(
+        await bot.send_message(
             booking["telegram_id"],
             "❌ Администратор отклонил заявку на бронирование. Выберите другое время или места.",
         )
     except Exception:
         pass
+    return True, None
 
 
-@router.callback_query(F.data.startswith("bkadm:approve:"))
-async def admin_approve_booking(callback: CallbackQuery) -> None:
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-    booking_id = int(callback.data.rsplit(":", 1)[1])
-    if not await _claim_for_admin(booking_id, callback.from_user.id):
-        await callback.answer("Заявка уже обрабатывается или обработана", show_alert=True)
-        return
+async def approve_booking(bot: Bot, booking_id: int, admin_id: int) -> tuple[bool, str | None]:
+    """Возвращает (ok, error). error=None и ok=True — заявка подтверждена и создана в Сервисе."""
+    if not await _claim_for_admin(booking_id, admin_id):
+        return False, "Заявка уже обрабатывается или обработана"
 
     booking = await _fetch_booking(booking_id)
     if not booking:
-        await callback.answer("Заявка не найдена", show_alert=True)
-        return
+        return False, "Заявка не найдена"
 
     start_at = datetime.fromisoformat(booking["start_at"]).astimezone(TZ)
     end_at = datetime.fromisoformat(booking["end_at"]).astimezone(TZ)
@@ -1153,18 +1271,15 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
     local = await _local_conflicts(staff_ids, start_at, end_at, exclude_booking_id=booking_id)
     if local:
         await _set_booking_status(booking_id, "pending_admin", error="Локальное пересечение")
-        await callback.answer(f"Уже занято: {local[0]['place_title']}", show_alert=True)
-        return
+        return False, f"Уже занято: {local[0]['place_title']}"
 
     remote, remote_error = await _remote_conflicts(place_keys, start_at, end_at)
     if remote_error:
         await _set_booking_status(booking_id, "pending_admin", error=remote_error)
-        await callback.answer("Сервис не отвечает. Заявка оставлена на повторное подтверждение.", show_alert=True)
-        return
+        return False, "Сервис не отвечает. Заявка оставлена на повторное подтверждение."
     if remote:
         await _set_booking_status(booking_id, "pending_admin", error="Занято")
-        await callback.answer("Занято: " + ", ".join(remote), show_alert=True)
-        return
+        return False, "Занято: " + ", ".join(remote)
 
     created: list[tuple[int, int]] = []
     failure: str | None = None
@@ -1186,16 +1301,13 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
         if rollback_errors:
             full_error += " | Ошибка отката: " + "; ".join(rollback_errors)
         await _set_booking_status(booking_id, "pending_admin", error=full_error)
-        await callback.answer("Сервис не создал записи. Можно попробовать подтвердить ещё раз.", show_alert=True)
-        return
+        return False, "Сервис не создал записи. Можно попробовать подтвердить ещё раз."
 
-    await _set_booking_status(booking_id, "confirmed", admin_id=callback.from_user.id)
+    await _set_booking_status(booking_id, "confirmed", admin_id=admin_id)
     booking = await _fetch_booking(booking_id)
-    await callback.answer("Подтверждено")
-    await callback.message.edit_text(_message_html(callback.message) + "\n\n✅ <b>Подтверждено и создано в Сервисе</b>")
     if booking:
         try:
-            await callback.bot.send_message(
+            await bot.send_message(
                 booking["telegram_id"],
                 "✅ <b>Бронь подтверждена!</b>\n\n" + _format_booking(booking)
                 + "\n\nЗа час до визита бот попросит подтвердить, что вы придёте.",
@@ -1203,6 +1315,35 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
             )
         except Exception as exc:
             logger.warning("Не удалось уведомить клиента о подтверждении: %s", exc)
+    return True, None
+
+
+@router.callback_query(F.data.startswith("bkadm:reject:"))
+async def admin_reject_booking(callback: CallbackQuery) -> None:
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    booking_id = int(callback.data.rsplit(":", 1)[1])
+    ok, error = await reject_booking(callback.bot, booking_id, callback.from_user.id)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+    await callback.answer("Отклонено")
+    await callback.message.edit_text(_message_html(callback.message) + "\n\n❌ <b>Отклонено</b>")
+
+
+@router.callback_query(F.data.startswith("bkadm:approve:"))
+async def admin_approve_booking(callback: CallbackQuery) -> None:
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    booking_id = int(callback.data.rsplit(":", 1)[1])
+    ok, error = await approve_booking(callback.bot, booking_id, callback.from_user.id)
+    if not ok:
+        await callback.answer(error, show_alert=True)
+        return
+    await callback.answer("Подтверждено")
+    await callback.message.edit_text(_message_html(callback.message) + "\n\n✅ <b>Подтверждено и создано в Сервисе</b>")
 
 
 # ============================================================================
@@ -1224,28 +1365,35 @@ async def _cancel_booking(booking: dict[str, Any], *, cancelled_status: str = "c
     return True, None
 
 
+async def cancel_booking_by_user(bot: Bot, booking_id: int, telegram_id: int) -> tuple[bool, str | None]:
+    """Возвращает (ok, error). При ok=False error — текст для пользователя
+    (детали ошибки Сервиса уже отправлены админам)."""
+    booking = await _fetch_booking(booking_id)
+    if not booking or int(booking["telegram_id"]) != telegram_id:
+        return False, "Бронь не найдена"
+    if booking["status"] not in USER_CANCELLABLE_STATUSES:
+        return False, "Эту бронь уже нельзя отменить"
+    start_at = datetime.fromisoformat(booking["start_at"]).astimezone(TZ)
+    if start_at <= datetime.now(TZ):
+        return False, "Бронь уже началась"
+
+    ok, error = await _cancel_booking(booking)
+    if not ok:
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(admin_id, f"⚠️ Ошибка отмены брони #{booking_id}: {error}")
+            except Exception:
+                pass
+        return False, "Не удалось удалить запись из Сервиса. Администратор уведомлён."
+    return True, None
+
+
 @router.callback_query(F.data.startswith("bkuser:cancel:"))
 async def user_cancel_booking(callback: CallbackQuery) -> None:
     booking_id = int(callback.data.rsplit(":", 1)[1])
-    booking = await _fetch_booking(booking_id)
-    if not booking or int(booking["telegram_id"]) != callback.from_user.id:
-        await callback.answer("Бронь не найдена", show_alert=True)
-        return
-    if booking["status"] not in USER_CANCELLABLE_STATUSES:
-        await callback.answer("Эту бронь уже нельзя отменить этой кнопкой", show_alert=True)
-        return
-    start_at = datetime.fromisoformat(booking["start_at"]).astimezone(TZ)
-    if start_at <= datetime.now(TZ):
-        await callback.answer("Бронь уже началась", show_alert=True)
-        return
-    ok, error = await _cancel_booking(booking)
+    ok, error = await cancel_booking_by_user(callback.bot, booking_id, callback.from_user.id)
     if not ok:
-        await callback.answer("Не удалось удалить запись из Сервиса. Администратор уведомлён.", show_alert=True)
-        for admin_id in ADMIN_IDS:
-            try:
-                await callback.bot.send_message(admin_id, f"⚠️ Ошибка отмены брони #{booking_id}: {error}")
-            except Exception:
-                pass
+        await callback.answer(error, show_alert=True)
         return
     await callback.answer("Бронь отменена")
     await callback.message.edit_text("❌ Бронь отменена. Записи удалены из Сервиса.")

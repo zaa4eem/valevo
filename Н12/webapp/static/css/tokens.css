@@ -1,0 +1,133 @@
+/*
+ * VALEVO Mini App — design tokens + base/reset.
+ *
+ * Palette is carried over 1:1 from tv_board.py (the club's TV leaderboard
+ * display) so the Mini App reads as the same product: near-black HUD
+ * background, glowing cyan accents, gold/silver/bronze medal colors.
+ * Semantic status tokens (amber/danger/ok) are new — the TV board never
+ * needed them — but are picked to stay inside the same cyan/warning-light
+ * cockpit language instead of introducing an unrelated palette.
+ */
+
+:root{
+    /* --- brand palette, from tv_board.py --- */
+    --cyan:#4ac6c9;
+    --cyan2:#56e2e5;
+    --bg:#030707;
+    --white:#f4f1e8;
+    --line:rgba(74,198,201,.72);
+    --gold:#ffcc33;
+    --gold2:#ffdf75;
+    --silver:#d7dee8;
+    --bronze:#cd7f32;
+
+    /* --- semantic additions for app UI (status badges, forms, etc.) --- */
+    --amber:#ffb020;
+    --amber2:#ffd27a;
+    --danger:#ff5d6a;
+    --danger2:#ff8a93;
+    --ok:var(--cyan2);
+
+    /* --- surfaces --- */
+    --surface: linear-gradient(180deg,rgba(5,16,18,.88),rgba(1,5,6,.84));
+    --surface-soft: linear-gradient(180deg,rgba(5,16,18,.62),rgba(1,5,6,.58));
+    --surface-solid:#070f10;
+    --border: rgba(74,198,201,.34);
+    --border-strong: rgba(74,198,201,.72);
+    --text-dim: rgba(244,241,232,.66);
+    --text-faint: rgba(244,241,232,.42);
+
+    /* --- type --- */
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+    /* --- shape / motion --- */
+    --radius-sm:10px;
+    --radius:16px;
+    --radius-lg:22px;
+    --ease: cubic-bezier(.22,.9,.22,1);
+
+    /* --- chrome heights (kept in sync by JS via inline style on <html>) --- */
+    --tabbar-h:64px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-t: env(safe-area-inset-top, 0px);
+    --vh: 100vh; /* overwritten with Telegram viewportStableHeight when available */
+}
+
+*,*::before,*::after{ box-sizing:border-box; }
+
+html,body{
+    margin:0;
+    padding:0;
+    width:100%;
+    min-height:100%;
+    background:var(--bg);
+    color:var(--white);
+    font-family:var(--font);
+    -webkit-tap-highlight-color:transparent;
+}
+
+body{
+    min-height:var(--vh);
+    position:relative;
+    overflow-x:hidden;
+    background:
+        radial-gradient(circle at 14% 10%, rgba(74,198,201,.16), transparent 32%),
+        radial-gradient(circle at 88% 4%, rgba(74,198,201,.10), transparent 28%),
+        linear-gradient(135deg,#020405,#071011 55%,#020405);
+}
+
+/* soft diagonal hazard-stripe overlay, same idea as tv_board.py body::before */
+body::before{
+    content:"";
+    position:fixed;
+    inset:-80px;
+    pointer-events:none;
+    z-index:0;
+    background:linear-gradient(135deg,transparent 0 47%,rgba(74,198,201,.09) 47% 53%,transparent 53% 100%);
+    background-size:120px 120px;
+    opacity:.16;
+    transform:skewX(-18deg);
+}
+
+/* faint horizontal scanline texture, same idea as tv_board.py body::after */
+body::after{
+    content:"";
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    background-image:linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px);
+    background-size:100% 4px;
+    opacity:.10;
+}
+
+img{ max-width:100%; display:block; }
+button{ font-family:inherit; }
+input,textarea,select{ font-family:inherit; }
+
+a{ color:var(--cyan2); }
+
+::selection{ background:rgba(74,198,201,.35); color:var(--white); }
+
+/* Thin cyan-tinted scrollbars where supported (cosmetic, non-critical) */
+*{ scrollbar-width:thin; scrollbar-color:rgba(74,198,201,.4) transparent; }
+*::-webkit-scrollbar{ width:6px; height:6px; }
+*::-webkit-scrollbar-thumb{ background:rgba(74,198,201,.35); border-radius:99px; }
+
+.hud-label{
+    text-transform:uppercase;
+    letter-spacing:.11em;
+    font-weight:800;
+    font-size:12px;
+    color:var(--cyan);
+}
+
+.visually-hidden{
+    position:absolute !important;
+    width:1px;height:1px;
+    padding:0;margin:-1px;
+    overflow:hidden;
+    clip:rect(0,0,0,0);
+    white-space:nowrap;
+    border:0;
+}
