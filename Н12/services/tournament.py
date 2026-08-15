@@ -14,11 +14,11 @@ from config import MOSCOW_TZ
 from data.tournament import (
     CLASS_LADDER,
     MAIN_SEQUENCE,
-    MIN_STARTS_PER_MONTH,
     NEWCOMER_BONUS_POINTS,
     RELEGATION_BOTTOM_SHARE,
     class_score,
     classes_gating_promotion,
+    min_starts_for_class,
     month_bounds as _month_bounds,
     next_main_class,
 )
@@ -48,8 +48,9 @@ async def live_class_score(telegram_id: int, class_name: str, month_key: str, st
     """Текущий живой результат пилота в классе за месяц."""
     benchmark = await get_class_benchmark(class_name, month_key)
     best_ms, starts = await get_pilot_month_best(telegram_id, class_name, start_iso, end_iso)
+    min_starts = min_starts_for_class(class_name)
 
-    qualifies = starts >= MIN_STARTS_PER_MONTH and best_ms is not None and benchmark is not None
+    qualifies = starts >= min_starts and best_ms is not None and benchmark is not None
     score = class_score(best_ms, benchmark["benchmark_ms"]) if (qualifies and benchmark) else None
 
     if qualifies and score is not None and class_name == "MX-5":
@@ -63,7 +64,7 @@ async def live_class_score(telegram_id: int, class_name: str, month_key: str, st
         "qualifies": qualifies,
         "score": score,
         "benchmark": benchmark,
-        "min_starts": MIN_STARTS_PER_MONTH,
+        "min_starts": min_starts,
     }
 
 
@@ -110,8 +111,9 @@ async def month_qualified_participant_ids(start_iso: str, end_iso: str) -> set[i
     """Кто выполнил минимум стартов хотя бы в одном классе за месяц (приз за участие)."""
     qualified: set[int] = set()
     for class_name in CLASS_LADDER:
+        min_starts = min_starts_for_class(class_name)
         for row in await get_month_participants(class_name, start_iso, end_iso):
-            if row["starts"] >= MIN_STARTS_PER_MONTH:
+            if row["starts"] >= min_starts:
                 qualified.add(row["telegram_id"])
     return qualified
 

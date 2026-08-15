@@ -16,8 +16,8 @@ from config import MOSCOW_TZ
 from data.tournament import (
     CLASS_LADDER,
     MAIN_SEQUENCE,
-    MIN_STARTS_PER_MONTH,
     SIDE_DISCIPLINES,
+    min_starts_for_class,
     month_bounds,
 )
 from database.db import (
@@ -166,7 +166,7 @@ async def _check_founding_member(telegram_id: int, month_key: str, start_iso: st
 
     for class_name in CLASS_LADDER:
         _, starts = await get_pilot_month_best(telegram_id, class_name, start_iso, end_iso)
-        if starts >= MIN_STARTS_PER_MONTH:
+        if starts >= min_starts_for_class(class_name):
             await _award(telegram_id, "founding_member", bot)
             return
 
@@ -221,7 +221,7 @@ async def _check_streak(telegram_id: int, bot=None) -> None:
         met = False
         for class_name in CLASS_LADDER:
             _best, starts = await get_pilot_month_best(telegram_id, class_name, start_iso, end_iso)
-            if starts >= MIN_STARTS_PER_MONTH:
+            if starts >= min_starts_for_class(class_name):
                 met = True
                 break
         if not met:

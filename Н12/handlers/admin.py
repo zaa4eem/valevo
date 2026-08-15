@@ -51,6 +51,18 @@ from services.yclients_auto import issue_or_queue_valevo_bonus, auto_sync_pilot_
 router = Router()
 logger = logging.getLogger(__name__)
 
+# Держим сильные ссылки на фоновые задачи — без этого asyncio может собрать
+# их сборщиком мусора до завершения (создание таска само по себе ссылку не
+# держит), и уведомления/удаления/очистка клавиатур будут тихо не срабатывать.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+    return task
+
 # ======================== HELPERS ========================
 async def safe_delete_message(bot, chat_id, msg_id):
     try: await bot.delete_message(chat_id, msg_id)
@@ -61,12 +73,17 @@ async def delete_later(msg, delay=10):
     try: await msg.delete()
     except: pass
 
-async def cleanup_undo_state(msg: Message, state: FSMContext, delay: int):
+async def cleanup_undo_state(msg: Message, delay: int):
+    # Раньше здесь был await state.clear() — но state это общий FSMContext
+    # на (chat, user), а не привязанный к конкретному кругу. finish_lap уже
+    # чистит state сам сразу после создания этой задачи (см. ниже); если админ
+    # успевал начать СЛЕДУЮЩИЙ ввод времени в эти же 30 секунд, этот таймер
+    # прилетал прямо посреди нового флоу и стирал его состояние — новое время
+    # переставало приниматься без единой ошибки. Тут достаточно снять кнопку.
     await asyncio.sleep(delay)
     try:
         await msg.edit_reply_markup(reply_markup=None)
     except: pass
-    await state.clear()
 
 def is_admin(uid): return uid in ADMIN_IDS
 
@@ -374,7 +391,7 @@ async def search_pilot_by_number(message: Message, state: FSMContext):
 async def addlap_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
-    asyncio.create_task(delete_later(message, 1))
+    _spawn(delete_later(message, 1))
     await state.clear()
     await state.set_state(AddLap.discipline)
     await message.answer("🏆 Выберите дисциплину:", reply_markup=get_disciplines_keyboard())
@@ -456,7 +473,7 @@ async def finish_lap(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     lap_text = (message.text or "").strip()
-    asyncio.create_task(delete_later(message, 1))
+    _spawn(delete_later(message, 1))
 
     discipline = data.get("discipline")
     username = data.get("username")
@@ -518,13 +535,13 @@ async def finish_lap(message: Message, state: FSMContext):
                 text=text,
                 reply_markup=undo_keyboard,
             )
-            asyncio.create_task(cleanup_undo_state(sent_msg, state, 30))
+            _spawn(cleanup_undo_state(sent_msg, 30))
         except Exception:
             await message.answer(text, reply_markup=undo_keyboard)
     else:
         await message.answer(text, reply_markup=undo_keyboard)
 
-    asyncio.create_task(send_notifications(
+    _spawn(send_notifications(
         bot=message.bot,
         discipline=discipline,
         new_username=username,
@@ -1298,9 +1315,9 @@ async def _tournament_progress_line(telegram_id: int, discipline: str) -> str:
     """Строка о зачёте в турнире v2 для уведомления пилоту после засчитанного круга.
 
     Раньше после каждого круга просто писали "время зафиксировано" без единого
-    слова о том, идёт ли это в зачёт (нужно 5 стартов + заданный клубом эталон
-    в этом месяце) — человеку неоткуда было понять, почему в общем зачёте до
-    сих пор нет баллов после первого же заезда."""
+    слова о том, идёт ли это в зачёт (нужен минимум стартов в классе за месяц —
+    свой на каждой ступени лестницы — + заданный клубом эталон) — человеку
+    неоткуда было понять, почему в общем зачёте до сих пор нет баллов."""
     if discipline not in CLASS_LADDER:
         return ""
     try:

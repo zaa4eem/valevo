@@ -1,6 +1,6 @@
 import html
 
-from data.tournament import CLASS_LADDER
+from data.tournament import CLASS_LADDER, min_starts_for_class
 from database.db import get_all_class_benchmarks, get_pilot_by_telegram_id
 from services.tournament import month_bounds, month_participant_ids, rank_month_overall
 from utils.message_style import DIVIDER
@@ -54,9 +54,10 @@ async def _build_class_block(class_name: str, month_key: str, start_iso: str, en
         display = await _pilot_display(telegram_id)
         lines.append(f"{mark} {html.escape(display)} — <b>{score}</b> баллов")
 
+    min_starts = min_starts_for_class(class_name)
     for telegram_id, starts in pending:
         display = await _pilot_display(telegram_id)
-        lines.append(f"· {html.escape(display)} — {starts}/5 стартов (вне зачёта)")
+        lines.append(f"· {html.escape(display)} — {starts}/{min_starts} стартов (вне зачёта)")
 
     return "\n".join(lines)
 

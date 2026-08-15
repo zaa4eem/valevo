@@ -11,8 +11,6 @@ from datetime import datetime
 
 from pytz import timezone
 
-MIN_STARTS_PER_MONTH = 5
-
 # Доля нижних мест в классе, понижаемых по итогам месяца (кроме входного класса
 # и кроме тех, кто перешёл в этот класс в этом же месяце).
 RELEGATION_BOTTOM_SHARE = 0.15
@@ -21,15 +19,28 @@ RELEGATION_BOTTOM_SHARE = 0.15
 NEWCOMER_BONUS_POINTS = 15
 
 # (класс, вес в общем зачёте, порог перехода выше; None — финальный класс без порога,
-#  side_of — если это доп.дисциплина, к какому основному классу она привязана)
+#  side_of — если это доп.дисциплина, к какому основному классу она привязана,
+#  min_starts — минимум стартов в этом классе за месяц, чтобы он засчитывался
+#  в общий зачёт: специально сделан лёгким на входе (1 старт в MX-5 — то есть
+#  засчитывается уже с первой гонки месяца) и слегка растёт с каждой следующей
+#  ступенью лестницы, а не единый порог в 5 стартов на все классы сразу)
 CLASS_LADDER: dict[str, dict] = {
-    "MX-5":  {"weight": 1.0, "threshold": 80,  "side_of": None},
-    "BTCC":  {"weight": 1.4, "threshold": 100, "side_of": None},
-    "DTM":   {"weight": 1.7, "threshold": 110, "side_of": "BTCC"},
-    "GT500": {"weight": 2.0, "threshold": 120, "side_of": None},
-    "Touge": {"weight": 1.2, "threshold": 90,  "side_of": "GT500"},
-    "GT3":   {"weight": 2.4, "threshold": None, "side_of": None},
+    "MX-5":  {"weight": 1.0, "threshold": 80,  "side_of": None,   "min_starts": 1},
+    "BTCC":  {"weight": 1.4, "threshold": 100, "side_of": None,   "min_starts": 2},
+    "DTM":   {"weight": 1.7, "threshold": 110, "side_of": "BTCC", "min_starts": 2},
+    "GT500": {"weight": 2.0, "threshold": 120, "side_of": None,   "min_starts": 3},
+    "Touge": {"weight": 1.2, "threshold": 90,  "side_of": "GT500", "min_starts": 3},
+    "GT3":   {"weight": 2.4, "threshold": None, "side_of": None,  "min_starts": 4},
 }
+
+# Дефолт для классов, отсутствующих в CLASS_LADDER (на практике не бывает,
+# но лучше явный минимум, чем деление по KeyError).
+DEFAULT_MIN_STARTS = 1
+
+
+def min_starts_for_class(class_name: str) -> int:
+    """Минимум стартов в классе за месяц для попадания в общий зачёт."""
+    return CLASS_LADDER.get(class_name, {}).get("min_starts", DEFAULT_MIN_STARTS)
 
 # Порядок основных (не доп.) ступеней лестницы — по нему определяется, что
 # открывается следующим при переходе.
