@@ -28,16 +28,19 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Обновлено под лестницу турнира v2 (MX-5 -> BTCC -> GT500 -> GT3). Все 5
-# пунктов теперь крутятся в общей карусели (фиксированную левую колонку
-# занимает не одна из дисциплин, а общий зачёт турнира — см. FIXED_TOP_ITEM
-# и renderBoard). Меняя количество пунктов здесь, обязательно пересчитай
-# @keyframes carouselStep и --cycle-time ниже — они настроены именно на 5 шагов.
+# Обновлено под лестницу турнира v2 (MX-5 -> BTCC(+DTM) -> GT500(+Touge) -> GT3).
+# Все 7 пунктов (включая доп.дисциплины DTM и Touge) крутятся в общей карусели
+# (фиксированную левую колонку занимает не одна из дисциплин, а общий зачёт
+# турнира — см. FIXED_TOP_ITEM и renderBoard). Меняя количество пунктов здесь,
+# обязательно пересчитай @keyframes carouselStep и --cycle-time ниже — они
+# настроены именно на 7 шагов.
 DISPLAY_ORDER = [
     {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP"},
     {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West"},
     {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "Silverstone"},
+    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI"},
     {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": ""},
+    {"key": "Touge", "aliases": ["TOUGE", "TOGUE"], "title": "Touge", "subtitle": ""},
     {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP", "subtitle": "LMU | Hyper BMW | Sebring circuit"},
 ]
 
@@ -299,7 +302,7 @@ body::after{
 
 .carousel-track{
     --col-w:370px;
-    --cycle-time:56s;
+    --cycle-time:78.4s;
 
     height:100%;
     display:flex;
@@ -649,27 +652,34 @@ body::after{
 .ticker b{color:var(--cyan)}
 .gold{color:var(--gold2)}
 
-/* 5 карусельных пунктов (GT3, MX-5, BTCC, GT500, Week CUP) — каждый занимает
-   1/5 цикла: держит кадр CAROUSEL_HOLD_MS, затем едет CAROUSEL_MOVE_MS.
-   Если поменяешь состав/число пунктов DISPLAY_ORDER — пересчитай проценты
-   здесь и --cycle-time выше (сейчас 5 * (10000+1200)мс = 56с). */
+/* 7 карусельных пунктов (GT3, MX-5, BTCC, DTM, GT500, Touge, Week CUP) —
+   каждый занимает 1/7 цикла: держит кадр CAROUSEL_HOLD_MS, затем едет
+   CAROUSEL_MOVE_MS. Если поменяешь состав/число пунктов DISPLAY_ORDER —
+   пересчитай проценты здесь и --cycle-time выше (сейчас 7 * (10000+1200)мс
+   = 78.4с). */
 @keyframes carouselStep{
     0%{transform:translate3d(0,0,0)}
-    17.857%{transform:translate3d(0,0,0)}
+    12.755%{transform:translate3d(0,0,0)}
 
-    20%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
-    37.857%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    14.286%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    27.041%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
 
-    40%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
-    57.857%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    28.571%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    41.327%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
 
-    60%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
-    77.857%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    42.857%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    55.612%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
 
-    80%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
-    97.857%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    57.143%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    69.898%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
 
-    100%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
+    71.429%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
+    84.184%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
+
+    85.714%{transform:translate3d(calc(var(--col-w) * -6),0,0)}
+    98.469%{transform:translate3d(calc(var(--col-w) * -6),0,0)}
+
+    100%{transform:translate3d(calc(var(--col-w) * -7),0,0)}
 }
 
 @keyframes ticker{
