@@ -80,6 +80,11 @@ HTML_TEMPLATE = r"""
     --gold2:#ffdf75;
     --silver:#d7dee8;
     --bronze:#cd7f32;
+    /* Карбоновая "плетёнка" — общая текстура-подложка для топ-5 общего зачёта:
+       два перекрёстных диагональных штриха, как на настоящих гоночных панелях. */
+    --carbon:
+        repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0 3px, transparent 3px 7px),
+        repeating-linear-gradient(-45deg, rgba(0,0,0,.18) 0 3px, transparent 3px 7px);
 }
 
 html,body{
@@ -275,7 +280,10 @@ body::after{
 }
 
 .ranks{
-    padding-top:104px;
+    /* 104px — высота .head, + 46px — высота .badge-row, добавленной над ним.
+       Не обновил это при добавлении плашки этапа — цифры мест съехали
+       относительно строк ровно на её высоту. */
+    padding-top:150px;
 }
 
 .rank{
@@ -544,54 +552,93 @@ body::after{
     color:#ffc28c;
 }
 
-/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — своя анимация и фон на каждое место ========== */
+/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — гоночная ливрея на каждое место ========== */
 /* Только в фиксированной колонке ("Общий зачёт"): .row1/.row2/.row3 у обычных
    дисциплин-карусели остаются как были (следующие правила их не трогают —
    применяются только внутри .fixed-col через более специфичный селектор).
    row4 и row5 — новые классы (раньше 4-е и 5-е место были обычной строкой
-   без акцента), но они оформлены только под .fixed-col, поэтому в
-   дисциплинах карусели 4-5 строки выглядят как прежде.
-   У каждого места — свой узор поверх фирменного градиента места (молнии
-   у 1-го, звёзды у 2-го, искры у 3-го, шевроны-скорость у 4-го, лёгкие
-   блики у 5-го), нарисованный крошечным инлайновым SVG, без внешних файлов. */
+   без акцента), но они оформлены только под .fixed-col.
+
+   Раньше тут был мелкий повторяющийся SVG-паттерн (молнии/звёзды и т.п.) —
+   на деле выглядел как обои, а не гоночный дизайн. Заменено на настоящую
+   ливрею: карбоновая текстура-подложка + диагональные полосы (как краска
+   на капоте болида) + острый угловой клин слева вместо плоской полоски
+   (как номерная табличка), у 1-го места клин — в шашечку финишного флага. */
+.fixed-col .row{
+    padding-left:30px;
+}
+
+.fixed-col .row1,
+.fixed-col .row2,
+.fixed-col .row3,
+.fixed-col .row4,
+.fixed-col .row5{
+    position:relative;
+}
+
+.fixed-col .row1::before,
+.fixed-col .row2::before,
+.fixed-col .row3::before,
+.fixed-col .row4::before,
+.fixed-col .row5::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:0;
+    bottom:0;
+    width:24px;
+    clip-path:polygon(0 0, 100% 0, 58% 100%, 0 100%);
+    z-index:1;
+}
+
 .fixed-col .row1{
-    background-image:
-        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2ZmZTI3YSIgZmlsbC1vcGFjaXR5PSIwLjMyIiBkPSJNMzUgNEwxNiAzNGgxMWwtNCAyNiAyMS0zMkgzM2w0LTI0eiIvPjwvc3ZnPg=="),
+    background:
+        var(--carbon),
+        repeating-linear-gradient(115deg, rgba(255,224,120,.24) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(255,204,51,.26),rgba(255,230,120,.10),rgba(255,204,51,.20));
-    background-repeat:repeat, no-repeat;
-    background-size:52px 52px, cover;
-    background-position:0 0, 0 0;
+    box-shadow:0 0 22px rgba(255,204,51,.22);
+}
+
+.fixed-col .row1::before{
+    background-image:repeating-conic-gradient(#0b0f0f 0 25%, var(--gold2) 0 50%);
+    background-size:8px 8px;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.45);
 }
 
 .fixed-col .row2{
-    background-image:
-        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2U3ZWRmNSIgZmlsbC1vcGFjaXR5PSIwLjMwIiBkPSJNMzIgNmw3LjUgMTUuNUw1NyAyNGwtMTIuNSAxMkw0NyA1NCAzMiA0NSAxNyA1NGwyLjUtMThMNyAyNGwxNy41LTIuNXoiLz48L3N2Zz4="),
+    background:
+        var(--carbon),
+        repeating-linear-gradient(115deg, rgba(255,255,255,.14) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(225,235,245,.16),rgba(74,198,201,.05));
-    background-repeat:repeat, no-repeat;
-    background-size:52px 52px, cover;
-    background-position:0 0, 0 0;
     animation:silverShimmer 5s ease-in-out infinite;
 }
 
+.fixed-col .row2::before{
+    background:linear-gradient(160deg,#f3f7fb,var(--silver) 55%,#9fb0bf);
+}
+
 .fixed-col .row3{
-    background-image:
-        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2ZmYmY3YSIgZmlsbC1vcGFjaXR5PSIwLjMyIiBkPSJNMzIgNmMyIDEyIDggMTggMjAgMjAtMTIgMi0xOCA4LTIwIDIwLTItMTItOC0xOC0yMC0yMCAxMi0yIDE4LTggMjAtMjB6Ii8+PC9zdmc+"),
+    background:
+        var(--carbon),
+        repeating-linear-gradient(115deg, rgba(255,191,122,.20) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(205,127,50,.20),rgba(74,198,201,.04));
-    background-repeat:repeat, no-repeat;
-    background-size:44px 44px, cover;
-    background-position:0 0, 0 0;
     animation:bronzeEmber 5.4s ease-in-out infinite;
 }
 
+.fixed-col .row3::before{
+    background:linear-gradient(160deg,#ffcf8a,var(--bronze) 55%,#8a4d1c);
+}
+
 .fixed-col .row4{
-    background-image:
-        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iIzhmZTNlNSIgZmlsbC1vcGFjaXR5PSIwLjMwIiBkPSJNOCAxMmwxOCAyMC0xOCAyMCAxMCAwIDE4LTIwLTE4LTIwek0zNCAxMmwxOCAyMC0xOCAyMCAxMCAwIDE4LTIwLTE4LTIweiIvPjwvc3ZnPg=="),
+    background:
+        var(--carbon),
+        repeating-linear-gradient(115deg, rgba(143,227,229,.20) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
-    background-repeat:repeat, no-repeat;
-    background-size:48px 48px, cover;
-    background-position:0 0, 0 0;
-    box-shadow:inset 6px 0 0 var(--cyan);
     animation:cyanRise 4.6s ease-in-out infinite;
+}
+
+.fixed-col .row4::before{
+    background:linear-gradient(160deg,var(--cyan2),var(--cyan) 55%,#1c6e70);
 }
 
 .fixed-col .row4 .name,
@@ -600,24 +647,25 @@ body::after{
 }
 
 .fixed-col .row5{
-    background-image:
-        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2Y0ZjFlOCIgZmlsbC1vcGFjaXR5PSIwLjIwIiBkPSJNMzIgMTBjMS41IDkgNiAxMy41IDE1IDE1LTkgMS41LTEzLjUgNi0xNSAxNS0xLjUtOS02LTEzLjUtMTUtMTUgOS0xLjUgMTMuNS02IDE1LTE1eiIvPjwvc3ZnPg=="),
+    background:
+        var(--carbon),
+        repeating-linear-gradient(115deg, rgba(244,241,232,.10) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
-    background-repeat:repeat, no-repeat;
-    background-size:40px 40px, cover;
-    background-position:0 0, 0 0;
-    box-shadow:inset 6px 0 0 rgba(244,241,232,.55);
     animation:softFlicker 6s ease-in-out infinite;
 }
 
+.fixed-col .row5::before{
+    background:linear-gradient(160deg,rgba(244,241,232,.95),rgba(244,241,232,.45) 55%,rgba(74,198,201,.35));
+}
+
 @keyframes silverShimmer{
-    0%,100%{box-shadow:inset 6px 0 0 var(--silver),0 0 0 rgba(215,222,232,0)}
-    50%{box-shadow:inset 6px 0 0 var(--silver),0 0 20px rgba(215,222,232,.30)}
+    0%,100%{box-shadow:0 0 0 rgba(215,222,232,0)}
+    50%{box-shadow:0 0 20px rgba(215,222,232,.30)}
 }
 
 @keyframes bronzeEmber{
-    0%,100%{box-shadow:inset 6px 0 0 var(--bronze),0 0 0 rgba(205,127,50,0)}
-    50%{box-shadow:inset 6px 0 0 var(--bronze),0 0 18px rgba(205,127,50,.32)}
+    0%,100%{box-shadow:0 0 0 rgba(205,127,50,0)}
+    50%{box-shadow:0 0 18px rgba(205,127,50,.32)}
 }
 
 @keyframes cyanRise{
