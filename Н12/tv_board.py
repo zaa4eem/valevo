@@ -31,17 +31,27 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Обновлено под лестницу турнира v2 (MX-5 -> BTCC(+DTM) -> GT500(+Touge) -> GT3).
 # Все 7 пунктов (включая доп.дисциплины DTM и Touge) крутятся в общей карусели
 # (фиксированную левую колонку занимает не одна из дисциплин, а общий зачёт
-# турнира — см. FIXED_TOP_ITEM и renderBoard). Меняя количество пунктов здесь,
-# обязательно пересчитай @keyframes carouselStep и --cycle-time ниже — они
-# настроены именно на 7 шагов.
+# турнира — см. FIXED_TOP_ITEM и renderBoard). Порядок — строго по лестнице
+# (MX-5 первым как этап 1, доп.дисциплина сразу после своего основного класса),
+# согласовано макетом. stage/stage_type определяют плашку над колонкой:
+# "main" — цифра этапа, "side" — доп.этап, "event" — вне лестницы (Week CUP).
+# Меняя количество пунктов здесь, обязательно пересчитай @keyframes
+# carouselStep и --cycle-time ниже — они настроены именно на 7 шагов.
 DISPLAY_ORDER = [
-    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP"},
-    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West"},
-    {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "Silverstone"},
-    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI"},
-    {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": ""},
-    {"key": "Touge", "aliases": ["TOUGE", "TOGUE"], "title": "Touge", "subtitle": ""},
-    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP", "subtitle": "LMU | Hyper BMW | Sebring circuit"},
+    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West",
+     "stage": "Этап 1", "stage_type": "main"},
+    {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "Silverstone",
+     "stage": "Этап 2", "stage_type": "main"},
+    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI",
+     "stage": "Доп. этап", "stage_type": "side"},
+    {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": "",
+     "stage": "Этап 3", "stage_type": "main"},
+    {"key": "Touge", "aliases": ["TOUGE", "TOGUE"], "title": "Touge", "subtitle": "",
+     "stage": "Доп. этап", "stage_type": "side"},
+    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP",
+     "stage": "Этап 4", "stage_type": "main"},
+    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP",
+     "subtitle": "LMU | Hyper BMW | Sebring circuit", "stage": "Отдельный кубок", "stage_type": "event"},
 ]
 
 CAROUSEL_DUPLICATES = 4
@@ -289,7 +299,7 @@ body::after{
 
 .carousel-viewport{
     min-width:0;
-    height:624px;
+    height:670px;
     overflow:hidden;
     position:relative;
     border:3px solid rgba(74,198,201,.88);
@@ -298,6 +308,47 @@ body::after{
     box-shadow:
         0 0 30px rgba(74,198,201,.16),
         inset 0 0 30px rgba(74,198,201,.07);
+}
+
+/* Полоса с плашкой этапа над заголовком колонки — общая высота колонки/вьюпорта
+   выросла ровно на её высоту (624px -> 670px), сам .head и .rows ниже не
+   трогали, чтобы старый вид не сдвинулся и не изменился. У фиксированной
+   колонки ("Общий зачёт") плашка пустая — просто резервирует то же место,
+   чтобы обе колонки остались одной высоты. */
+.badge-row{
+    height:46px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+.stage-badge{
+    font-size:14px;
+    font-weight:1000;
+    letter-spacing:.4px;
+    text-transform:uppercase;
+    font-style:italic;
+    padding:5px 16px;
+    border-radius:999px;
+    line-height:1;
+}
+
+.stage-badge--main{
+    color:#04211f;
+    background:linear-gradient(180deg,var(--cyan2),var(--cyan));
+    box-shadow:0 0 14px rgba(74,198,201,.35);
+}
+
+.stage-badge--side{
+    color:#2a1600;
+    background:linear-gradient(180deg,#ffcf8a,#ffb454);
+    box-shadow:0 0 14px rgba(255,180,84,.30);
+}
+
+.stage-badge--event{
+    color:rgba(244,241,232,.75);
+    background:transparent;
+    border:2px solid rgba(244,241,232,.4);
 }
 
 .carousel-track{
@@ -319,7 +370,7 @@ body::after{
     width:370px;
     min-width:370px;
     max-width:370px;
-    height:624px;
+    height:670px;
     overflow:hidden;
     background:transparent;
     border:none;
@@ -491,6 +542,58 @@ body::after{
 .row3 .name,
 .row3 .time{
     color:#ffc28c;
+}
+
+/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — своя анимация на каждое место ========== */
+/* Только в фиксированной колонке ("Общий зачёт"): .row1/.row2/.row3 у обычных
+   дисциплин-карусели остаются как были (эти правила ничего не переопределяют,
+   только добавляют анимацию сверху через более специфичный селектор). row4 и
+   row5 — новые классы (раньше 4-е и 5-е место были обычной строкой без
+   акцента), но они оформлены только под .fixed-col, поэтому в дисциплинах
+   карусели 4-5 строки выглядят как прежде. */
+.fixed-col .row2{
+    animation:silverShimmer 5s ease-in-out infinite;
+}
+
+.fixed-col .row3{
+    animation:bronzeEmber 5.4s ease-in-out infinite;
+}
+
+.fixed-col .row4{
+    background:linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
+    box-shadow:inset 6px 0 0 var(--cyan);
+    animation:cyanRise 4.6s ease-in-out infinite;
+}
+
+.fixed-col .row4 .name,
+.fixed-col .row4 .time{
+    color:var(--cyan2);
+}
+
+.fixed-col .row5{
+    background:linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
+    box-shadow:inset 6px 0 0 rgba(244,241,232,.55);
+    animation:softFlicker 6s ease-in-out infinite;
+}
+
+@keyframes silverShimmer{
+    0%,100%{box-shadow:inset 6px 0 0 var(--silver),0 0 0 rgba(215,222,232,0)}
+    50%{box-shadow:inset 6px 0 0 var(--silver),0 0 20px rgba(215,222,232,.30)}
+}
+
+@keyframes bronzeEmber{
+    0%,100%{box-shadow:inset 6px 0 0 var(--bronze),0 0 0 rgba(205,127,50,0)}
+    50%{box-shadow:inset 6px 0 0 var(--bronze),0 0 18px rgba(205,127,50,.32)}
+}
+
+@keyframes cyanRise{
+    0%,100%{filter:brightness(1)}
+    50%{filter:brightness(1.16)}
+}
+
+@keyframes softFlicker{
+    0%,45%,55%,100%{opacity:1}
+    50%{opacity:.78}
 }
 
 .empty{
@@ -835,7 +938,8 @@ function escapeHtml(value){
 
 function makeRow(pilot, index, oldMap){
     const row = document.createElement("div");
-    const placeClass = index === 0 ? "row1" : index === 1 ? "row2" : index === 2 ? "row3" : "";
+    const placeClass = index === 0 ? "row1" : index === 1 ? "row2" : index === 2 ? "row3"
+        : index === 3 ? "row4" : index === 4 ? "row5" : "";
     row.className = `row ${placeClass}`;
     row.dataset.pilot = pilot.name;
     row.dataset.place = String(index);
@@ -889,6 +993,18 @@ function makeColumn(item, pilots, oldGroups){
     col.className = "col";
     col.dataset.discipline = item.key;
 
+    // Плашка этапа всегда рендерится (даже пустой — у "Общий зачёт" своего
+    // stage нет), чтобы высота колонки совпадала с каруселью и .head/.rows
+    // ниже остались ровно там же, где были до добавления плашек.
+    const badgeRow = document.createElement("div");
+    badgeRow.className = "badge-row";
+    if (item.stage){
+        const pill = document.createElement("span");
+        pill.className = `stage-badge stage-badge--${item.stage_type || "main"}`;
+        pill.textContent = item.stage;
+        badgeRow.appendChild(pill);
+    }
+
     const head = document.createElement("div");
     head.className = "head";
     head.innerHTML = `<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>`;
@@ -911,6 +1027,7 @@ function makeColumn(item, pilots, oldGroups){
         }
     }
 
+    col.appendChild(badgeRow);
     col.appendChild(head);
     col.appendChild(rows);
     return col;
