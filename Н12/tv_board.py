@@ -565,7 +565,7 @@ body::after{
    на капоте болида) + острый угловой клин слева вместо плоской полоски
    (как номерная табличка), у 1-го места клин — в шашечку финишного флага. */
 .fixed-col .row{
-    padding-left:30px;
+    padding-left:40px;
 }
 
 .fixed-col .row1,
@@ -576,20 +576,47 @@ body::after{
     position:relative;
 }
 
+/* Угловой клин слева — теперь с номером места внутри (как таблоид позиции в
+   гоночном ТВ-графике) и глянцевым бликом по диагонали, чтобы металл
+   действительно читался как металл, а не плоская закраска. У 1-го места
+   вместо номера — шашечка финишного флага, этого узнают без подписи. */
 .fixed-col .row1::before,
 .fixed-col .row2::before,
 .fixed-col .row3::before,
 .fixed-col .row4::before,
 .fixed-col .row5::before{
-    content:"";
     position:absolute;
     left:0;
     top:0;
     bottom:0;
-    width:24px;
-    clip-path:polygon(0 0, 100% 0, 58% 100%, 0 100%);
-    z-index:1;
+    width:32px;
+    clip-path:polygon(0 0, 100% 0, 62% 100%, 0 100%);
+    z-index:2;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding-bottom:10px;
+    font-size:15px;
+    font-weight:1000;
+    font-style:italic;
 }
+
+.fixed-col .row1::before{ content:""; }
+.fixed-col .row2::before{ content:"2"; color:#1c2733; text-shadow:0 1px 0 rgba(255,255,255,.5); }
+.fixed-col .row3::before{ content:"3"; color:#2a1608; text-shadow:0 1px 0 rgba(255,207,138,.5); }
+.fixed-col .row4::before{ content:"4"; color:#042a2c; text-shadow:0 1px 0 rgba(143,227,229,.5); }
+.fixed-col .row5::before{ content:"5"; color:#2b2822; text-shadow:0 1px 0 rgba(255,255,255,.35); }
+
+/* Тонкая светящаяся полоса под каждой строкой топ-5 — довершает ощущение
+   отдельной "карточки места", а не просто раскрашенной строки таблицы. */
+.fixed-col .row1,.fixed-col .row2,.fixed-col .row3,.fixed-col .row4,.fixed-col .row5{
+    border-bottom:2px solid transparent;
+}
+.fixed-col .row1{border-bottom-color:rgba(255,204,51,.55)}
+.fixed-col .row2{border-bottom-color:rgba(215,222,232,.45)}
+.fixed-col .row3{border-bottom-color:rgba(205,127,50,.5)}
+.fixed-col .row4{border-bottom-color:rgba(74,198,201,.5)}
+.fixed-col .row5{border-bottom-color:rgba(244,241,232,.3)}
 
 .fixed-col .row1{
     background:
@@ -600,9 +627,11 @@ body::after{
 }
 
 .fixed-col .row1::before{
-    background-image:repeating-conic-gradient(#0b0f0f 0 25%, var(--gold2) 0 50%);
-    background-size:8px 8px;
-    box-shadow:inset 0 0 0 1px rgba(0,0,0,.45);
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.5) 0%, transparent 34%),
+        repeating-conic-gradient(#0b0f0f 0 25%, var(--gold2) 0 50%);
+    background-size:auto, 9px 9px;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.45), inset 0 10px 10px -6px rgba(255,255,255,.35);
 }
 
 .fixed-col .row2{
@@ -614,7 +643,10 @@ body::after{
 }
 
 .fixed-col .row2::before{
-    background:linear-gradient(160deg,#f3f7fb,var(--silver) 55%,#9fb0bf);
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.6) 0%, transparent 34%),
+        linear-gradient(160deg,#f3f7fb,var(--silver) 55%,#9fb0bf);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.45);
 }
 
 .fixed-col .row3{
@@ -626,7 +658,10 @@ body::after{
 }
 
 .fixed-col .row3::before{
-    background:linear-gradient(160deg,#ffcf8a,var(--bronze) 55%,#8a4d1c);
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.45) 0%, transparent 34%),
+        linear-gradient(160deg,#ffcf8a,var(--bronze) 55%,#8a4d1c);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.3);
 }
 
 .fixed-col .row4{
@@ -638,7 +673,10 @@ body::after{
 }
 
 .fixed-col .row4::before{
-    background:linear-gradient(160deg,var(--cyan2),var(--cyan) 55%,#1c6e70);
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.5) 0%, transparent 34%),
+        linear-gradient(160deg,var(--cyan2),var(--cyan) 55%,#1c6e70);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.35);
 }
 
 .fixed-col .row4 .name,
@@ -655,8 +693,42 @@ body::after{
 }
 
 .fixed-col .row5::before{
-    background:linear-gradient(160deg,rgba(244,241,232,.95),rgba(244,241,232,.45) 55%,rgba(74,198,201,.35));
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.4) 0%, transparent 34%),
+        linear-gradient(160deg,rgba(244,241,232,.95),rgba(244,241,232,.45) 55%,rgba(74,198,201,.35));
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.25);
 }
+
+/* Блик-скан по всей строке — раньше был только у 1-го места, остальные
+   рядом выглядели заметно "тише". Сдвиги по времени разные, чтобы все
+   пять не мигали в такт (иначе смотрится механически, не премиально). */
+.fixed-col .row2::after,
+.fixed-col .row3::after,
+.fixed-col .row4::after,
+.fixed-col .row5::after{
+    content:"";
+    position:absolute;
+    top:0;
+    left:-80%;
+    width:45%;
+    height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);
+    transform:skewX(-18deg);
+    pointer-events:none;
+    z-index:1;
+}
+.fixed-col .row2::after{animation:rowSweep 7s linear infinite}
+.fixed-col .row3::after{animation:rowSweep 7.6s linear infinite}
+.fixed-col .row4::after{animation:rowSweep 6.6s linear infinite}
+.fixed-col .row5::after{animation:rowSweep 8.2s linear infinite}
+
+/* Баллы топ-5 светятся в цвете места, а не одинаковым голубым, как во всей
+   остальной таблице — довершает ощущение персональной "карточки". */
+.fixed-col .row1 .time{text-shadow:0 0 14px rgba(255,204,51,.5)}
+.fixed-col .row2 .time{text-shadow:0 0 14px rgba(215,222,232,.42)}
+.fixed-col .row3 .time{text-shadow:0 0 14px rgba(205,127,50,.45)}
+.fixed-col .row4 .time{text-shadow:0 0 14px rgba(74,198,201,.45)}
+.fixed-col .row5 .time{text-shadow:0 0 10px rgba(244,241,232,.32)}
 
 @keyframes silverShimmer{
     0%,100%{box-shadow:0 0 0 rgba(215,222,232,0)}
