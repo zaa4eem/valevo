@@ -576,15 +576,15 @@ body::after{
     position:relative;
 }
 
-/* Угловой клин слева — теперь с номером места внутри (как таблоид позиции в
-   гоночном ТВ-графике) и глянцевым бликом по диагонали, чтобы металл
-   действительно читался как металл, а не плоская закраска. У 1-го места
-   вместо номера — шашечка финишного флага, этого узнают без подписи. */
+/* Угловой клин слева — без номера (дублировал цифру из колонки мест слева),
+   просто цветной металлик с глянцевым бликом по диагонали. У 1-го места —
+   шашечка финишного флага. */
 .fixed-col .row1::before,
 .fixed-col .row2::before,
 .fixed-col .row3::before,
 .fixed-col .row4::before,
 .fixed-col .row5::before{
+    content:"";
     position:absolute;
     left:0;
     top:0;
@@ -592,38 +592,24 @@ body::after{
     width:32px;
     clip-path:polygon(0 0, 100% 0, 62% 100%, 0 100%);
     z-index:2;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding-bottom:10px;
-    font-size:15px;
-    font-weight:1000;
-    font-style:italic;
 }
-
-.fixed-col .row1::before{ content:""; }
-.fixed-col .row2::before{ content:"2"; color:#1c2733; text-shadow:0 1px 0 rgba(255,255,255,.5); }
-.fixed-col .row3::before{ content:"3"; color:#2a1608; text-shadow:0 1px 0 rgba(255,207,138,.5); }
-.fixed-col .row4::before{ content:"4"; color:#042a2c; text-shadow:0 1px 0 rgba(143,227,229,.5); }
-.fixed-col .row5::before{ content:"5"; color:#2b2822; text-shadow:0 1px 0 rgba(255,255,255,.35); }
 
 /* Тонкая светящаяся полоса под каждой строкой топ-5 — довершает ощущение
    отдельной "карточки места", а не просто раскрашенной строки таблицы. */
 .fixed-col .row1,.fixed-col .row2,.fixed-col .row3,.fixed-col .row4,.fixed-col .row5{
     border-bottom:2px solid transparent;
 }
-.fixed-col .row1{border-bottom-color:rgba(255,204,51,.55)}
-.fixed-col .row2{border-bottom-color:rgba(215,222,232,.45)}
-.fixed-col .row3{border-bottom-color:rgba(205,127,50,.5)}
-.fixed-col .row4{border-bottom-color:rgba(74,198,201,.5)}
-.fixed-col .row5{border-bottom-color:rgba(244,241,232,.3)}
+.fixed-col .row1{border-bottom-color:rgba(255,204,51,.85)}
+.fixed-col .row2{border-bottom-color:rgba(215,222,232,.7)}
+.fixed-col .row3{border-bottom-color:rgba(205,127,50,.8)}
+.fixed-col .row4{border-bottom-color:rgba(74,198,201,.8)}
+.fixed-col .row5{border-bottom-color:rgba(244,241,232,.5)}
 
 .fixed-col .row1{
     background:
         var(--carbon),
-        repeating-linear-gradient(115deg, rgba(255,224,120,.24) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(255,204,51,.26),rgba(255,230,120,.10),rgba(255,204,51,.20));
-    box-shadow:0 0 22px rgba(255,204,51,.22);
+    box-shadow:0 0 34px rgba(255,204,51,.45), 0 0 60px rgba(255,204,51,.18);
 }
 
 .fixed-col .row1::before{
@@ -637,7 +623,6 @@ body::after{
 .fixed-col .row2{
     background:
         var(--carbon),
-        repeating-linear-gradient(115deg, rgba(255,255,255,.14) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(225,235,245,.16),rgba(74,198,201,.05));
     animation:silverShimmer 5s ease-in-out infinite;
 }
@@ -652,7 +637,6 @@ body::after{
 .fixed-col .row3{
     background:
         var(--carbon),
-        repeating-linear-gradient(115deg, rgba(255,191,122,.20) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(205,127,50,.20),rgba(74,198,201,.04));
     animation:bronzeEmber 5.4s ease-in-out infinite;
 }
@@ -667,7 +651,6 @@ body::after{
 .fixed-col .row4{
     background:
         var(--carbon),
-        repeating-linear-gradient(115deg, rgba(143,227,229,.20) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
     animation:cyanRise 4.6s ease-in-out infinite;
 }
@@ -687,7 +670,6 @@ body::after{
 .fixed-col .row5{
     background:
         var(--carbon),
-        repeating-linear-gradient(115deg, rgba(244,241,232,.10) 0 14px, transparent 14px 92px),
         linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
     animation:softFlicker 6s ease-in-out infinite;
 }
@@ -723,31 +705,33 @@ body::after{
 .fixed-col .row5::after{animation:rowSweep 8.2s linear infinite}
 
 /* Баллы топ-5 светятся в цвете места, а не одинаковым голубым, как во всей
-   остальной таблице — довершает ощущение персональной "карточки". */
-.fixed-col .row1 .time{text-shadow:0 0 14px rgba(255,204,51,.5)}
-.fixed-col .row2 .time{text-shadow:0 0 14px rgba(215,222,232,.42)}
-.fixed-col .row3 .time{text-shadow:0 0 14px rgba(205,127,50,.45)}
-.fixed-col .row4 .time{text-shadow:0 0 14px rgba(74,198,201,.45)}
-.fixed-col .row5 .time{text-shadow:0 0 10px rgba(244,241,232,.32)}
+   остальной таблице — довершает ощущение персональной "карточки". Свечение
+   сделано ярче и активнее специально для топ-5 — за пределами него ничего
+   не тронуто. */
+.fixed-col .row1 .time{text-shadow:0 0 22px rgba(255,204,51,.75)}
+.fixed-col .row2 .time{text-shadow:0 0 20px rgba(215,222,232,.6)}
+.fixed-col .row3 .time{text-shadow:0 0 20px rgba(205,127,50,.65)}
+.fixed-col .row4 .time{text-shadow:0 0 20px rgba(74,198,201,.65)}
+.fixed-col .row5 .time{text-shadow:0 0 16px rgba(244,241,232,.5)}
 
 @keyframes silverShimmer{
     0%,100%{box-shadow:0 0 0 rgba(215,222,232,0)}
-    50%{box-shadow:0 0 20px rgba(215,222,232,.30)}
+    50%{box-shadow:0 0 34px rgba(215,222,232,.55)}
 }
 
 @keyframes bronzeEmber{
     0%,100%{box-shadow:0 0 0 rgba(205,127,50,0)}
-    50%{box-shadow:0 0 18px rgba(205,127,50,.32)}
+    50%{box-shadow:0 0 30px rgba(205,127,50,.55)}
 }
 
 @keyframes cyanRise{
-    0%,100%{filter:brightness(1)}
-    50%{filter:brightness(1.16)}
+    0%,100%{filter:brightness(1);box-shadow:0 0 0 rgba(74,198,201,0)}
+    50%{filter:brightness(1.32);box-shadow:0 0 30px rgba(74,198,201,.5)}
 }
 
 @keyframes softFlicker{
-    0%,45%,55%,100%{opacity:1}
-    50%{opacity:.78}
+    0%,100%{opacity:1;box-shadow:0 0 0 rgba(244,241,232,0)}
+    50%{opacity:.88;box-shadow:0 0 20px rgba(244,241,232,.4)}
 }
 
 .empty{
