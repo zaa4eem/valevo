@@ -98,9 +98,18 @@ async def build_leaderboard() -> str:
 
 
 async def _build_overall_standings_block(month_key: str, start_iso: str, end_iso: str) -> str:
+    """Итог месяца = сумма (баллы класса × вес класса) по всем классам, где
+    выполнен зачёт. Раньше показывался только итоговое число без объяснения,
+    из чего оно складывается — пилоту было "непонятно как" оно считается,
+    особенно если он выступает в нескольких классах сразу. Теперь под каждым
+    итогом — краткая раскладка по классам, из которой видно, что каждый новый
+    класс с эталоном действительно добавляет свой вклад."""
     ranked = await rank_month_overall(month_key, start_iso, end_iso)
 
-    lines = ["🏆 <b>ОБЩИЙ ЗАЧЁТ МЕСЯЦА</b>"]
+    lines = [
+        "🏆 <b>ОБЩИЙ ЗАЧЁТ МЕСЯЦА</b>",
+        "<i>Итог = сумма (баллы класса × вес класса) по всем классам зачёта</i>",
+    ]
     if not ranked:
         lines.append("Пока никто не набрал зачётных баллов в этом месяце.")
         return "\n".join(lines)
@@ -108,9 +117,14 @@ async def _build_overall_standings_block(month_key: str, start_iso: str, end_iso
     for i, r in enumerate(ranked[:OVERALL_TOP_N]):
         display = await _pilot_display(r["telegram_id"])
         mark = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+        breakdown_text = " + ".join(
+            f"{html.escape(b['class_name'])} {_format_score(b['score'])}×{b['weight']:g}"
+            for b in r["breakdown"]
+        )
         lines.append(
             f"{mark} {html.escape(display)} — "
             f"<code>{html.escape(_format_score(r['total']))}</code>"
+            f"\n     <i>{breakdown_text}</i>"
         )
 
     return "\n".join(lines)
