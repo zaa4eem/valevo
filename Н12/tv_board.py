@@ -544,23 +544,52 @@ body::after{
     color:#ffc28c;
 }
 
-/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — своя анимация на каждое место ========== */
+/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — своя анимация и фон на каждое место ========== */
 /* Только в фиксированной колонке ("Общий зачёт"): .row1/.row2/.row3 у обычных
-   дисциплин-карусели остаются как были (эти правила ничего не переопределяют,
-   только добавляют анимацию сверху через более специфичный селектор). row4 и
-   row5 — новые классы (раньше 4-е и 5-е место были обычной строкой без
-   акцента), но они оформлены только под .fixed-col, поэтому в дисциплинах
-   карусели 4-5 строки выглядят как прежде. */
+   дисциплин-карусели остаются как были (следующие правила их не трогают —
+   применяются только внутри .fixed-col через более специфичный селектор).
+   row4 и row5 — новые классы (раньше 4-е и 5-е место были обычной строкой
+   без акцента), но они оформлены только под .fixed-col, поэтому в
+   дисциплинах карусели 4-5 строки выглядят как прежде.
+   У каждого места — свой узор поверх фирменного градиента места (молнии
+   у 1-го, звёзды у 2-го, искры у 3-го, шевроны-скорость у 4-го, лёгкие
+   блики у 5-го), нарисованный крошечным инлайновым SVG, без внешних файлов. */
+.fixed-col .row1{
+    background-image:
+        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2ZmZTI3YSIgZmlsbC1vcGFjaXR5PSIwLjMyIiBkPSJNMzUgNEwxNiAzNGgxMWwtNCAyNiAyMS0zMkgzM2w0LTI0eiIvPjwvc3ZnPg=="),
+        linear-gradient(90deg,rgba(255,204,51,.26),rgba(255,230,120,.10),rgba(255,204,51,.20));
+    background-repeat:repeat, no-repeat;
+    background-size:52px 52px, cover;
+    background-position:0 0, 0 0;
+}
+
 .fixed-col .row2{
+    background-image:
+        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2U3ZWRmNSIgZmlsbC1vcGFjaXR5PSIwLjMwIiBkPSJNMzIgNmw3LjUgMTUuNUw1NyAyNGwtMTIuNSAxMkw0NyA1NCAzMiA0NSAxNyA1NGwyLjUtMThMNyAyNGwxNy41LTIuNXoiLz48L3N2Zz4="),
+        linear-gradient(90deg,rgba(225,235,245,.16),rgba(74,198,201,.05));
+    background-repeat:repeat, no-repeat;
+    background-size:52px 52px, cover;
+    background-position:0 0, 0 0;
     animation:silverShimmer 5s ease-in-out infinite;
 }
 
 .fixed-col .row3{
+    background-image:
+        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2ZmYmY3YSIgZmlsbC1vcGFjaXR5PSIwLjMyIiBkPSJNMzIgNmMyIDEyIDggMTggMjAgMjAtMTIgMi0xOCA4LTIwIDIwLTItMTItOC0xOC0yMC0yMCAxMi0yIDE4LTggMjAtMjB6Ii8+PC9zdmc+"),
+        linear-gradient(90deg,rgba(205,127,50,.20),rgba(74,198,201,.04));
+    background-repeat:repeat, no-repeat;
+    background-size:44px 44px, cover;
+    background-position:0 0, 0 0;
     animation:bronzeEmber 5.4s ease-in-out infinite;
 }
 
 .fixed-col .row4{
-    background:linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
+    background-image:
+        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iIzhmZTNlNSIgZmlsbC1vcGFjaXR5PSIwLjMwIiBkPSJNOCAxMmwxOCAyMC0xOCAyMCAxMCAwIDE4LTIwLTE4LTIwek0zNCAxMmwxOCAyMC0xOCAyMCAxMCAwIDE4LTIwLTE4LTIweiIvPjwvc3ZnPg=="),
+        linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
+    background-repeat:repeat, no-repeat;
+    background-size:48px 48px, cover;
+    background-position:0 0, 0 0;
     box-shadow:inset 6px 0 0 var(--cyan);
     animation:cyanRise 4.6s ease-in-out infinite;
 }
@@ -571,7 +600,12 @@ body::after{
 }
 
 .fixed-col .row5{
-    background:linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
+    background-image:
+        url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA2NCA2NCI+PHBhdGggZmlsbD0iI2Y0ZjFlOCIgZmlsbC1vcGFjaXR5PSIwLjIwIiBkPSJNMzIgMTBjMS41IDkgNiAxMy41IDE1IDE1LTkgMS41LTEzLjUgNi0xNSAxNS0xLjUtOS02LTEzLjUtMTUtMTUgOS0xLjUgMTMuNS02IDE1LTE1eiIvPjwvc3ZnPg=="),
+        linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
+    background-repeat:repeat, no-repeat;
+    background-size:40px 40px, cover;
+    background-position:0 0, 0 0;
     box-shadow:inset 6px 0 0 rgba(244,241,232,.55);
     animation:softFlicker 6s ease-in-out infinite;
 }

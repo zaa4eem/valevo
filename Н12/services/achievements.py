@@ -68,7 +68,13 @@ CATALOG: dict[str, tuple[str, str, str, int]] = {
 assert len(CATALOG) == 25, f"Ожидалось 25 достижений, сейчас {len(CATALOG)}"
 
 
-async def _award(telegram_id: int, code: str, bot=None) -> None:
+async def _award(telegram_id: int, code: str, bag: list | None = None) -> None:
+    """Разблокирует ачивку и начисляет рейтинг. Раньше сразу же отправляла
+    отдельное сообщение — если один круг открывал сразу 3-5 ачивок (частый
+    случай: первый круг месяца ⇒ founding_member + pioneer + milestone +
+    beat_benchmark одновременно), пилоту прилетало 3-5 сообщений подряд.
+    Теперь просто складывает новые ачивки в bag — вызывающий код отправляет
+    их одним сообщением через _flush_achievements после всех проверок."""
     if code not in CATALOG:
         return
     newly_unlocked = await unlock_achievement(telegram_id, code)
@@ -81,15 +87,35 @@ async def _award(telegram_id: int, code: str, bot=None) -> None:
     except Exception:
         logger.exception("Не удалось начислить рейтинг за ачивку %s пилоту %s", code, telegram_id)
 
-    if bot is not None:
-        try:
-            await bot.send_message(
-                telegram_id,
-                f"{emoji} <b>НОВОЕ ДОСТИЖЕНИЕ</b>\n\n"
-                f"<b>{title}</b>\n{description}\n\n📈 Рейтинг: +{reward}",
-            )
-        except Exception:
-            logger.warning("Не удалось уведомить пилота %s о достижении %s", telegram_id, code)
+    if bag is not None:
+        bag.append((emoji, title, description, reward))
+
+
+async def _flush_achievements(telegram_id: int, bot, bag: list) -> None:
+    """Отправляет одно сообщение со всеми ачивками, накопленными в bag за
+    текущую проверку (одну, если она единственная — без лишнего "список из 1")."""
+    if not bag or bot is None:
+        return
+
+    if len(bag) == 1:
+        emoji, title, description, reward = bag[0]
+        text = (
+            f"{emoji} <b>НОВОЕ ДОСТИЖЕНИЕ</b>\n\n"
+            f"<b>{title}</b>\n{description}\n\n📈 Рейтинг: +{reward}"
+        )
+    else:
+        total_reward = sum(reward for _, _, _, reward in bag)
+        lines = [f"🎉 <b>НОВЫЕ ДОСТИЖЕНИЯ ({len(bag)})</b>", ""]
+        for emoji, title, description, reward in bag:
+            lines.append(f"{emoji} <b>{title}</b> — {description} (+{reward})")
+        lines.append("")
+        lines.append(f"📈 Рейтинг суммарно: +{total_reward}")
+        text = "\n".join(lines)
+
+    try:
+        await bot.send_message(telegram_id, text)
+    except Exception:
+        logger.warning("Не удалось уведомить пилота %s о достижениях (%s шт.)", telegram_id, len(bag))
 
 
 async def check_achievements_after_lap(
@@ -101,20 +127,23 @@ async def check_achievements_after_lap(
     lap_time_ms: int | None = None,
     promoted_to: str | None = None,
 ) -> None:
-    """Проверки, привязанные к моменту засчитанного круга."""
+    """Проверки, привязанные к моменту засчитанного круга. Все ачивки,
+    открытые за этот вызов, собираются в один bag и уходят одним сообщением
+    в конце — вместо того чтобы прилетать пилоту по отдельности."""
+    bag: list = []
 
     if promoted_to == "BTCC":
-        await _award(telegram_id, "unlocked_btcc", bot)
+        await _award(telegram_id, "unlocked_btcc", bag)
     elif promoted_to == "GT500":
-        await _award(telegram_id, "unlocked_gt500", bot)
+        await _award(telegram_id, "unlocked_gt500", bag)
     elif promoted_to == "GT3":
-        await _award(telegram_id, "unlocked_gt3", bot)
+        await _award(telegram_id, "unlocked_gt3", bag)
 
     total_laps = await count_lifetime_laps(telegram_id)
     for milestone in LAP_MILESTONES:
         if total_laps >= milestone:
             code = "first_lap" if milestone == 1 else f"laps_{milestone}"
-            await _award(telegram_id, code, bot)
+            await _award(telegram_id, code, bag)
 
     if track and lap_time_ms is not None:
         # created_at "перед этим кругом" — берём с небольшим запасом, круг только что вставлен.
@@ -122,7 +151,7 @@ async def check_achievements_after_lap(
         before = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
         was_empty = not await has_prior_laps_on_track(discipline_name, track, before)
         if was_empty:
-            await _award(telegram_id, "pioneer_empty_table", bot)
+            await _award(telegram_id, "pioneer_empty_table", bag)
 
     if discipline_name in CLASS_LADDER:
         # Отложенный импорт — избегаем цикла на уровне модуля (services.tournament
@@ -135,27 +164,29 @@ async def check_achievements_after_lap(
         result = await live_class_score(telegram_id, discipline_name, month_key, start_iso, end_iso)
         if result["qualifies"] and result["score"] is not None:
             if result["score"] >= 100:
-                await _award(telegram_id, "beat_benchmark", bot)
+                await _award(telegram_id, "beat_benchmark", bag)
             if result["score"] >= 130:
-                await _award(telegram_id, "max_score", bot)
+                await _award(telegram_id, "max_score", bag)
 
         if result["benchmark"]:
             improvements = await count_month_improvements(telegram_id, discipline_name, start_iso, end_iso)
             if improvements >= 5:
-                await _award(telegram_id, "improved_5_times", bot)
+                await _award(telegram_id, "improved_5_times", bag)
 
-        await _check_founding_member(telegram_id, month_key, start_iso, end_iso, bot)
+        await _check_founding_member(telegram_id, month_key, start_iso, end_iso, bag)
 
     raced = await lifetime_disciplines_raced(telegram_id)
     if set(MAIN_SEQUENCE).issubset(raced):
-        await _award(telegram_id, "all_main_classes", bot)
+        await _award(telegram_id, "all_main_classes", bag)
 
     all_side = {name for names in SIDE_DISCIPLINES.values() for name in names}
     if all_side and all_side.issubset(raced):
-        await _award(telegram_id, "both_side_disciplines", bot)
+        await _award(telegram_id, "both_side_disciplines", bag)
+
+    await _flush_achievements(telegram_id, bot, bag)
 
 
-async def _check_founding_member(telegram_id: int, month_key: str, start_iso: str, end_iso: str, bot=None) -> None:
+async def _check_founding_member(telegram_id: int, month_key: str, start_iso: str, end_iso: str, bag: list | None = None) -> None:
     launch_month = await get_setting("tournament_launch_month")
     if launch_month is None:
         launch_month = month_key
@@ -167,7 +198,7 @@ async def _check_founding_member(telegram_id: int, month_key: str, start_iso: st
     for class_name in CLASS_LADDER:
         _, starts = await get_pilot_month_best(telegram_id, class_name, start_iso, end_iso)
         if starts >= min_starts_for_class(class_name):
-            await _award(telegram_id, "founding_member", bot)
+            await _award(telegram_id, "founding_member", bag)
             return
 
 
@@ -176,31 +207,44 @@ async def grant_manual_achievement(telegram_id: int, code: str, bot=None) -> boo
     выдаётся вручную администратором."""
     if code not in CATALOG:
         return False
-    await _award(telegram_id, code, bot)
+    bag: list = []
+    await _award(telegram_id, code, bag)
+    await _flush_achievements(telegram_id, bot, bag)
     return True
 
 
 async def check_achievements_month_end(bot=None) -> None:
     """Проверки, зависящие от итогов месяца — вызывается из ежемесячной джобы
-    закрытия сезона (после релегации)."""
+    закрытия сезона (после релегации). Ранжирование месяца и стрик могут оба
+    открыть ачивку одному и тому же пилоту за один прогон — копим в общий bag
+    на пилота между обеими проверками и шлём одно сообщение в конце, а не два."""
     from services.tournament import month_participant_ids, rank_month_overall  # локальный импорт: избегаем цикла на уровне модуля
 
     month_key, start_iso, end_iso = month_bounds(moscow_tz_name=MOSCOW_TZ)
+    bags: dict[int, list] = {}
+
+    def bag_for(telegram_id: int) -> list:
+        return bags.setdefault(telegram_id, [])
 
     ranking = await rank_month_overall(month_key, start_iso, end_iso)
     for rank, row in enumerate(ranking, start=1):
+        telegram_id = row["telegram_id"]
+        bag = bag_for(telegram_id)
         if len(row["breakdown"]) >= 3:
-            await _award(row["telegram_id"], "multi_class_month", bot)
+            await _award(telegram_id, "multi_class_month", bag)
         if rank == 1:
-            await _award(row["telegram_id"], "won_month", bot)
+            await _award(telegram_id, "won_month", bag)
         if rank <= 5:
-            await _award(row["telegram_id"], "top5_month", bot)
+            await _award(telegram_id, "top5_month", bag)
 
     for telegram_id in await month_participant_ids(start_iso, end_iso):
-        await _check_streak(telegram_id, bot)
+        await _check_streak(telegram_id, bag_for(telegram_id))
+
+    for telegram_id, bag in bags.items():
+        await _flush_achievements(telegram_id, bot, bag)
 
 
-async def _check_streak(telegram_id: int, bot=None) -> None:
+async def _check_streak(telegram_id: int, bag: list | None = None) -> None:
     """Считает подряд идущие месяцы (включая текущий) с выполненным минимумом
     стартов хотя бы в одной дисциплине."""
     from datetime import datetime
@@ -234,8 +278,8 @@ async def _check_streak(telegram_id: int, bot=None) -> None:
             year -= 1
 
     if streak >= 3:
-        await _award(telegram_id, "streak_3", bot)
+        await _award(telegram_id, "streak_3", bag)
     if streak >= 6:
-        await _award(telegram_id, "streak_6", bot)
+        await _award(telegram_id, "streak_6", bag)
     if streak >= 12:
-        await _award(telegram_id, "streak_12", bot)
+        await _award(telegram_id, "streak_12", bag)

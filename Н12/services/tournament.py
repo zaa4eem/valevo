@@ -68,17 +68,68 @@ async def live_class_score(telegram_id: int, class_name: str, month_key: str, st
     }
 
 
-async def overall_monthly_total(telegram_id: int, month_key: str, start_iso: str, end_iso: str) -> tuple[float, list[dict]]:
-    """Общий взвешенный зачёт месяца — сумма (баллы × вес) по всем классам,
-    где выполнен минимум стартов. Возвращает (итог, детали по классам)."""
+# Бонус за место в личном зачёте класса среди тех, кто выполнил зачёт в этом
+# классе в этом месяце — 1-е место, 2-е, 3-е. Дальше без бонуса. Считается
+# заново при каждом обращении к рангу класса (никаких сохранённых событий
+# "обогнал/обогнали") — обогнали кого-то и заняли его место, бонус в общем
+# зачёте сразу перешёл к вам, а не остался висеть у прежнего лидера. Это то,
+# что делает общий зачёт "плавающим" не только от своего личного времени, но
+# и от того, где вы сейчас относительно других — не влияет на порог перехода
+# класса (это отдельная, "чистая" метрика скорости против эталона).
+POSITION_BONUS_BY_RANK = {1: 10, 2: 6, 3: 3}
+
+
+async def class_position_bonuses(class_name: str, month_key: str, start_iso: str, end_iso: str) -> dict[int, int]:
+    """{telegram_id: бонус} для всех, кто сейчас в зачёте этого класса, по
+    текущему ранжированию среди них же (не среди всех пилотов клуба)."""
+    participants = await month_participant_ids(start_iso, end_iso)
+    scored: list[tuple[int, int]] = []
+    for telegram_id in participants:
+        result = await live_class_score(telegram_id, class_name, month_key, start_iso, end_iso)
+        if result["qualifies"] and result["score"] is not None:
+            scored.append((telegram_id, result["score"]))
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return {
+        telegram_id: POSITION_BONUS_BY_RANK.get(rank, 0)
+        for rank, (telegram_id, _score) in enumerate(scored, start=1)
+    }
+
+
+async def overall_monthly_total(
+    telegram_id: int,
+    month_key: str,
+    start_iso: str,
+    end_iso: str,
+    position_bonuses: dict[str, dict[int, int]] | None = None,
+) -> tuple[float, list[dict]]:
+    """Общий взвешенный зачёт месяца — сумма ((баллы класса + бонус за место в
+    классе) × вес) по всем классам, где выполнен минимум стартов.
+
+    position_bonuses — необязательный предпосчитанный {класс: {telegram_id: бонус}}.
+    rank_month_overall считает его один раз на класс и передаёт сюда, чтобы не
+    пересчитывать ранжирование класса для каждого участника отдельно (было бы
+    O(участники²) на весь общий зачёт). При одиночном вызове (например, для
+    одного пилота из профиля) считается на лету для каждого класса.
+    """
     total = 0.0
     breakdown = []
     for class_name, cfg in CLASS_LADDER.items():
         result = await live_class_score(telegram_id, class_name, month_key, start_iso, end_iso)
         if result["qualifies"] and result["score"] is not None:
-            weighted = result["score"] * cfg["weight"]
+            if position_bonuses is not None:
+                bonus = position_bonuses.get(class_name, {}).get(telegram_id, 0)
+            else:
+                class_bonuses = await class_position_bonuses(class_name, month_key, start_iso, end_iso)
+                bonus = class_bonuses.get(telegram_id, 0)
+            effective_score = result["score"] + bonus
+            weighted = effective_score * cfg["weight"]
             total += weighted
-            breakdown.append({**result, "weight": cfg["weight"], "weighted": weighted})
+            breakdown.append({
+                **result,
+                "position_bonus": bonus,
+                "weight": cfg["weight"],
+                "weighted": weighted,
+            })
     return round(total, 1), breakdown
 
 
@@ -98,9 +149,15 @@ async def rank_month_overall(month_key: str, start_iso: str, end_iso: str) -> li
     Каждый элемент: {telegram_id, total, breakdown}. Используется и для выплаты
     призов, и для витрины в лидерборде/ТВ-табло, и для проверки ачивок.
     """
+    participant_ids = await month_participant_ids(start_iso, end_iso)
+    position_bonuses = {
+        class_name: await class_position_bonuses(class_name, month_key, start_iso, end_iso)
+        for class_name in CLASS_LADDER
+    }
+
     totals = []
-    for telegram_id in await month_participant_ids(start_iso, end_iso):
-        total, breakdown = await overall_monthly_total(telegram_id, month_key, start_iso, end_iso)
+    for telegram_id in participant_ids:
+        total, breakdown = await overall_monthly_total(telegram_id, month_key, start_iso, end_iso, position_bonuses)
         if total > 0:
             totals.append({"telegram_id": telegram_id, "total": total, "breakdown": breakdown})
     totals.sort(key=lambda row: row["total"], reverse=True)
