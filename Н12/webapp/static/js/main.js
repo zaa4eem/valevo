@@ -4,11 +4,11 @@
  * GET /api/me, then hands off to the router for the tab-based app shell.
  */
 
-import { initTelegram, haptic, setBackButtonVisible, hideMainButton } from "./telegram.js";
+import { initTelegram, getStartParam, haptic, setBackButtonVisible, hideMainButton } from "./telegram.js";
 import { api } from "./api.js";
 import { appState, setMe } from "./state.js";
 import { clear, errorState } from "./ui.js";
-import { initRouter, setTabs, startRouter } from "./router.js";
+import { initRouter, setTabs, startRouter, switchTab } from "./router.js";
 
 import { renderSplash } from "./screens/splash.js";
 import { renderAuthFailed } from "./screens/auth-failed.js";
@@ -62,10 +62,22 @@ function buildTabs(isAdmin) {
     return tabs;
 }
 
+// Bot notifications ("🔥 Сессия завершена!", achievement unlocks, booking
+// reminders...) can deep-link straight into a tab via a Telegram
+// `t.me/<bot>/<app>?startapp=<tab id>` button — the payload is just the tab
+// id itself, kept in sync with buildTabs() below. Unknown/missing values
+// fall through to the normal "profile" landing tab.
+const DEEP_LINK_TABS = new Set(["profile", "leaders", "booking", "time", "more"]);
+
 function startApp() {
     initRouter({ view: viewEl, tabbar: tabbarEl });
     setTabs(buildTabs(appState.me.is_admin));
     startRouter("profile");
+
+    const target = getStartParam();
+    if (target && target !== "profile" && DEEP_LINK_TABS.has(target)) {
+        switchTab(target, { silent: true });
+    }
 }
 
 async function boot() {

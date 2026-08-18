@@ -29,6 +29,25 @@ export function getInitData() {
 }
 
 /**
+ * Which tab a bot message's deep link asked to open (e.g. a "session
+ * complete" DM linking straight into "profile"), or "" for a plain app
+ * open. Two sources, checked in order:
+ *  - Telegram's own start_param, populated only when opened via a named
+ *    Mini App's t.me/<bot>/<app>?startapp=... link (requires a one-time
+ *    /newapp setup in @BotFather — see deploy/WEBAPP_DEPLOY.md);
+ *  - a plain #hash on the app URL, which works with the WebAppInfo(url=...)
+ *    buttons this bot already sends everywhere (menu button, notifications)
+ *    with no extra BotFather setup needed.
+ * Unlike initData, neither is cryptographically signed — never use this for
+ * anything beyond picking which screen to land on.
+ */
+export function getStartParam() {
+    const fromTelegram = tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param;
+    if (fromTelegram) return fromTelegram;
+    return (typeof location !== "undefined" && location.hash) ? location.hash.slice(1) : "";
+}
+
+/**
  * Boots the Telegram SDK: ready → expand → dark chrome colors → viewport sync.
  * Safe to call once at app startup even outside Telegram.
  */

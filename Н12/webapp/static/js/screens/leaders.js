@@ -7,6 +7,13 @@ import { registerScreen, switchTab } from "../router.js";
 import { api } from "../api.js";
 import { el, clear, emptyState, errorState, mountAsync } from "../ui.js";
 import { haptic } from "../telegram.js";
+import { cached, peekCache } from "../state.js";
+
+// Live standings and the flat rating table both drift slowly (a lap only
+// moves them once an admin approves it) — a short TTL means switching
+// tabs and back renders instantly from cache instead of a fresh spinner,
+// while still catching up within half a minute.
+const LEADERBOARD_TTL_MS = 30_000;
 
 let activeSubTab = "leaders"; // persisted across tab switches within the session
 
@@ -56,56 +63,81 @@ function buildOverallCard(overall, monthKey) {
     return card;
 }
 
-function loadLeaderboard(container) {
-    mountAsync(container, async (c, retry) => {
-        const res = await api.get("/api/leaderboard");
-        clear(c);
-        if (!res.ok) { c.appendChild(errorState(res.error, retry)); return; }
+function renderLeaderboardData(c, res, retry) {
+    clear(c);
+    if (!res.ok) { c.appendChild(errorState(res.error, retry)); return; }
 
-        const classes = (res.data && res.data.classes) || [];
-        const overall = (res.data && res.data.overall) || [];
-        if (classes.length === 0 && overall.length === 0) {
-            c.appendChild(emptyState(
-                "Таблица лидеров пока пуста",
-                "Станьте первым — отправьте свой результат через «Установить время»!",
-                { actionText: "Установить время", onAction: () => { haptic("light"); switchTab("time"); } },
-            ));
-            return;
-        }
+    const classes = (res.data && res.data.classes) || [];
+    const overall = (res.data && res.data.overall) || [];
+    if (classes.length === 0 && overall.length === 0) {
+        c.appendChild(emptyState(
+            "Таблица лидеров пока пуста",
+            "Станьте первым — отправьте свой результат через «Установить время»!",
+            { actionText: "Установить время", onAction: () => { haptic("light"); switchTab("time"); } },
+        ));
+        return;
+    }
 
-        const stack = el("div", { class: "stack-sm" });
-        classes.forEach((entry) => stack.appendChild(buildClassCard(entry)));
-        if (overall.length) stack.appendChild(buildOverallCard(overall, res.data.month_key));
-        c.appendChild(stack);
+    const stack = el("div", { class: "stack-sm" });
+    classes.forEach((entry) => stack.appendChild(buildClassCard(entry)));
+    if (overall.length) stack.appendChild(buildOverallCard(overall, res.data.month_key));
+    c.appendChild(stack);
+}
+
+function renderTop10Data(c, res, retry) {
+    clear(c);
+    if (!res.ok) { c.appendChild(errorState(res.error, retry)); return; }
+
+    const pilots = (res.data && res.data.pilots) || [];
+    if (pilots.length === 0) {
+        c.appendChild(emptyState("Рейтинг пока пуст", "Здесь появится десятка сильнейших пилотов клуба."));
+        return;
+    }
+
+    const card = el("div", { class: "card" });
+    pilots.forEach((p, i) => {
+        const rank = i + 1;
+        const rowCls = rank <= 3 ? ` top${rank}` : "";
+        const name = p.display_name || (p.username ? `@${p.username}` : "Пилот");
+        const numberSuffix = p.pilot_number ? ` · #${p.pilot_number}` : "";
+        card.appendChild(el("div", { class: `top10-row${rowCls}` }, [
+            el("div", { class: "top10-rank" }, String(rank)),
+            el("div", { class: "top10-name" }, name + numberSuffix),
+            el("div", { class: "top10-rating" }, String(p.rating)),
+        ]));
+    });
+    c.appendChild(card);
+}
+
+/**
+ * Renders instantly from a warm cache (no spinner flash) then silently
+ * refetches in the background, same instant-then-refresh pattern profile.js
+ * uses for its own bootstrap data — just generalized here via state.js's
+ * cache instead of a screen-local variable. Falls back to mountAsync's
+ * spinner only when there's nothing cached yet to show.
+ */
+function loadCached(container, cacheKey, fetcher, render) {
+    const warm = peekCache(cacheKey, { ttlMs: LEADERBOARD_TTL_MS });
+    const retry = () => loadCached(container, cacheKey, fetcher, render);
+
+    if (warm) {
+        render(container, warm, retry);
+        cached(cacheKey, fetcher, { force: true }).then((res) => render(container, res, retry));
+        return;
+    }
+
+    mountAsync(container, async (c) => {
+        const res = await cached(cacheKey, fetcher, { ttlMs: LEADERBOARD_TTL_MS });
+        render(c, res, retry);
     });
 }
 
+function loadLeaderboard(container) {
+    loadCached(container, "leaderboard", () => api.get("/api/leaderboard"), renderLeaderboardData);
+}
+
 function loadTop10(container) {
-    mountAsync(container, async (c, retry) => {
-        const res = await api.get("/api/top10");
-        clear(c);
-        if (!res.ok) { c.appendChild(errorState(res.error, retry)); return; }
-
-        const pilots = (res.data && res.data.pilots) || [];
-        if (pilots.length === 0) {
-            c.appendChild(emptyState("Рейтинг пока пуст", "Здесь появится десятка сильнейших пилотов клуба."));
-            return;
-        }
-
-        const card = el("div", { class: "card" });
-        pilots.forEach((p, i) => {
-            const rank = i + 1;
-            const rowCls = rank <= 3 ? ` top${rank}` : "";
-            const name = p.display_name || (p.username ? `@${p.username}` : "Пилот");
-            const numberSuffix = p.pilot_number ? ` · #${p.pilot_number}` : "";
-            card.appendChild(el("div", { class: `top10-row${rowCls}` }, [
-                el("div", { class: "top10-rank" }, String(rank)),
-                el("div", { class: "top10-name" }, name + numberSuffix),
-                el("div", { class: "top10-rating" }, String(p.rating)),
-            ]));
-        });
-        c.appendChild(card);
-    });
+    loadCached(container, "top10", () => api.get("/api/top10"), renderTop10Data);
 }
 
 function renderLeaders(container) {

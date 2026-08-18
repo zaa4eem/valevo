@@ -31,6 +31,7 @@ from database.db import (
     unlock_achievement,
     update_pilot_rating,
 )
+from keyboards.menu import webapp_deep_link_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ async def _flush_achievements(telegram_id: int, bot, bag: list) -> None:
         text = "\n".join(lines)
 
     try:
-        await bot.send_message(telegram_id, text)
+        await bot.send_message(telegram_id, text, reply_markup=webapp_deep_link_keyboard("profile", "🏅 Открыть ачивки"))
     except Exception:
         logger.warning("Не удалось уведомить пилота %s о достижениях (%s шт.)", telegram_id, len(bag))
 

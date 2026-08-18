@@ -144,6 +144,13 @@ function renderCurrent() {
     // container element.
     window.scrollTo(0, 0);
 
+    // Restart the fade-in on every navigation: remove-reflow-add, since
+    // toggling the same class twice in a row (e.g. two pushes in a row)
+    // wouldn't otherwise retrigger the CSS animation.
+    viewEl.classList.remove("view-enter");
+    void viewEl.offsetWidth;
+    viewEl.classList.add("view-enter");
+
     const renderFn = screens.get(top.screen);
     if (!renderFn) {
         viewEl.appendChild(errorState(`Экран «${top.screen}» ещё не готов.`, null));

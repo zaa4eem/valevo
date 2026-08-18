@@ -1,10 +1,23 @@
 from aiogram.types import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton,
     WebAppInfo,
 )
 
 from config import ADMIN_IDS, WEBAPP_BASE_URL
+
+
+def webapp_deep_link_keyboard(tab: str, text: str) -> InlineKeyboardMarkup | None:
+    """Инлайн-кнопка под уведомлением, открывающая мини-приложение сразу на
+    нужной вкладке (#profile, #leaders, ...) — см. main.js:getStartParam().
+    None, если WEBAPP_BASE_URL не настроен (та же защита, что и в get_menu)."""
+    if not WEBAPP_BASE_URL:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=text, web_app=WebAppInfo(url=f"{WEBAPP_BASE_URL}#{tab}"))
+    ]])
 
 
 def get_menu(user_id):

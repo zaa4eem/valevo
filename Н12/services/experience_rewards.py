@@ -8,6 +8,7 @@ from handlers.booking import (
     ensure_booking_schema,
     get_bookings_pending_experience,
 )
+from keyboards.menu import webapp_deep_link_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ async def process_completed_bookings(bot):
                             f"➕ Опыт: +{duration_minutes} мин"
                             f"{rating_text}"
                         ),
+                        reply_markup=webapp_deep_link_keyboard("profile", "👤 Открыть профиль"),
                     )
                 except Exception as e:
                     logger.warning(

@@ -44,6 +44,16 @@ export async function cached(key, fetcher, { ttlMs = 0, force = false } = {}) {
     return result;
 }
 
+/** Synchronous peek at a cached result without triggering a fetch — lets a
+ * screen render instantly from a warm cache (no spinner flash) and only
+ * fall back to the loading state when there's truly nothing to show yet. */
+export function peekCache(key, { ttlMs = 0 } = {}) {
+    const hit = store.get(key);
+    if (!hit) return null;
+    if (ttlMs && Date.now() - hit.at >= ttlMs) return null;
+    return hit.result;
+}
+
 export function invalidateCache(key) {
     if (key) store.delete(key);
     else store.clear();
