@@ -1,6 +1,8 @@
 import asyncio
 import html
 import logging
+import os
+import sys
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher
@@ -21,6 +23,7 @@ from services.yclients_auto import auto_sync_all_pilots, process_pending_yclient
 from services.bonus_expiration import expire_season_bonuses
 from utils.log_config import LoggingMiddleware, setup_logging
 from utils.menu_updater_middleware import MenuUpdaterMiddleware
+from utils.chat_hygiene import ChatHygieneMiddleware
 
 
 setup_logging()
@@ -30,6 +33,7 @@ logger = logging.getLogger(__name__)
 def _register_middlewares(dp: Dispatcher) -> None:
     dp.update.outer_middleware(LoggingMiddleware())
     updater = MenuUpdaterMiddleware()
+    hygiene = ChatHygieneMiddleware()
 
     for router in (
         booking.router,
@@ -41,6 +45,7 @@ def _register_middlewares(dp: Dispatcher) -> None:
     ):
         router.message.outer_middleware(updater)
         router.callback_query.outer_middleware(updater)
+        router.message.outer_middleware(hygiene)
 
 
 def _register_routers(dp: Dispatcher) -> None:
@@ -102,7 +107,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.get_job("monthly_reset"):
         scheduler.add_job(
             perform_monthly_reset,
-            CronTrigger(day=16, hour=18, minute=30, timezone=moscow_tz),
+            CronTrigger(day=20, hour=18, minute=1, timezone=moscow_tz),
             args=[bot],
             id="monthly_reset",
             replace_existing=True,
@@ -168,8 +173,8 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(booking.process_booking_reminders(bot)),
     ]
 
-    if now.day == 15 and now.hour >= 14:
-        logger.info("15-е число после 14:00 — проверяю ежемесячные начисления при старте.")
+    if now.day == 20 and now.hour >= 18:
+        logger.info("20-е число после 18:01 — проверяю ежемесячные начисления при старте.")
         await perform_monthly_reset(bot)
 
     return background_tasks
@@ -192,7 +197,12 @@ async def main() -> None:
     background_tasks = await _run_startup_jobs(bot, scheduler)
     background_tasks.append(asyncio.create_task(process_completed_bookings(bot)))
 
-    logger.info("Бот запущен")
+    exe_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__)
+    try:
+        build_time = datetime.fromtimestamp(os.path.getmtime(exe_path)).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError:
+        build_time = "неизвестно"
+    logger.info("Бот запущен (сборка от %s)", build_time)
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

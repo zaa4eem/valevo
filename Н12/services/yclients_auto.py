@@ -167,6 +167,13 @@ async def _process_pending_yclients_operations_locked(limit: int = 100) -> dict:
                     await update_pending_yclients_operation(op["id"], "retry", last_error=ensured.get("message"))
                     failed += 1
             elif op["operation_type"] == "bonus":
+                # TODO(human): если op["yclients_client_id"] отсутствует (клиент не был
+                # найден по телефону на момент начисления), change_valevo_bonus сразу
+                # вернёт ok=False status=no_client_id, и эта операция будет уходить в
+                # "retry" бесконечно на каждом проходе — client_id тут никогда не
+                # появится сам. Нужно решить: подставлять актуальный client_id пилота
+                # (если он появился в pilots после ручной/авто синхронизации) перед
+                # повтором, либо ограничить число попыток и уведомлять админа.
                 result = await change_valevo_bonus(op["yclients_client_id"], op["amount"], title=op.get("title") or "Valevo Bonus")
                 if result.get("ok"):
                     await update_pending_yclients_operation(op["id"], "done", yclients_card_id=str(result.get("card_id")))

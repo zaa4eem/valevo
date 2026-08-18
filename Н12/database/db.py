@@ -110,6 +110,60 @@ async def init_db():
     """)
 
     await db.execute("""
+        CREATE TABLE IF NOT EXISTS class_benchmarks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_name TEXT NOT NULL,
+            month_key TEXT NOT NULL,
+            track TEXT,
+            benchmark_ms INTEGER NOT NULL,
+            set_by_admin_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(class_name, month_key)
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS pilot_class_status (
+            telegram_id INTEGER PRIMARY KEY,
+            current_class TEXT NOT NULL DEFAULT 'MX-5',
+            promoted_at TIMESTAMP,
+            promoted_month_key TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS pilot_achievements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            achievement_code TEXT NOT NULL,
+            unlocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(telegram_id, achievement_code)
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS bot_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS support_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            username TEXT,
+            message_text TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            admin_id INTEGER,
+            reply_text TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            answered_at TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_time_requests_user_status
         ON time_requests(telegram_id, status)
     """)
@@ -409,23 +463,57 @@ async def update_pilot_number(telegram_id, number):
         await db.close()
 
 async def update_display_name(telegram_id, new_display_name):
-    """Возвращает True, если ник обновлён, иначе False (если ник занят)."""
+    """Возвращает True, если ник обновлён, иначе False (если ник занят).
+
+    Может выбросить sqlite3.IntegrityError, если такой же ник заняли параллельно
+    между проверкой ниже и этим UPDATE (уникальный индекс idx_pilots_display_name) —
+    вызывающий код должен обработать это как "ник уже занят".
+    """
     db = await get_db()
-    # Проверяем, не занято ли такое же имя другим пилотом (игнорируя себя)
-    cursor = await db.execute(
-        "SELECT telegram_id FROM pilots WHERE display_name = ? AND telegram_id != ?",
-        (new_display_name, telegram_id)
-    )
-    if await cursor.fetchone():
+    try:
+        # Проверяем, не занято ли такое же имя другим пилотом (игнорируя себя)
+        cursor = await db.execute(
+            "SELECT telegram_id FROM pilots WHERE display_name = ? AND telegram_id != ?",
+            (new_display_name, telegram_id)
+        )
+        if await cursor.fetchone():
+            return False
+        await db.execute(
+            "UPDATE pilots SET display_name = ? WHERE telegram_id = ?",
+            (new_display_name, telegram_id)
+        )
+        await db.commit()
+        return True
+    finally:
         await db.close()
-        return False
-    await db.execute(
-        "UPDATE pilots SET display_name = ? WHERE telegram_id = ?",
-        (new_display_name, telegram_id)
-    )
-    await db.commit()
-    await db.close()
-    return True
+
+async def sync_pilot_menu_version(telegram_id: int, target_version: int) -> bool:
+    """Обновляет сохранённую версию reply-меню пилота, если она отстала от текущей.
+
+    Возвращает True, если версия была обновлена — значит, пилоту нужно один раз
+    показать обновлённую клавиатуру. Хранится в БД (а не в FSM-состоянии),
+    потому что FSM-состояние регулярно очищается state.clear() внутри обычных сценариев.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT menu_version FROM pilots WHERE telegram_id = ?", (telegram_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return False
+        current = row[0] or 0
+        if current == target_version:
+            return False
+        await db.execute(
+            "UPDATE pilots SET menu_version = ? WHERE telegram_id = ?",
+            (target_version, telegram_id),
+        )
+        await db.commit()
+        return True
+    finally:
+        await db.close()
+
 
 async def sync_pilot_menu_version(telegram_id: int, target_version: int) -> bool:
     """Обновляет сохранённую версию reply-меню пилота, если она отстала от текущей.
@@ -1735,6 +1823,340 @@ async def complete_time_request(
         (status, admin_id, lap_id, request_id)
     )
 
+    await db.commit()
+    await db.close()
+
+
+async def create_support_message(telegram_id: int, username: str | None, message_text: str) -> int:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        INSERT INTO support_messages(telegram_id, username, message_text)
+        VALUES (?, ?, ?)
+        """,
+        (telegram_id, username, message_text),
+    )
+    message_id = cursor.lastrowid
+    await db.commit()
+    await db.close()
+    return message_id
+
+
+async def get_support_message(message_id: int):
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM support_messages WHERE id = ?",
+        (message_id,),
+    )
+    row = await cursor.fetchone()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return dict(zip(columns, row)) if row else None
+
+
+async def claim_support_message_for_reply(message_id: int, admin_id: int) -> bool:
+    """Атомарно закрепляет заявку за админом, который начал печатать ответ,
+    чтобы два администратора не отправили клиенту два разных ответа."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'answering', admin_id = ?
+        WHERE id = ? AND status = 'pending'
+        """,
+        (admin_id, message_id),
+    )
+    changed = cursor.rowcount == 1
+    await db.commit()
+    await db.close()
+    return changed
+
+
+async def release_support_message(message_id: int) -> None:
+    """Возвращает заявку в pending, если админ отменил ответ."""
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'pending', admin_id = NULL
+        WHERE id = ? AND status = 'answering'
+        """,
+        (message_id,),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def complete_support_message(message_id: int, admin_id: int, reply_text: str) -> None:
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE support_messages
+        SET status = 'answered', admin_id = ?, reply_text = ?, answered_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (admin_id, reply_text, message_id),
+    )
+    await db.commit()
+    await db.close()
+
+
+# ============================================================================
+# ТУРНИРНАЯ СИСТЕМА v2 (живой рейтинг по эталону)
+# ============================================================================
+
+async def set_class_benchmark(class_name: str, month_key: str, track: str | None, benchmark_ms: int, admin_id: int) -> None:
+    db = await get_db()
+    await db.execute(
+        """
+        INSERT INTO class_benchmarks(class_name, month_key, track, benchmark_ms, set_by_admin_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(class_name, month_key) DO UPDATE SET
+            track = excluded.track,
+            benchmark_ms = excluded.benchmark_ms,
+            set_by_admin_id = excluded.set_by_admin_id
+        """,
+        (class_name, month_key, track, benchmark_ms, admin_id),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def get_class_benchmark(class_name: str, month_key: str) -> dict | None:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM class_benchmarks WHERE class_name = ? AND month_key = ?",
+        (class_name, month_key),
+    )
+    row = await cursor.fetchone()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return dict(zip(columns, row)) if row else None
+
+
+async def get_all_class_benchmarks(month_key: str) -> dict[str, dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM class_benchmarks WHERE month_key = ?",
+        (month_key,),
+    )
+    rows = await cursor.fetchall()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return {row[columns.index("class_name")]: dict(zip(columns, row)) for row in rows}
+
+
+async def get_pilot_class(telegram_id: int) -> str:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT current_class FROM pilot_class_status WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return row[0] if row else "MX-5"
+
+
+async def get_all_pilot_classes() -> dict[int, str]:
+    db = await get_db()
+    cursor = await db.execute("SELECT telegram_id, current_class FROM pilot_class_status")
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {tid: cls for tid, cls in rows}
+
+
+async def set_pilot_class(telegram_id: int, new_class: str, month_key: str | None = None) -> None:
+    db = await get_db()
+    await db.execute(
+        """
+        INSERT INTO pilot_class_status(telegram_id, current_class, promoted_at, promoted_month_key, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(telegram_id) DO UPDATE SET
+            current_class = excluded.current_class,
+            promoted_at = CURRENT_TIMESTAMP,
+            promoted_month_key = excluded.promoted_month_key,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (telegram_id, new_class, month_key),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def get_pilot_month_best(telegram_id: int, discipline: str, month_start_iso: str, month_end_iso: str) -> tuple[int | None, int]:
+    """Личный лучший круг и число стартов пилота в дисциплине за календарный месяц."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT MIN(l.lap_time_ms), COUNT(*)
+        FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE l.telegram_id = ? AND d.name = ?
+          AND l.created_at >= ? AND l.created_at < ?
+        """,
+        (telegram_id, discipline, month_start_iso, month_end_iso),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    if not row:
+        return None, 0
+    best_ms, starts = row
+    return (int(best_ms) if best_ms is not None else None), int(starts or 0)
+
+
+async def get_month_participants(discipline: str, month_start_iso: str, month_end_iso: str) -> list[dict]:
+    """Все пилоты с хотя бы одним стартом в дисциплине за месяц (для релегации/зачёта)."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT l.telegram_id, MIN(l.lap_time_ms) AS best_ms, COUNT(*) AS starts
+        FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE d.name = ? AND l.created_at >= ? AND l.created_at < ?
+        GROUP BY l.telegram_id
+        """,
+        (discipline, month_start_iso, month_end_iso),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [{"telegram_id": tid, "best_ms": best_ms, "starts": starts} for tid, best_ms, starts in rows]
+
+
+async def is_first_active_month(telegram_id: int, month_start_iso: str) -> bool:
+    """True, если у пилота нет ни одного круга раньше начала этого месяца
+    (то есть это его первый активный месяц — новичок или "разбуженный" аккаунт)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT 1 FROM laps WHERE telegram_id = ? AND created_at < ? LIMIT 1",
+        (telegram_id, month_start_iso),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return row is None
+
+
+async def count_lifetime_laps(telegram_id: int) -> int:
+    db = await get_db()
+    cursor = await db.execute("SELECT COUNT(*) FROM laps WHERE telegram_id = ?", (telegram_id,))
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return int(row[0] or 0) if row else 0
+
+
+async def lifetime_disciplines_raced(telegram_id: int) -> set[str]:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT DISTINCT d.name FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE l.telegram_id = ?
+        """,
+        (telegram_id,),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {row[0] for row in rows}
+
+
+async def has_prior_laps_on_track(discipline: str, track: str, before_created_at: str) -> bool:
+    """Были ли уже круги на этой трассе/дисциплине до данного момента (для ачивки "первопроходец")."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT 1 FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE d.name = ? AND l.track = ? AND l.created_at < ?
+        LIMIT 1
+        """,
+        (discipline, track, before_created_at),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return row is not None
+
+
+async def count_month_improvements(telegram_id: int, discipline: str, start_iso: str, end_iso: str) -> int:
+    """Сколько раз за месяц личный лучший круг в дисциплине реально улучшался
+    (а не просто повторялся хуже прежнего)."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT l.lap_time_ms
+        FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE l.telegram_id = ? AND d.name = ?
+          AND l.created_at >= ? AND l.created_at < ?
+        ORDER BY l.created_at ASC
+        """,
+        (telegram_id, discipline, start_iso, end_iso),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+
+    improvements = 0
+    best = None
+    for (lap_ms,) in rows:
+        if best is None:
+            best = lap_ms
+            continue
+        if lap_ms < best:
+            improvements += 1
+            best = lap_ms
+    return improvements
+
+
+async def unlock_achievement(telegram_id: int, achievement_code: str) -> bool:
+    """Атомарно разблокирует ачивку. Возвращает True, только если она открыта впервые сейчас."""
+    db = await get_db()
+    cursor = await db.execute(
+        "INSERT OR IGNORE INTO pilot_achievements(telegram_id, achievement_code) VALUES (?, ?)",
+        (telegram_id, achievement_code),
+    )
+    unlocked_now = cursor.rowcount == 1
+    await db.commit()
+    await db.close()
+    return unlocked_now
+
+
+async def get_pilot_achievements(telegram_id: int) -> set[str]:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT achievement_code FROM pilot_achievements WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {row[0] for row in rows}
+
+
+async def get_setting(key: str) -> str | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return row[0] if row else None
+
+
+async def set_setting(key: str, value: str) -> None:
+    db = await get_db()
+    await db.execute(
+        "INSERT INTO bot_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
     await db.commit()
     await db.close()
 

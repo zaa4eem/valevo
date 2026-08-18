@@ -25,8 +25,6 @@ from config import ADMIN_IDS, GROUP_ID, MOSCOW_TZ
 from database.db import (
     add_lap,
     delete_lap,
-    get_top3,
-    get_pilot_by_username,
     get_pilot_by_telegram_id,
     get_all_disciplines,
     get_tracks_for_discipline,
@@ -45,6 +43,9 @@ from database.db import (
 
 from handlers.admin import send_notifications
 from keyboards.menu import get_menu
+from services.tournament import check_and_process_promotion
+from services.achievements import check_achievements_after_lap
+from utils.message_style import DIVIDER, header
 from utils.time_parser import time_to_ms
 
 
@@ -127,7 +128,7 @@ async def check_request_allowed(
     if requests_are_closed():
         return (
             False,
-            "🌙 <b>Приём заявок сейчас закрыт.</b>\n\n"
+            "🌙 <b>Приём заявок сейчас закрыт</b>.\n\n"
             "Запросить установку времени можно ежедневно:\n"
             "🕛 с <b>12:00</b> до <b>01:00</b> по московскому времени.\n\n"
             "Ограничение введено, чтобы ночью администраторам "
@@ -141,7 +142,7 @@ async def check_request_allowed(
     if pending:
         return (
             False,
-            "⏳ <b>У вас уже есть заявка на проверке.</b>\n\n"
+            "⏳ <b>У вас уже есть заявка на проверке</b>.\n\n"
             f"Дисциплина: <b>{html.escape(str(pending['discipline']))}</b>\n"
             f"Трасса: <b>{html.escape(str(pending['track']))}</b>\n"
             f"Время: <b>{html.escape(str(pending['lap_time_text']))}</b>\n\n"
@@ -156,7 +157,7 @@ async def check_request_allowed(
     if cooldown > 0:
         return (
             False,
-            "⏱ <b>Слишком частая отправка заявок.</b>\n\n"
+            "⏱ <b>Слишком частая отправка заявок</b>.\n\n"
             f"Повторить попытку можно примерно через "
             f"<b>{format_cooldown(cooldown)}</b>."
         )
@@ -235,7 +236,7 @@ def request_caption(
     )
 
     return (
-        "🏁 <b>НОВАЯ ЗАЯВКА НА ФИКСАЦИЮ ВРЕМЕНИ</b>\n\n"
+        header("🏁", "Новая заявка на фиксацию времени") + "\n\n"
         f"🆔 Заявка: <b>#{request_id}</b>\n"
         f"👤 Пилот: <b>{safe_name}</b>\n"
         f"#️⃣ Номер пилота: <b>{number_text}</b>\n"
@@ -255,12 +256,12 @@ async def edit_admin_request_message(
 
     # Чтобы при повторном редактировании статусы не дублировались.
     base_caption = old_caption.split(
-        "\n\n━━━━━━━━━━━━━━━━━━\n"
+        f"\n\n{DIVIDER}\n"
     )[0]
 
     new_caption = (
         f"{base_caption}\n\n"
-        "━━━━━━━━━━━━━━━━━━\n"
+        f"{DIVIDER}\n"
         f"{status_text}"
     )
 
@@ -479,7 +480,7 @@ async def user_time_request_lap_time(
     await state.set_state(TimeRequestForm.proof)
 
     await message.answer(
-        "📸 <b>Теперь отправьте фотографию результата.</b>\n\n"
+        "📸 <b>Теперь отправьте фотографию результата</b>.\n\n"
         "На фотографии должны быть отчётливо видны:\n"
         "• итоговое время;\n"
         "• выбранная трасса или экран результата.\n\n"
@@ -657,7 +658,7 @@ async def user_time_request_proof(
         return
 
     await message.answer(
-        "✅ <b>Заявка отправлена администрации.</b>\n\n"
+        "✅ <b>Заявка отправлена администрации</b>.\n\n"
         f"🏆 Дисциплина: <b>{html.escape(discipline)}</b>\n"
         f"🗺 Трасса: <b>{html.escape(track)}</b>\n"
         f"⏱ Время: <b>{html.escape(lap_time_text)}</b>\n\n"
@@ -737,9 +738,6 @@ async def approve_time_request(bot: Bot, request_id: int, admin_id: int) -> tupl
         lap_time_text = request["lap_time_text"]
         lap_time_ms = request["lap_time_ms"]
 
-        old_top = await get_top3()
-        old_rows = old_top.get(discipline, [])
-
         lap_id = await add_lap(
             discipline=discipline,
             username=username,
@@ -749,29 +747,18 @@ async def approve_time_request(bot: Bot, request_id: int, admin_id: int) -> tupl
             lap_time_ms=lap_time_ms,
         )
 
-        new_top = await get_top3()
-        new_rows = new_top.get(discipline, [])
+        promoted_to = None
+        try:
+            promoted_to = await check_and_process_promotion(selected_tid, discipline, callback.bot)
+            await check_achievements_after_lap(
+                selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
+            )
+        except Exception:
+            logger.exception("Ошибка турнирного движка после круга (заявка #%s)", request_id)
 
-        old_positions = {row["username"]: index for index, row in enumerate(old_rows)}
-        new_positions = {row["username"]: index for index, row in enumerate(new_rows)}
-
-        medals = ["🥇", "🥈", "🥉"]
-        rating_values = [20, 15, 10]
-
-        # Та же логика рейтинга, что используется при ручной установке времени администратором.
-        for uname, new_index in new_positions.items():
-            old_index = old_positions.get(uname, 999)
-            if new_index < old_index and new_index < 3:
-                old_rating_value = rating_values[old_index] if old_index < 3 else 0
-                delta = rating_values[new_index] - old_rating_value
-                if delta <= 0:
-                    continue
-                pilot = await get_pilot_by_username(uname)
-                if not pilot:
-                    continue
-                pilot_tid = pilot[1]
-                await update_pilot_rating(pilot_tid, delta)
-                rating_changes[pilot_tid] = rating_changes.get(pilot_tid, 0) + delta
+        # Рейтинг теперь начисляется только турнирным движком (переходы/ачивки) —
+        # старое начисление за топ-3 лучшего времени за всё время убрано.
+        # rating_changes остаётся пустым — откат ниже по коду безопасен как есть.
 
         await complete_time_request(
             request_id=request_id,
@@ -780,20 +767,16 @@ async def approve_time_request(bot: Bot, request_id: int, admin_id: int) -> tupl
             lap_id=lap_id,
         )
 
-        # Используется существующая система: уведомление пилоту, изменения позиций, сообщение в группу.
         try:
             await send_notifications(
                 bot=bot,
-                old_positions=old_positions,
-                new_positions=new_positions,
-                medals=medals,
                 discipline=discipline,
                 new_username=username,
                 lap_text=lap_time_text,
                 selected_tid=selected_tid,
-                new_rows=new_rows,
                 track=track,
                 group_id=GROUP_ID,
+                promoted_to=promoted_to,
             )
         except Exception:
             logger.exception("Заявка #%s принята, но ошибка уведомлений", request_id)
@@ -877,8 +860,8 @@ async def reject_time_request(bot: Bot, request_id: int, admin_id: int) -> tuple
         try:
             await bot.send_message(
                 request["telegram_id"],
-                "❌ <b>Администратор отклонил вашу заявку "
-                "на установку времени.</b>\n\n"
+                "❌ <b>Администратор отклонил вашу заявку</b> "
+                "на установку времени.\n\n"
                 f"🏆 Дисциплина: "
                 f"<b>{html.escape(str(request['discipline']))}</b>\n"
                 f"🗺 Трасса: "

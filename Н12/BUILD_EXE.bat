@@ -147,6 +147,8 @@ echo [5/7] Собираю EXE бота...
  --onefile ^
  --noconsole ^
  --name "%BOT_BUILD_NAME%" ^
+ --collect-all apscheduler ^
+ --collect-all pytz ^
  main.py
 
 if errorlevel 1 (
@@ -177,6 +179,7 @@ if exist "static" (
      --onefile ^
      --noconsole ^
      --name "%TV_BUILD_NAME%" ^
+     --collect-all pytz ^
      --add-data "static;static" ^
      tv_board.py
 ) else (
@@ -184,6 +187,7 @@ if exist "static" (
      --onefile ^
      --noconsole ^
      --name "%TV_BUILD_NAME%" ^
+     --collect-all pytz ^
      tv_board.py
 )
 
@@ -266,13 +270,32 @@ echo - %START_VBS%
 echo - %START_BAT%
 echo - %STOP_BAT%
 echo.
-echo Для скрытого запуска используй:
-echo %START_VBS%
+echo После запуска бот и TV Board не должны висеть внизу на панели.
+echo Они будут видны только в диспетчере задач (это нормально, --noconsole).
 echo.
-echo Или:
-echo %START_BAT%
+
+REM ================================
+REM  АВТОЗАПУСК + ПРОВЕРКА ПО ЛОГУ
+REM ================================
+
+echo Запускаю бота в скрытом режиме...
+call "%START_BAT%"
+
+echo Жду запуск (5 сек)...
+timeout /t 5 /nobreak >nul
+
 echo.
-echo После запуска они не должны висеть внизу на панели.
-echo Они будут видны только в диспетчере задач.
+echo ================================
+echo  ПОСЛЕДНИЕ СТРОКИ ЛОГА (logs\bot.log)
+echo ================================
+if exist "logs\bot.log" (
+    powershell -NoProfile -Command "Get-Content -Path 'logs\bot.log' -Tail 8 -Encoding UTF8"
+    echo.
+    echo Если видишь строку "Бот запущен (сборка от ...)" с текущим временем —
+    echo обновление точно применилось и бот работает на новой сборке.
+) else (
+    echo Лог-файл не найден: logs\bot.log
+    echo Проверь .env ^(LOG_DIR/LOG_FILE^) и что бот реально стартовал.
+)
 echo.
 pause

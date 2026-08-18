@@ -20,6 +20,9 @@ admin_menu = ReplyKeyboardMarkup(
         [
             KeyboardButton(text="🏆 Закрыть Week CUP")
         ],
+        [
+            KeyboardButton(text="🎯 Эталоны месяца")
+        ],
         [KeyboardButton(text="🔙 Назад"),
          KeyboardButton(text="📢 Рассылка")
         ]

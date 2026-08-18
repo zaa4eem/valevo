@@ -1,28 +1,37 @@
+# Лестница классов турнира v2: MX-5 -> BTCC (+доп. DTM) -> GT500 (+доп. Touge) -> GT3.
+# Сами дисциплины/трассы остаются редактируемыми как раньше (админ может
+# добавить/убрать трассу) — здесь только начальный набор при первом запуске.
 DISCIPLINES = [
     "MX-5",
-    "F1",
+    "BTCC",
+    "GT500",
     "GT3",
     "DTM",
-    "Week CUP"
+    "Touge",
+    "Week CUP",
 ]
 
 TRACKS = {
 
     "MX-5": [
-        "Barcelona"
+        "Suzuka West"
     ],
 
-    "F1": [
-        "Red Bull Ring"
+    "BTCC": [
+        "Silverstone"
     ],
+
+    "GT500": [],
 
     "GT3": [
-        "Nürburgring"
+        "Silverstone GP"
     ],
 
     "DTM": [
         "AKAGI"
     ],
+
+    "Touge": [],
 
     "Week CUP": [
         "Nürburgring GP"

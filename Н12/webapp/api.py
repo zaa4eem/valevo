@@ -54,7 +54,7 @@ from database.db import (
     update_pilot_number,
     update_pilot_rating,
 )
-from services.leaderboard import get_leaderboard_entries
+from services.leaderboard import get_tournament_leaderboard_data
 from services.nickname import sanitize_pilot_name
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.profile_service import get_profile_data
@@ -210,7 +210,7 @@ async def api_set_nickname(
 # ============================================================================
 @app.get("/api/leaderboard")
 async def api_leaderboard(_user: TelegramWebAppUser = Depends(get_current_user)) -> dict[str, Any]:
-    return {"entries": await get_leaderboard_entries()}
+    return await get_tournament_leaderboard_data()
 
 
 @app.get("/api/top10")

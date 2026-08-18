@@ -11,6 +11,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import BASE_DIR, DB_NAME
+from services.tournament import month_bounds, rank_month_overall
+from database.db import get_pilot_by_telegram_id
 
 # Используем те же пути, что и основной бот (config.py), а не путь относительно
 # текущей рабочей директории — иначе TV-board, запущенный из другой папки/сервиса,
@@ -26,15 +28,31 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+# Обновлено под лестницу турнира v2 (MX-5 -> BTCC(+DTM) -> GT500(+Touge) -> GT3).
+# Все 7 пунктов (включая доп.дисциплины DTM и Touge) крутятся в общей карусели
+# (фиксированную левую колонку занимает не одна из дисциплин, а общий зачёт
+# турнира — см. FIXED_TOP_ITEM и renderBoard). Порядок — строго по лестнице
+# (MX-5 первым как этап 1, доп.дисциплина сразу после своего основного класса),
+# согласовано макетом. stage/stage_type определяют плашку над колонкой:
+# "main" — цифра этапа, "side" — доп.этап, "event" — вне лестницы (Week CUP).
+# Меняя количество пунктов здесь, обязательно пересчитай @keyframes
+# carouselStep и --cycle-time ниже — они настроены именно на 7 шагов.
 DISPLAY_ORDER = [
-    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "spa-francorchamps"},
-    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "red bull ring"},
-    {"key": "F1", "aliases": ["F1", "FORMULA", "FORMULA 1"], "title": "F1", "subtitle": "sochi gp"},
-    {"key": "DTM", "aliases": ["DTM", "AKAGI", "АКАГИ"], "title": "DTM", "subtitle": "Tsukuba"},
-    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP", "subtitle": "LMU | Hyper BMW | Sebring circuit"},
+    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West",
+     "stage": "Этап 1", "stage_type": "main"},
+    {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "Silverstone",
+     "stage": "Этап 2", "stage_type": "main"},
+    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI",
+     "stage": "Доп. этап", "stage_type": "side"},
+    {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": "",
+     "stage": "Этап 3", "stage_type": "main"},
+    {"key": "Touge", "aliases": ["TOUGE", "TOGUE"], "title": "Touge", "subtitle": "",
+     "stage": "Доп. этап", "stage_type": "side"},
+    {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Silverstone GP",
+     "stage": "Этап 4", "stage_type": "main"},
+    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "Week CUP",
+     "subtitle": "LMU | Hyper BMW | Sebring circuit", "stage": "Отдельный кубок", "stage_type": "event"},
 ]
-
-FIXED_KEY = "GT3"
 
 CAROUSEL_DUPLICATES = 4
 CAROUSEL_HOLD_MS = 10000
@@ -62,6 +80,11 @@ HTML_TEMPLATE = r"""
     --gold2:#ffdf75;
     --silver:#d7dee8;
     --bronze:#cd7f32;
+    /* Карбоновая "плетёнка" — общая текстура-подложка для топ-5 общего зачёта:
+       два перекрёстных диагональных штриха, как на настоящих гоночных панелях. */
+    --carbon:
+        repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0 3px, transparent 3px 7px),
+        repeating-linear-gradient(-45deg, rgba(0,0,0,.18) 0 3px, transparent 3px 7px);
 }
 
 html,body{
@@ -195,7 +218,7 @@ body::after{
     flex:1 1 auto;
     min-height:0;
     display:grid;
-    grid-template-columns:54px minmax(300px,34%) minmax(0,1fr);
+    grid-template-columns:54px minmax(260px,28%) minmax(0,1fr);
     gap:10px;
     align-items:start;
     position:relative;
@@ -257,7 +280,10 @@ body::after{
 }
 
 .ranks{
-    padding-top:104px;
+    /* 104px — высота .head, + 46px — высота .badge-row, добавленной над ним.
+       Не обновил это при добавлении плашки этапа — цифры мест съехали
+       относительно строк ровно на её высоту. */
+    padding-top:150px;
 }
 
 .rank{
@@ -281,7 +307,7 @@ body::after{
 
 .carousel-viewport{
     min-width:0;
-    height:624px;
+    height:670px;
     overflow:hidden;
     position:relative;
     border:3px solid rgba(74,198,201,.88);
@@ -292,9 +318,50 @@ body::after{
         inset 0 0 30px rgba(74,198,201,.07);
 }
 
+/* Полоса с плашкой этапа над заголовком колонки — общая высота колонки/вьюпорта
+   выросла ровно на её высоту (624px -> 670px), сам .head и .rows ниже не
+   трогали, чтобы старый вид не сдвинулся и не изменился. У фиксированной
+   колонки ("Общий зачёт") плашка пустая — просто резервирует то же место,
+   чтобы обе колонки остались одной высоты. */
+.badge-row{
+    height:46px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+.stage-badge{
+    font-size:14px;
+    font-weight:1000;
+    letter-spacing:.4px;
+    text-transform:uppercase;
+    font-style:italic;
+    padding:5px 16px;
+    border-radius:999px;
+    line-height:1;
+}
+
+.stage-badge--main{
+    color:#04211f;
+    background:linear-gradient(180deg,var(--cyan2),var(--cyan));
+    box-shadow:0 0 14px rgba(74,198,201,.35);
+}
+
+.stage-badge--side{
+    color:#2a1600;
+    background:linear-gradient(180deg,#ffcf8a,#ffb454);
+    box-shadow:0 0 14px rgba(255,180,84,.30);
+}
+
+.stage-badge--event{
+    color:rgba(244,241,232,.75);
+    background:transparent;
+    border:2px solid rgba(244,241,232,.4);
+}
+
 .carousel-track{
     --col-w:370px;
-    --cycle-time:44.8s;
+    --cycle-time:78.4s;
 
     height:100%;
     display:flex;
@@ -311,7 +378,7 @@ body::after{
     width:370px;
     min-width:370px;
     max-width:370px;
-    height:624px;
+    height:670px;
     overflow:hidden;
     background:transparent;
     border:none;
@@ -334,6 +401,24 @@ body::after{
         0 0 30px rgba(74,198,201,.16),
         inset 0 0 30px rgba(74,198,201,.07),
         inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+/* ========== ОБЩИЙ ЗАЧЁТ (фиксированная левая колонка) ========== */
+/* Золотой акцент — чтобы главная, всегда видимая колонка выделялась среди
+   карусели дисциплин. */
+
+.fixed-col .col{
+    border:3px solid rgba(255,204,51,.55);
+    background:linear-gradient(180deg,rgba(18,14,2,.88),rgba(1,5,6,.84));
+    box-shadow:
+        0 0 30px rgba(255,204,51,.10),
+        inset 0 0 30px rgba(255,204,51,.05),
+        inset 0 1px 0 rgba(255,255,255,.08);
+}
+
+.fixed-col .head{
+    border-bottom:3px solid rgba(255,204,51,.55);
+    background:linear-gradient(180deg,rgba(255,204,51,.14),rgba(0,0,0,.23));
 }
 
 .head{
@@ -465,6 +550,188 @@ body::after{
 .row3 .name,
 .row3 .time{
     color:#ffc28c;
+}
+
+/* ========== ТОП-5 ОБЩЕГО ЗАЧЁТА — гоночная ливрея на каждое место ========== */
+/* Только в фиксированной колонке ("Общий зачёт"): .row1/.row2/.row3 у обычных
+   дисциплин-карусели остаются как были (следующие правила их не трогают —
+   применяются только внутри .fixed-col через более специфичный селектор).
+   row4 и row5 — новые классы (раньше 4-е и 5-е место были обычной строкой
+   без акцента), но они оформлены только под .fixed-col.
+
+   Раньше тут был мелкий повторяющийся SVG-паттерн (молнии/звёзды и т.п.) —
+   на деле выглядел как обои, а не гоночный дизайн. Заменено на настоящую
+   ливрею: карбоновая текстура-подложка + диагональные полосы (как краска
+   на капоте болида) + острый угловой клин слева вместо плоской полоски
+   (как номерная табличка), у 1-го места клин — в шашечку финишного флага. */
+.fixed-col .row{
+    padding-left:40px;
+}
+
+.fixed-col .row1,
+.fixed-col .row2,
+.fixed-col .row3,
+.fixed-col .row4,
+.fixed-col .row5{
+    position:relative;
+}
+
+/* Угловой клин слева — без номера (дублировал цифру из колонки мест слева),
+   просто цветной металлик с глянцевым бликом по диагонали. У 1-го места —
+   шашечка финишного флага. */
+.fixed-col .row1::before,
+.fixed-col .row2::before,
+.fixed-col .row3::before,
+.fixed-col .row4::before,
+.fixed-col .row5::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:0;
+    bottom:0;
+    width:32px;
+    clip-path:polygon(0 0, 100% 0, 62% 100%, 0 100%);
+    z-index:2;
+}
+
+/* Тонкая светящаяся полоса под каждой строкой топ-5 — довершает ощущение
+   отдельной "карточки места", а не просто раскрашенной строки таблицы. */
+.fixed-col .row1,.fixed-col .row2,.fixed-col .row3,.fixed-col .row4,.fixed-col .row5{
+    border-bottom:2px solid transparent;
+}
+.fixed-col .row1{border-bottom-color:rgba(255,204,51,.85)}
+.fixed-col .row2{border-bottom-color:rgba(215,222,232,.7)}
+.fixed-col .row3{border-bottom-color:rgba(205,127,50,.8)}
+.fixed-col .row4{border-bottom-color:rgba(74,198,201,.8)}
+.fixed-col .row5{border-bottom-color:rgba(244,241,232,.5)}
+
+.fixed-col .row1{
+    background:
+        var(--carbon),
+        linear-gradient(90deg,rgba(255,204,51,.26),rgba(255,230,120,.10),rgba(255,204,51,.20));
+    box-shadow:0 0 34px rgba(255,204,51,.45), 0 0 60px rgba(255,204,51,.18);
+}
+
+.fixed-col .row1::before{
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.5) 0%, transparent 34%),
+        repeating-conic-gradient(#0b0f0f 0 25%, var(--gold2) 0 50%);
+    background-size:auto, 9px 9px;
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.45), inset 0 10px 10px -6px rgba(255,255,255,.35);
+}
+
+.fixed-col .row2{
+    background:
+        var(--carbon),
+        linear-gradient(90deg,rgba(225,235,245,.16),rgba(74,198,201,.05));
+    animation:silverShimmer 5s ease-in-out infinite;
+}
+
+.fixed-col .row2::before{
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.6) 0%, transparent 34%),
+        linear-gradient(160deg,#f3f7fb,var(--silver) 55%,#9fb0bf);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.45);
+}
+
+.fixed-col .row3{
+    background:
+        var(--carbon),
+        linear-gradient(90deg,rgba(205,127,50,.20),rgba(74,198,201,.04));
+    animation:bronzeEmber 5.4s ease-in-out infinite;
+}
+
+.fixed-col .row3::before{
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.45) 0%, transparent 34%),
+        linear-gradient(160deg,#ffcf8a,var(--bronze) 55%,#8a4d1c);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.3);
+}
+
+.fixed-col .row4{
+    background:
+        var(--carbon),
+        linear-gradient(90deg,rgba(74,198,201,.20),rgba(74,198,201,.03));
+    animation:cyanRise 4.6s ease-in-out infinite;
+}
+
+.fixed-col .row4::before{
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.5) 0%, transparent 34%),
+        linear-gradient(160deg,var(--cyan2),var(--cyan) 55%,#1c6e70);
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.35);
+}
+
+.fixed-col .row4 .name,
+.fixed-col .row4 .time{
+    color:var(--cyan2);
+}
+
+.fixed-col .row5{
+    background:
+        var(--carbon),
+        linear-gradient(90deg,rgba(244,241,232,.10),rgba(74,198,201,.02));
+    animation:softFlicker 6s ease-in-out infinite;
+}
+
+.fixed-col .row5::before{
+    background:
+        linear-gradient(135deg, rgba(255,255,255,.4) 0%, transparent 34%),
+        linear-gradient(160deg,rgba(244,241,232,.95),rgba(244,241,232,.45) 55%,rgba(74,198,201,.35));
+    box-shadow:inset 0 10px 10px -6px rgba(255,255,255,.25);
+}
+
+/* Блик-скан по всей строке — раньше был только у 1-го места, остальные
+   рядом выглядели заметно "тише". Сдвиги по времени разные, чтобы все
+   пять не мигали в такт (иначе смотрится механически, не премиально). */
+.fixed-col .row2::after,
+.fixed-col .row3::after,
+.fixed-col .row4::after,
+.fixed-col .row5::after{
+    content:"";
+    position:absolute;
+    top:0;
+    left:-80%;
+    width:45%;
+    height:100%;
+    background:linear-gradient(90deg,transparent,rgba(255,255,255,.10),transparent);
+    transform:skewX(-18deg);
+    pointer-events:none;
+    z-index:1;
+}
+.fixed-col .row2::after{animation:rowSweep 7s linear infinite}
+.fixed-col .row3::after{animation:rowSweep 7.6s linear infinite}
+.fixed-col .row4::after{animation:rowSweep 6.6s linear infinite}
+.fixed-col .row5::after{animation:rowSweep 8.2s linear infinite}
+
+/* Баллы топ-5 светятся в цвете места, а не одинаковым голубым, как во всей
+   остальной таблице — довершает ощущение персональной "карточки". Свечение
+   сделано ярче и активнее специально для топ-5 — за пределами него ничего
+   не тронуто. */
+.fixed-col .row1 .time{text-shadow:0 0 22px rgba(255,204,51,.75)}
+.fixed-col .row2 .time{text-shadow:0 0 20px rgba(215,222,232,.6)}
+.fixed-col .row3 .time{text-shadow:0 0 20px rgba(205,127,50,.65)}
+.fixed-col .row4 .time{text-shadow:0 0 20px rgba(74,198,201,.65)}
+.fixed-col .row5 .time{text-shadow:0 0 16px rgba(244,241,232,.5)}
+
+@keyframes silverShimmer{
+    0%,100%{box-shadow:0 0 0 rgba(215,222,232,0)}
+    50%{box-shadow:0 0 34px rgba(215,222,232,.55)}
+}
+
+@keyframes bronzeEmber{
+    0%,100%{box-shadow:0 0 0 rgba(205,127,50,0)}
+    50%{box-shadow:0 0 30px rgba(205,127,50,.55)}
+}
+
+@keyframes cyanRise{
+    0%,100%{filter:brightness(1);box-shadow:0 0 0 rgba(74,198,201,0)}
+    50%{filter:brightness(1.32);box-shadow:0 0 30px rgba(74,198,201,.5)}
+}
+
+@keyframes softFlicker{
+    0%,100%{opacity:1;box-shadow:0 0 0 rgba(244,241,232,0)}
+    50%{opacity:.88;box-shadow:0 0 20px rgba(244,241,232,.4)}
 }
 
 .empty{
@@ -626,20 +893,34 @@ body::after{
 .ticker b{color:var(--cyan)}
 .gold{color:var(--gold2)}
 
+/* 7 карусельных пунктов (GT3, MX-5, BTCC, DTM, GT500, Touge, Week CUP) —
+   каждый занимает 1/7 цикла: держит кадр CAROUSEL_HOLD_MS, затем едет
+   CAROUSEL_MOVE_MS. Если поменяешь состав/число пунктов DISPLAY_ORDER —
+   пересчитай проценты здесь и --cycle-time выше (сейчас 7 * (10000+1200)мс
+   = 78.4с). */
 @keyframes carouselStep{
     0%{transform:translate3d(0,0,0)}
-    22.321%{transform:translate3d(0,0,0)}
+    12.755%{transform:translate3d(0,0,0)}
 
-    25%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
-    47.321%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    14.286%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
+    27.041%{transform:translate3d(calc(var(--col-w) * -1),0,0)}
 
-    50%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
-    72.321%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    28.571%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
+    41.327%{transform:translate3d(calc(var(--col-w) * -2),0,0)}
 
-    75%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
-    97.321%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    42.857%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
+    55.612%{transform:translate3d(calc(var(--col-w) * -3),0,0)}
 
-    100%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    57.143%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+    69.898%{transform:translate3d(calc(var(--col-w) * -4),0,0)}
+
+    71.429%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
+    84.184%{transform:translate3d(calc(var(--col-w) * -5),0,0)}
+
+    85.714%{transform:translate3d(calc(var(--col-w) * -6),0,0)}
+    98.469%{transform:translate3d(calc(var(--col-w) * -6),0,0)}
+
+    100%{transform:translate3d(calc(var(--col-w) * -7),0,0)}
 }
 
 @keyframes ticker{
@@ -773,7 +1054,6 @@ body::after{
 
 <script>
 let DISPLAY_ORDER = {display_order_json};
-const FIXED_KEY = "{fixed_key}";
 const CAROUSEL_HOLD_MS = {carousel_hold_ms};
 const CAROUSEL_MOVE_MS = {carousel_move_ms};
 const DATA_REFRESH_MS = {data_refresh_ms};
@@ -796,7 +1076,8 @@ function escapeHtml(value){
 
 function makeRow(pilot, index, oldMap){
     const row = document.createElement("div");
-    const placeClass = index === 0 ? "row1" : index === 1 ? "row2" : index === 2 ? "row3" : "";
+    const placeClass = index === 0 ? "row1" : index === 1 ? "row2" : index === 2 ? "row3"
+        : index === 3 ? "row4" : index === 4 ? "row5" : "";
     row.className = `row ${placeClass}`;
     row.dataset.pilot = pilot.name;
     row.dataset.place = String(index);
@@ -850,6 +1131,18 @@ function makeColumn(item, pilots, oldGroups){
     col.className = "col";
     col.dataset.discipline = item.key;
 
+    // Плашка этапа всегда рендерится (даже пустой — у "Общий зачёт" своего
+    // stage нет), чтобы высота колонки совпадала с каруселью и .head/.rows
+    // ниже остались ровно там же, где были до добавления плашек.
+    const badgeRow = document.createElement("div");
+    badgeRow.className = "badge-row";
+    if (item.stage){
+        const pill = document.createElement("span");
+        pill.className = `stage-badge stage-badge--${item.stage_type || "main"}`;
+        pill.textContent = item.stage;
+        badgeRow.appendChild(pill);
+    }
+
     const head = document.createElement("div");
     head.className = "head";
     head.innerHTML = `<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>`;
@@ -872,6 +1165,7 @@ function makeColumn(item, pilots, oldGroups){
         }
     }
 
+    col.appendChild(badgeRow);
     col.appendChild(head);
     col.appendChild(rows);
     return col;
@@ -904,7 +1198,7 @@ function showLeaderOverlay(item, pilot){
 }
 
 function carouselItems(){
-    return DISPLAY_ORDER.filter(i => i.key !== FIXED_KEY);
+    return DISPLAY_ORDER;
 }
 
 function renderBoard(data, animate=true){
@@ -918,12 +1212,15 @@ function renderBoard(data, animate=true){
     if (!fixedRoot || !carousel) return;
 
     const oldGroups = state ? state.groups : null;
+    const oldOverall = state && state.tournament ? state.tournament.overall : null;
 
     fixedRoot.innerHTML = "";
     carousel.innerHTML = "";
 
-    const fixedItem = DISPLAY_ORDER.find(i => i.key === FIXED_KEY);
-    fixedRoot.appendChild(makeColumn(fixedItem, data.groups[FIXED_KEY] || [], animate ? oldGroups : null));
+    const topItem = {key:"TOP", title:"Общий зачёт", subtitle:""};
+    const topPilots = (data.tournament && data.tournament.overall) || [];
+    const topOldGroups = animate && oldOverall ? {TOP: oldOverall} : null;
+    fixedRoot.appendChild(makeColumn(topItem, topPilots, topOldGroups));
 
     const items = carouselItems();
 
@@ -1096,6 +1393,43 @@ def clean_number(value) -> str:
     return value
 
 
+async def load_tournament_data() -> dict:
+    """
+    Общий взвешенный зачёт месяца турнира v2 для фиксированной колонки
+    ТВ-табло ("Общий зачёт" — кто сейчас лидирует за призы клуба).
+
+    Ничего не пишет в БД, только читает — использует те же async-функции,
+    что и сам бот (services.tournament / database.db), поэтому цифры на
+    экране всегда совпадают с тем, что видит пилот в личном кабинете.
+    """
+    month_key, start_iso, end_iso = month_bounds()
+
+    try:
+        ranking = await rank_month_overall(month_key, start_iso, end_iso)
+    except Exception:
+        logging.exception("TV board: не удалось загрузить общий зачёт месяца")
+        ranking = []
+
+    overall = []
+    for row in ranking:
+        try:
+            pilot = await get_pilot_by_telegram_id(row["telegram_id"]) or {}
+        except Exception:
+            pilot = {}
+        name = clean_name(pilot.get("display_name"), pilot.get("username"))
+        number = clean_number(pilot.get("pilot_number"))
+        overall.append({
+            "name": name,
+            "num": number,
+            "time": f'{row["total"]:g}',
+        })
+
+    return {
+        "month_key": month_key,
+        "overall": overall,
+    }
+
+
 def load_groups() -> dict[str, list[dict]]:
     groups = {item["key"]: [] for item in DISPLAY_ORDER}
 
@@ -1189,32 +1523,38 @@ def make_ticker(groups: dict[str, list[dict]], display_order: list[dict] | None 
     return " &nbsp; | &nbsp; ".join(parts)
 
 
-def payload() -> dict:
+async def payload() -> dict:
     groups = load_groups()
     display_order = get_dynamic_display_order(groups)
+
+    try:
+        tournament = await load_tournament_data()
+    except Exception:
+        logging.exception("TV board: панель турнира v2 недоступна")
+        tournament = {"month_key": None, "classes": [], "overall": []}
 
     return {
         "groups": groups,
         "ticker": make_ticker(groups, display_order),
         "updated_at": datetime.now().strftime("%H:%M:%S"),
         "display_order": display_order,
+        "tournament": tournament,
     }
 
 
 @app.get("/api/leaderboard")
 async def api_leaderboard():
-    return JSONResponse(payload())
+    return JSONResponse(await payload())
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    data = payload()
+    data = await payload()
     page = HTML_TEMPLATE
     page = page.replace("{bot_username}", BOT_USERNAME)
     page = page.replace("{ranks}", "".join(f'<div class="rank">{i}</div>' for i in range(1, 11)))
     page = page.replace("{ticker}", data["ticker"])
     page = page.replace("{display_order_json}", json.dumps(data["display_order"], ensure_ascii=False))
-    page = page.replace("{fixed_key}", FIXED_KEY)
     page = page.replace("{carousel_hold_ms}", str(CAROUSEL_HOLD_MS))
     page = page.replace("{carousel_move_ms}", str(CAROUSEL_MOVE_MS))
     page = page.replace("{data_refresh_ms}", str(DATA_REFRESH_MS))

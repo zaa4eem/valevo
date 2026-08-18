@@ -27,6 +27,8 @@ from config import ADMIN_IDS, BASE_DIR, MOSCOW_TZ, YCLIENTS_COMPANY_ID
 from database.db import get_db, get_pilot_by_telegram_id
 from keyboards.menu import get_menu
 from services.yclients_service import BASE_URL, REQUEST_TIMEOUT, _request, get_headers, normalize_phone
+from utils.chat_hygiene import schedule_fade_delete
+from utils.message_style import DIVIDER, header
 
 router = Router(name="booking")
 logger = logging.getLogger(__name__)
@@ -247,6 +249,42 @@ async def _claim_for_admin(booking_id: int, admin_id: int) -> bool:
     await db.commit()
     await db.close()
     return changed
+
+
+async def _reject_if_pending(booking_id: int, admin_id: int) -> bool:
+    """Атомарно отклоняет заявку только если она ещё pending_admin —
+    чтобы отклонение не могло затереть заявку, которую параллельно
+    уже подтверждает другой администратор."""
+    db = await get_db()
+    cur = await db.execute(
+        """
+        UPDATE booking_requests_v2
+        SET status = 'rejected', admin_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'pending_admin'
+        """,
+        (admin_id, booking_id),
+    )
+    changed = cur.rowcount == 1
+    await db.commit()
+    await db.close()
+    return changed
+
+
+async def _clear_yclients_record(item_id: int) -> None:
+    """Сбрасывает ссылку на удалённую в YCLIENTS запись, чтобы позже
+    (повторное подтверждение или отмена) не пытались удалить/использовать
+    уже несуществующую запись."""
+    db = await get_db()
+    await db.execute(
+        """
+        UPDATE booking_items_v2
+        SET yclients_record_id = NULL, yclients_status = 'pending'
+        WHERE id = ?
+        """,
+        (item_id,),
+    )
+    await db.commit()
+    await db.close()
 
 
 async def _local_conflicts(
@@ -852,7 +890,7 @@ def _format_booking(booking: dict[str, Any]) -> str:
     places = ", ".join(_h(item["place_title"]) for item in booking.get("items", []))
     username = _h(booking.get("username"))
     return (
-        f"🎟 <b>Бронирование #{int(booking['id'])}</b>\n\n"
+        header("🎟", f"Бронирование #{int(booking['id'])}") + "\n\n"
         f"👤 {_h(booking.get('display_name'))}"
         + (f" (@{username})" if username else "")
         + f"\n📱 {_h(booking.get('phone'))}\n"
@@ -868,7 +906,7 @@ def _selection_summary(data: dict[str, Any]) -> str:
     end_at = datetime.fromisoformat(data["end_at"]).astimezone(TZ)
     places = ", ".join(BOOKING_PLACES[key]["title"] for key in data["selected_places"])
     return (
-        "📋 <b>ПРОВЕРЬТЕ ЗАЯВКУ</b>\n\n"
+        header("📋", "Проверьте заявку") + "\n\n"
         f"🖥 Места: <b>{places}</b>\n"
         f"📅 Дата: <b>{start_at.strftime('%d.%m.%Y')}</b>\n"
         f"⏰ Время: <b>{start_at.strftime('%H:%M')}–{end_at.strftime('%H:%M')}</b>\n"
@@ -877,17 +915,47 @@ def _selection_summary(data: dict[str, Any]) -> str:
     )
 
 
-async def _send_places_screen(message: Message, state: FSMContext, place_type: str, selected: list[str]) -> None:
-    text = (
-        "Выберите конкретные места.\n"
-        f"Можно выбрать от 1 до {MAX_PLACES_PER_BOOKING}.\n\n"
-        "На карте клуба номера должны совпадать с кнопками ниже."
-    )
-    keyboard = _places_keyboard(place_type, selected)
-    if CLUB_MAP_PATH.exists():
-        await message.answer_photo(FSInputFile(CLUB_MAP_PATH), caption=text, reply_markup=keyboard)
+async def _replace_flow_message(
+    bot: Bot,
+    state: FSMContext,
+    chat_id: int,
+    *,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    photo_path: Path | None = None,
+) -> Message:
+    """Отправляет новое сообщение сценария бронирования и убирает предыдущее
+    (с задержкой, не мгновенно) — используется только когда тип контента
+    меняется (текст → фото и обратно) и обычный edit_text невозможен."""
+    data = await state.get_data()
+    old_chat_id = data.get("flow_chat_id")
+    old_message_id = data.get("flow_message_id")
+
+    if photo_path and photo_path.exists():
+        sent = await bot.send_photo(chat_id, FSInputFile(photo_path), caption=text, reply_markup=reply_markup)
     else:
-        await message.answer(text + "\n\n⚠️ Карта пока не загружена: static/club_map.png", reply_markup=keyboard)
+        sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+
+    if old_chat_id and old_message_id:
+        schedule_fade_delete(bot, old_chat_id, old_message_id)
+
+    await state.update_data(flow_chat_id=sent.chat.id, flow_message_id=sent.message_id)
+    return sent
+
+
+async def _edit_flow_message(state: FSMContext, bot: Bot, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    """Редактирует текущее сообщение сценария на месте (без новых сообщений).
+    Используется для переходов текст → текст, когда message-объект хендлера
+    не совпадает с сообщением сценария (например, свободный ввод времени)."""
+    data = await state.get_data()
+    chat_id = data.get("flow_chat_id")
+    message_id = data.get("flow_message_id")
+    if not chat_id or not message_id:
+        return
+    try:
+        await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=reply_markup)
+    except Exception:
+        pass
 
 
 # ============================================================================
@@ -900,8 +968,18 @@ async def booking_start(message: Message, state: FSMContext) -> None:
     if not pilot:
         await message.answer("Сначала зарегистрируйтесь в боте через /start.", reply_markup=get_menu(message.from_user.id))
         return
+
+    # Если пилот бросил предыдущий сценарий на середине — уберём его "хвост".
+    old_data = await state.get_data()
+    old_chat_id = old_data.get("flow_chat_id")
+    old_message_id = old_data.get("flow_message_id")
+
     await state.clear()
-    await message.answer("Что хотите забронировать?", reply_markup=_type_keyboard())
+    sent = await message.answer("🎟 <b>Что хотите забронировать?</b>", reply_markup=_type_keyboard())
+    await state.update_data(flow_chat_id=sent.chat.id, flow_message_id=sent.message_id)
+
+    if old_chat_id and old_message_id:
+        schedule_fade_delete(message.bot, old_chat_id, old_message_id, delay=1.0)
 
 
 @router.callback_query(F.data.startswith("bk:type:"))
@@ -910,11 +988,27 @@ async def booking_choose_type(callback: CallbackQuery, state: FSMContext) -> Non
     if place_type not in {"static", "motion"}:
         await callback.answer("Неизвестный тип", show_alert=True)
         return
-    await state.clear()
     await state.update_data(place_type=place_type, selected_places=[])
     await state.set_state(BookingFlow.selecting_places)
     await callback.answer()
-    await _send_places_screen(callback.message, state, place_type, [])
+
+    text = (
+        "🖥 <b>Выберите конкретные места.</b>\n"
+        f"Можно выбрать от 1 до {MAX_PLACES_PER_BOOKING}.\n\n"
+        "На карте клуба номера должны совпадать с кнопками ниже."
+    )
+    keyboard = _places_keyboard(place_type, [])
+    if CLUB_MAP_PATH.exists():
+        await _replace_flow_message(
+            callback.bot, state, callback.message.chat.id,
+            text=text, reply_markup=keyboard, photo_path=CLUB_MAP_PATH,
+        )
+    else:
+        await _replace_flow_message(
+            callback.bot, state, callback.message.chat.id,
+            text=text + "\n\n⚠️ Карта пока не загружена: static/club_map.png",
+            reply_markup=keyboard,
+        )
 
 
 @router.callback_query(BookingFlow.selecting_places, F.data.startswith("bk:place:"))
@@ -955,7 +1049,10 @@ async def booking_places_done(callback: CallbackQuery, state: FSMContext) -> Non
         return
     await state.set_state(BookingFlow.choosing_date)
     await callback.answer()
-    await callback.message.answer("Выберите дату:", reply_markup=_date_keyboard())
+    await _replace_flow_message(
+        callback.bot, state, callback.message.chat.id,
+        text="📅 <b>Выберите дату:</b>", reply_markup=_date_keyboard(),
+    )
 
 
 @router.callback_query(BookingFlow.choosing_date, F.data.startswith("bk:date:"))
@@ -973,8 +1070,8 @@ async def booking_choose_date(callback: CallbackQuery, state: FSMContext) -> Non
     await state.update_data(selected_date=selected_date.isoformat())
     await state.set_state(BookingFlow.entering_time)
     await callback.answer()
-    await callback.message.answer(
-        "Выберите время или напишите его вручную в формате <b>18:35</b>.\n"
+    await callback.message.edit_text(
+        "🕐 Выберите время или напишите его вручную в формате <b>18:35</b>.\n"
         "Клуб работает с 12:00 до 00:00.",
         reply_markup=_time_keyboard(selected_date),
     )
@@ -1013,30 +1110,34 @@ async def booking_no_time(callback: CallbackQuery) -> None:
     )
 
 
-async def _accept_time(raw: str, message: Message, state: FSMContext) -> None:
+async def _accept_time(raw: str, state: FSMContext, bot: Bot) -> None:
+    data = await state.get_data()
+    selected_date = date.fromisoformat(data["selected_date"])
+
+    async def retry(text: str) -> None:
+        await _edit_flow_message(state, bot, f"⚠️ {text}", _time_keyboard(selected_date))
+
     try:
         selected_time = datetime.strptime(raw.strip(), "%H:%M").time()
     except ValueError:
-        await message.answer("Введите время в формате <b>18:35</b>.")
+        await retry("Введите время в формате <b>18:35</b> или выберите слот ниже.")
         return
 
     if selected_time < OPEN_TIME:
-        await message.answer("Клуб открывается в 12:00. Выберите более позднее время.")
+        await retry("Клуб открывается в 12:00. Выберите более позднее время.")
         return
 
-    data = await state.get_data()
-    selected_date = date.fromisoformat(data["selected_date"])
     start_at = datetime.combine(selected_date, selected_time, tzinfo=TZ)
     now = datetime.now(TZ)
 
     if start_at <= now:
-        await message.answer("Это время уже прошло. Выберите будущий слот.")
+        await retry("Это время уже прошло. Выберите будущий слот.")
         return
 
     closing = datetime.combine(selected_date + timedelta(days=1), CLOSE_TIME, tzinfo=TZ)
     minimum_end = start_at + timedelta(minutes=min(DURATION_OPTIONS))
     if minimum_end > closing:
-        await message.answer("До закрытия клуба осталось меньше 30 минут.")
+        await retry("До закрытия клуба осталось меньше 30 минут.")
         return
 
     selected = list(data.get("selected_places") or [])
@@ -1046,8 +1147,8 @@ async def _accept_time(raw: str, message: Message, state: FSMContext) -> None:
     # После выбора длительности проверка выполняется повторно на весь интервал.
     local = await _local_conflicts(staff_ids, start_at, minimum_end)
     if local:
-        await message.answer(
-            "❌ На выбранное время место уже занято:\n"
+        await retry(
+            "На выбранное время место уже занято:\n"
             + _format_local_conflicts(local)
             + "\n\nВыберите другое время."
         )
@@ -1055,14 +1156,11 @@ async def _accept_time(raw: str, message: Message, state: FSMContext) -> None:
 
     remote, remote_error = await _remote_conflicts(selected, start_at, minimum_end)
     if remote_error:
-        await message.answer(
-            "Не удалось проверить занятость в Сервисе. "
-            "Попробуйте выбрать время ещё раз чуть позже."
-        )
+        await retry("Не удалось проверить занятость в Сервисе. Попробуйте выбрать время ещё раз чуть позже.")
         return
     if remote:
-        await message.answer(
-            "❌ На выбранное время место уже занято:\n"
+        await retry(
+            "На выбранное время место уже занято:\n"
             + "\n".join(remote)
             + "\n\nВыберите другое время."
         )
@@ -1070,19 +1168,19 @@ async def _accept_time(raw: str, message: Message, state: FSMContext) -> None:
 
     await state.update_data(start_at=start_at.isoformat())
     await state.set_state(BookingFlow.choosing_duration)
-    await message.answer("Выберите длительность:", reply_markup=_duration_keyboard())
+    await _edit_flow_message(state, bot, "⌛ <b>Выберите длительность:</b>", _duration_keyboard())
 
 
 @router.callback_query(BookingFlow.entering_time, F.data.startswith("bk:time:"))
 async def booking_choose_time_callback(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     selected_time = callback.data.removeprefix("bk:time:")
-    await _accept_time(selected_time, callback.message, state)
+    await _accept_time(selected_time, state, callback.bot)
 
 
 @router.message(BookingFlow.entering_time)
 async def booking_choose_time_text(message: Message, state: FSMContext) -> None:
-    await _accept_time(message.text or "", message, state)
+    await _accept_time(message.text or "", state, message.bot)
 
 
 @router.callback_query(BookingFlow.choosing_duration, F.data.startswith("bk:duration:"))
@@ -1136,7 +1234,7 @@ async def booking_choose_duration(callback: CallbackQuery, state: FSMContext) ->
     await state.set_state(BookingFlow.confirming)
     await callback.answer()
     final_data = await state.get_data()
-    await callback.message.answer(_selection_summary(final_data), reply_markup=_confirm_keyboard())
+    await callback.message.edit_text(_selection_summary(final_data), reply_markup=_confirm_keyboard())
 
 
 async def submit_booking(
@@ -1217,7 +1315,7 @@ async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
 
     await state.clear()
     await callback.answer("Заявка отправлена")
-    await callback.message.answer(
+    await callback.message.edit_text(
         "✅ Заявка отправлена администратору.",
         reply_markup=_user_cancel_keyboard(booking_id),
     )
@@ -1227,11 +1325,14 @@ async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
 async def booking_cancel_flow(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer("Отменено")
+    message = callback.message
     try:
-        await callback.message.edit_reply_markup(reply_markup=None)
+        if message.photo:
+            await message.edit_caption(caption="❌ Бронирование отменено.", reply_markup=None)
+        else:
+            await message.edit_text("❌ Бронирование отменено.", reply_markup=None)
     except Exception:
         pass
-    await callback.message.answer("Бронирование отменено.", reply_markup=get_menu(callback.from_user.id))
 
 
 # ============================================================================
@@ -1239,11 +1340,12 @@ async def booking_cancel_flow(callback: CallbackQuery, state: FSMContext) -> Non
 # ============================================================================
 async def reject_booking(bot: Bot, booking_id: int, admin_id: int) -> tuple[bool, str | None]:
     """Возвращает (ok, error). error=None и ok=True — заявка отклонена."""
-    booking = await _fetch_booking(booking_id)
-    if not booking or booking["status"] != "pending_admin":
-        return False, "Заявка уже обработана"
+    if not await _reject_if_pending(booking_id, admin_id):
+        return False, "Заявка уже обрабатывается или обработана"
 
-    await _set_booking_status(booking_id, "rejected", admin_id=admin_id)
+    booking = await _fetch_booking(booking_id)
+    if not booking:
+        return False, "Заявка не найдена"
     try:
         await bot.send_message(
             booking["telegram_id"],
@@ -1293,9 +1395,11 @@ async def approve_booking(bot: Bot, booking_id: int, admin_id: int) -> tuple[boo
 
     if failure:
         rollback_errors = []
-        for _, record_id in created:
+        for item_id, record_id in created:
             ok, delete_error = await _delete_yclients_record(record_id)
-            if not ok:
+            if ok:
+                await _clear_yclients_record(item_id)
+            else:
                 rollback_errors.append(delete_error or str(record_id))
         full_error = failure
         if rollback_errors:
