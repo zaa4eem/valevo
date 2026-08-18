@@ -10,18 +10,47 @@ import { haptic } from "../telegram.js";
 
 let activeSubTab = "leaders"; // persisted across tab switches within the session
 
-function buildDisciplineCard(entry) {
+function buildClassCard(entry) {
     const card = el("div", { class: "card discipline-card" });
-    card.appendChild(el("div", { class: "card-title" }, [
-        el("span", {}, `🏁 ${entry.discipline}`),
-        el("span", { class: "track-name" }, entry.track || ""),
-    ]));
-    (entry.places || []).forEach((row) => {
+    const title = entry.side_of ? `${entry.class_name} (доп. для ${entry.side_of})` : entry.class_name;
+    card.appendChild(el("div", { class: "card-title" }, [el("span", {}, `🏁 ${title}`)]));
+
+    (entry.qualifying || []).forEach((row) => {
         const placeClass = row.place <= 3 ? ` place-${row.place}` : "";
         card.appendChild(el("div", { class: `medal-row${placeClass}` }, [
             el("span", { class: "medal" }, row.medal),
             el("span", { class: "pname" }, row.display_name),
-            el("span", { class: "ptime" }, row.lap_text),
+            el("span", { class: "ptime" }, `${row.score} баллов`),
+        ]));
+    });
+    (entry.pending || []).forEach((row) => {
+        card.appendChild(el("div", { class: "medal-row" }, [
+            el("span", { class: "medal" }, "·"),
+            el("span", { class: "pname" }, row.display_name),
+            el("span", { class: "ptime", style: "color:var(--text-faint);" }, `${row.starts}/${entry.min_starts} стартов`),
+        ]));
+    });
+    return card;
+}
+
+function buildOverallCard(overall, monthKey) {
+    const card = el("div", { class: "card discipline-card" });
+    card.appendChild(el("div", { class: "card-title" }, [
+        el("span", {}, "🏆 Общий зачёт месяца"),
+        el("span", { class: "track-name" }, monthKey || ""),
+    ]));
+    overall.forEach((row) => {
+        const placeClass = row.place <= 3 ? ` place-${row.place}` : "";
+        const breakdown = (row.breakdown || [])
+            .map((b) => `${b.class_name} ${b.score}${b.position_bonus ? `+${b.position_bonus}` : ""}×${b.weight}`)
+            .join(" + ");
+        card.appendChild(el("div", { class: `medal-row${placeClass}` }, [
+            el("span", { class: "medal" }, row.medal),
+            el("div", {}, [
+                el("div", { class: "pname" }, row.display_name),
+                breakdown ? el("div", { class: "field-hint", style: "margin-top:2px;" }, breakdown) : null,
+            ]),
+            el("span", { class: "ptime" }, row.total_text),
         ]));
     });
     return card;
@@ -33,8 +62,9 @@ function loadLeaderboard(container) {
         clear(c);
         if (!res.ok) { c.appendChild(errorState(res.error, retry)); return; }
 
-        const entries = (res.data && res.data.entries) || [];
-        if (entries.length === 0) {
+        const classes = (res.data && res.data.classes) || [];
+        const overall = (res.data && res.data.overall) || [];
+        if (classes.length === 0 && overall.length === 0) {
             c.appendChild(emptyState(
                 "Таблица лидеров пока пуста",
                 "Станьте первым — отправьте свой результат через «Установить время»!",
@@ -44,7 +74,8 @@ function loadLeaderboard(container) {
         }
 
         const stack = el("div", { class: "stack-sm" });
-        entries.forEach((entry) => stack.appendChild(buildDisciplineCard(entry)));
+        classes.forEach((entry) => stack.appendChild(buildClassCard(entry)));
+        if (overall.length) stack.appendChild(buildOverallCard(overall, res.data.month_key));
         c.appendChild(stack);
     });
 }

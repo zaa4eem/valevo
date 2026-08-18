@@ -11,7 +11,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from database.db import get_pilot_by_telegram_id, get_pilot_history_stats
+from database.db import get_pilot_by_telegram_id, get_pilot_history_stats, get_pilot_class, get_pilot_achievements
+from services.achievements import CATALOG
+from services.levels import pilot_level, pilot_level_progress
 from services.yclients_service import get_client, get_client_total_hours, get_valevo_bonus_balance
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,26 @@ def format_phone_display(phone: str | None) -> str:
     return str(phone) if phone else "—"
 
 
+async def _achievements_payload(telegram_id: int) -> dict[str, Any]:
+    """Полный каталог достижений с флагом unlocked — фронт рисует и
+    открытые, и запертые бейджи (стандартный геймификационный UX)."""
+    unlocked_codes = await get_pilot_achievements(telegram_id)
+    items = [
+        {
+            "code": code,
+            "emoji": emoji,
+            "title": title,
+            "description": description,
+            "reward": reward,
+            "unlocked": code in unlocked_codes,
+        }
+        for code, (emoji, title, description, reward) in CATALOG.items()
+    ]
+    # Открытые сначала, внутри групп — порядок каталога.
+    items.sort(key=lambda item: not item["unlocked"])
+    return {"unlocked_count": len(unlocked_codes), "total_count": len(CATALOG), "items": items}
+
+
 async def get_profile_data(telegram_id: int, fallback_username: str | None = None) -> dict[str, Any] | None:
     """Возвращает структурированные данные профиля пилота (без HTML-разметки).
 
@@ -94,6 +116,8 @@ async def get_profile_data(telegram_id: int, fallback_username: str | None = Non
     rating = pilot.get("rating") or 0
 
     history = await get_pilot_history_stats(telegram_id=telegram_id, username=username or "")
+    tournament_class = await get_pilot_class(telegram_id)
+    achievements = await _achievements_payload(telegram_id)
 
     club: dict[str, Any] = {"linked": bool(pilot.get("yclients_client_id"))}
     if pilot.get("yclients_client_id"):
@@ -122,6 +146,10 @@ async def get_profile_data(telegram_id: int, fallback_username: str | None = Non
         "phone_display": format_phone_display(pilot.get("phone")),
         "rating": rating,
         "rank": pilot_rank_progress(rating),
+        "level": pilot_level(rating),
+        "level_progress": pilot_level_progress(rating),
+        "tournament_class": tournament_class,
+        "achievements": achievements,
         "club": club,
         "history": history,
     }

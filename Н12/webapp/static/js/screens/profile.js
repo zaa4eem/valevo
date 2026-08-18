@@ -8,7 +8,7 @@
 import { registerScreen, push, switchTab } from "../router.js";
 import { api } from "../api.js";
 import { appState, setMe } from "../state.js";
-import { el, clear, errorState, toastError } from "../ui.js";
+import { el, clear, errorState, toastError, openSheet } from "../ui.js";
 import { haptic } from "../telegram.js";
 import { formatHoursValue, formatRub, formatWallDate, formatWallDateTime, clamp } from "../format.js";
 
@@ -49,6 +49,17 @@ function buildLadder(rank) {
         ]));
     });
     return wrap;
+}
+
+function buildLevelRow(level, levelProgress) {
+    const isMax = levelProgress.fraction >= 1 && levelProgress.points_left === 0;
+    return el("div", { class: "level-row" }, [
+        el("span", { class: "level-chip" }, `${level} ур.`),
+        el("div", { class: "level-track" }, [
+            el("div", { class: "level-fill", style: `width:${Math.round(clamp(levelProgress.fraction, 0, 1) * 100)}%` }),
+        ]),
+        el("span", { class: "level-points-left" }, isMax ? "макс." : `ещё ${levelProgress.points_left}`),
+    ]);
 }
 
 function buildProgress(rank) {
@@ -96,8 +107,41 @@ function buildHero(p) {
     card.appendChild(el("div", { class: "rank-title" }, rank.current_title));
     card.appendChild(el("div", { class: "rating-value" }, String(p.rating)));
     card.appendChild(el("div", { class: "rating-caption" }, "рейтинг пилота"));
+    if (p.level != null && p.level_progress) card.appendChild(buildLevelRow(p.level, p.level_progress));
     card.appendChild(buildProgress(rank));
 
+    return card;
+}
+
+function openAchievementDetail(item) {
+    const body = el("div", { style: "text-align:center;" }, [
+        el("div", { style: `font-size:44px;line-height:1;${item.unlocked ? "" : "filter:grayscale(1) brightness(.6);"}` }, item.emoji),
+        el("div", { class: "modal-title", style: "margin-top:12px;" }, item.title),
+        el("div", { class: "modal-text" }, item.description),
+        el("div", { style: "margin-top:10px;font-weight:800;color:var(--cyan2);" },
+            item.unlocked ? `Получено · +${item.reward} рейтинга` : `🔒 Заблокировано · +${item.reward} рейтинга при получении`),
+    ]);
+    openSheet(body, { center: true });
+}
+
+function buildBadgesCard(achievements) {
+    const card = el("div", { class: "card" });
+    card.appendChild(el("div", { class: "card-title" }, [
+        el("span", {}, "🏅 Ачивки"),
+        el("span", { class: "track-name" }, `${achievements.unlocked_count}/${achievements.total_count}`),
+    ]));
+
+    const grid = el("div", { class: "badge-grid" });
+    achievements.items.forEach((item) => {
+        grid.appendChild(el("button", {
+            class: `achv-badge${item.unlocked ? " unlocked" : ""}`,
+            onClick: () => { haptic("light"); openAchievementDetail(item); },
+        }, [
+            el("div", { class: "achv-emoji" }, item.emoji),
+            el("div", { class: "achv-title" }, item.title),
+        ]));
+    });
+    card.appendChild(grid);
     return card;
 }
 
@@ -226,6 +270,7 @@ function draw(container, profile) {
 
     const stack = el("div", { class: "stack" });
     stack.appendChild(buildHero(profile));
+    if (profile.achievements) stack.appendChild(buildBadgesCard(profile.achievements));
     stack.appendChild(buildClubCard(profile.club));
     stack.appendChild(buildAchievementsCard(profile.history));
     stack.appendChild(buildLastResultCard(profile.history));

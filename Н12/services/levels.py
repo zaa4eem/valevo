@@ -92,6 +92,29 @@ def pilot_level(rating: int | float | None) -> int:
     return min(level, TOTAL_LEVELS)
 
 
+def pilot_level_progress(rating: int | float | None) -> dict:
+    """Числовые данные прогресса уровня (без текстового форматирования) —
+    для JSON-ответов мини-приложения, twin of pilot_level_progress_bar."""
+    rating_value = max(0, int(rating or 0))
+    level = pilot_level(rating_value)
+
+    if level >= TOTAL_LEVELS:
+        return {"level": level, "total_levels": TOTAL_LEVELS, "fraction": 1.0, "points_left": 0}
+
+    current_boundary = LEVEL_BOUNDARIES[level - 1]
+    next_boundary = LEVEL_BOUNDARIES[level] if level < len(LEVEL_BOUNDARIES) else LEGEND_LEVEL_CAP_RATING
+    span = next_boundary - current_boundary
+    done = rating_value - current_boundary
+    fraction = max(0.0, min(1.0, done / span)) if span > 0 else 1.0
+
+    return {
+        "level": level,
+        "total_levels": TOTAL_LEVELS,
+        "fraction": fraction,
+        "points_left": max(0, next_boundary - rating_value),
+    }
+
+
 def pilot_level_progress_bar(rating: int | float | None, width: int = 10) -> str:
     """Прогресс-бар до следующего уровня (мелкий шаг, в отличие от ранга)."""
     rating_value = max(0, int(rating or 0))
