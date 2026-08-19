@@ -11,8 +11,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from config import BASE_DIR, DB_NAME
+from data.tournament import CLASS_LADDER
 from services.tournament import month_bounds, rank_month_overall
-from database.db import get_pilot_by_telegram_id
+from database.db import (
+    get_all_class_benchmarks,
+    get_month_participants,
+    get_pilot_by_telegram_id,
+)
 
 # Используем те же пути, что и основной бот (config.py), а не путь относительно
 # текущей рабочей директории — иначе TV-board, запущенный из другой папки/сервиса,
@@ -307,7 +312,7 @@ body::after{
 
 .carousel-viewport{
     min-width:0;
-    height:670px;
+    height:722px;
     overflow:hidden;
     position:relative;
     border:3px solid rgba(74,198,201,.88);
@@ -359,6 +364,15 @@ body::after{
     border:2px solid rgba(244,241,232,.4);
 }
 
+/* Плашка над фиксированной колонкой ("Общий зачёт") — раньше там было пустое
+   место, зарезервированное под высоту. Золотая, а не голубая, чтобы её не
+   читали как ещё один "Этап N" из карусели. */
+.stage-badge--beta{
+    color:#241a00;
+    background:linear-gradient(180deg,var(--gold2),var(--gold));
+    box-shadow:0 0 16px rgba(255,204,51,.5);
+}
+
 .carousel-track{
     --col-w:370px;
     --cycle-time:78.4s;
@@ -378,7 +392,7 @@ body::after{
     width:370px;
     min-width:370px;
     max-width:370px;
-    height:670px;
+    height:722px;
     overflow:hidden;
     background:transparent;
     border:none;
@@ -732,6 +746,78 @@ body::after{
 @keyframes softFlicker{
     0%,100%{opacity:1;box-shadow:0 0 0 rgba(244,241,232,0)}
     50%{opacity:.88;box-shadow:0 0 20px rgba(244,241,232,.4)}
+}
+
+/* ========== 11-я строка колонки: эталон месяца ========== */
+/* Не место в таблице, а справочная строка — поэтому отделена жирной линией
+   сверху и не получает номера в колонке мест слева (там по-прежнему 1…10).
+   Время и трасса берутся из class_benchmarks за текущий месяц, то есть из
+   того же эталона, который админ задаёт в боте — отдельно ничего не вводится. */
+.row.bench{
+    height:52px;
+    grid-template-columns:minmax(0,1fr) 150px;
+    border-bottom:none;
+    border-top:3px solid rgba(74,198,201,.6);
+    background:linear-gradient(180deg,rgba(74,198,201,.14),rgba(0,0,0,.42));
+}
+
+.bench .label{
+    display:flex;
+    flex-direction:column;
+    gap:2px;
+    min-width:0;
+}
+
+.bench .label b{
+    font-size:13px;
+    letter-spacing:.8px;
+    text-transform:uppercase;
+    color:var(--cyan2);
+    font-weight:1000;
+}
+
+.bench .label span{
+    font-size:12px;
+    color:rgba(157,179,179,.95);
+    font-weight:700;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+.bench .time{
+    font-size:22px;
+    color:var(--cyan2);
+    text-shadow:0 0 16px rgba(86,226,229,.6);
+}
+
+/* Эталон на месяц ещё не задан — видно сразу, где его не хватает. */
+.bench.none .time{
+    font-size:15px;
+    color:rgba(157,179,179,.8);
+    text-shadow:none;
+}
+
+/* Week CUP вне лестницы классов, эталон для него не задаётся — полоса
+   остаётся пустой, только чтобы высота колонок совпадала. */
+.row.bench.blank{
+    background:linear-gradient(180deg,rgba(74,198,201,.05),rgba(0,0,0,.3));
+}
+
+/* В общем зачёте эталона быть не может (там баллы, а не время круга) —
+   вместо него счётчик участников месяца, в золоте под цвет колонки.
+   padding-left сбрасываем: у этой строки нет углового клина топ-5. */
+.fixed-col .row.bench{
+    padding-left:14px;
+    border-top-color:rgba(255,204,51,.6);
+    background:linear-gradient(180deg,rgba(255,204,51,.14),rgba(0,0,0,.42));
+}
+
+.fixed-col .bench .label b{color:var(--gold2)}
+
+.fixed-col .bench .time{
+    color:var(--gold2);
+    text-shadow:0 0 16px rgba(255,204,51,.6);
 }
 
 .empty{
@@ -1126,6 +1212,23 @@ function makeEmptyRow(){
     return row;
 }
 
+// 11-я строка колонки: эталон месяца (у общего зачёта — счётчик участников).
+// bench == null → пустая полоса: у дисциплины эталона не бывает (Week CUP),
+// но место сохраняем, иначе колонки будут разной высоты.
+function makeBenchRow(bench){
+    const row = document.createElement("div");
+    if (!bench){
+        row.className = "row bench blank";
+        return row;
+    }
+    row.className = bench.muted ? "row bench none" : "row bench";
+    row.innerHTML =
+        `<div class="label"><b>${escapeHtml(bench.label)}</b>` +
+        `<span>${escapeHtml(bench.sub)}</span></div>` +
+        `<div class="time">${escapeHtml(bench.value)}</div>`;
+    return row;
+}
+
 function makeColumn(item, pilots, oldGroups){
     const col = document.createElement("div");
     col.className = "col";
@@ -1164,6 +1267,8 @@ function makeColumn(item, pilots, oldGroups){
             rows.appendChild(makeEmptyRow());
         }
     }
+
+    rows.appendChild(makeBenchRow(item.bench));
 
     col.appendChild(badgeRow);
     col.appendChild(head);
@@ -1217,7 +1322,20 @@ function renderBoard(data, animate=true){
     fixedRoot.innerHTML = "";
     carousel.innerHTML = "";
 
-    const topItem = {key:"TOP", title:"Общий зачёт", subtitle:""};
+    const participants = (data.tournament && data.tournament.participants) || 0;
+    const topItem = {
+        key:"TOP",
+        title:"Общий зачёт",
+        subtitle:"",
+        stage:"Бета тест",
+        stage_type:"beta",
+        bench:{
+            label:"Пилотов в турнире",
+            sub:"участвуют в этом месяце",
+            value:String(participants),
+            muted:false,
+        },
+    };
     const topPilots = (data.tournament && data.tournament.overall) || [];
     const topOldGroups = animate && oldOverall ? {TOP: oldOverall} : null;
     fixedRoot.appendChild(makeColumn(topItem, topPilots, topOldGroups));
@@ -1393,6 +1511,38 @@ def clean_number(value) -> str:
     return value
 
 
+def format_lap_ms(ms: int) -> str:
+    """Миллисекунды → "1:20.000" (тот же формат, что админ вводит в боте)."""
+    ms = int(ms)
+    return f"{ms // 60000}:{(ms % 60000) // 1000:02d}.{ms % 1000:03d}"
+
+
+def build_bench_cell(item: dict, benchmarks: dict[str, dict]) -> dict | None:
+    """Содержимое 11-й строки колонки (эталон месяца).
+
+    None → пустая полоса: дисциплина вне лестницы классов (Week CUP), эталон
+    для неё не задаётся вообще, но место под строку остаётся, чтобы высота
+    колонок карусели совпадала с фиксированной.
+    """
+    if item["key"] not in CLASS_LADDER:
+        return None
+
+    bench = benchmarks.get(item["key"])
+    if not bench:
+        return {
+            "label": "🎯 Эталон месяца",
+            "sub": "ещё не задан клубом",
+            "value": "не задан",
+            "muted": True,
+        }
+    return {
+        "label": "🎯 Эталон месяца",
+        "sub": bench.get("track") or "трасса не указана",
+        "value": bench["time"],
+        "muted": False,
+    }
+
+
 async def load_tournament_data() -> dict:
     """
     Общий взвешенный зачёт месяца турнира v2 для фиксированной колонки
@@ -1424,9 +1574,40 @@ async def load_tournament_data() -> dict:
             "time": f'{row["total"]:g}',
         })
 
+    # Эталоны месяца для 11-й строки каждой колонки — ровно те же значения,
+    # что админ задаёт в боте ("🎯 Эталоны месяца"), никакого второго источника.
+    try:
+        raw_benchmarks = await get_all_class_benchmarks(month_key)
+    except Exception:
+        logging.exception("TV board: не удалось загрузить эталоны месяца")
+        raw_benchmarks = {}
+
+    benchmarks: dict[str, dict] = {}
+    for class_name, row in (raw_benchmarks or {}).items():
+        benchmark_ms = row.get("benchmark_ms")
+        if not benchmark_ms:
+            continue
+        benchmarks[class_name] = {
+            "time": format_lap_ms(benchmark_ms),
+            "track": row.get("track") or "",
+        }
+
+    # "Пилотов в турнире" для строки под общим зачётом: у кого есть хотя бы
+    # один засчитанный круг в турнирном классе за этот месяц — то есть человек
+    # уже поехал, даже если эталон в его классе пока не задан и баллов нет.
+    participant_ids: set[int] = set()
+    try:
+        for class_name in CLASS_LADDER:
+            for row in await get_month_participants(class_name, start_iso, end_iso):
+                participant_ids.add(row["telegram_id"])
+    except Exception:
+        logging.exception("TV board: не удалось посчитать участников месяца")
+
     return {
         "month_key": month_key,
         "overall": overall,
+        "benchmarks": benchmarks,
+        "participants": len(participant_ids),
     }
 
 
@@ -1488,16 +1669,22 @@ def get_auto_subtitle(item: dict, groups: dict[str, list[dict]]) -> str:
     return str(item.get("subtitle") or "")
 
 
-def get_dynamic_display_order(groups: dict[str, list[dict]]) -> list[dict]:
+def get_dynamic_display_order(
+    groups: dict[str, list[dict]],
+    benchmarks: dict[str, dict] | None = None,
+) -> list[dict]:
     """
-    Копия DISPLAY_ORDER, но subtitle автоматически подгружается из laps.track.
+    Копия DISPLAY_ORDER, но subtitle автоматически подгружается из laps.track,
+    а bench — данные строки эталона месяца для этой дисциплины.
     Это не меняет внешний вид сайта и не требует править код перед новым сезоном.
     """
+    benchmarks = benchmarks or {}
     dynamic_order = []
 
     for item in DISPLAY_ORDER:
         new_item = dict(item)
         new_item["subtitle"] = get_auto_subtitle(item, groups)
+        new_item["bench"] = build_bench_cell(item, benchmarks)
         dynamic_order.append(new_item)
 
     return dynamic_order
@@ -1525,13 +1712,16 @@ def make_ticker(groups: dict[str, list[dict]], display_order: list[dict] | None 
 
 async def payload() -> dict:
     groups = load_groups()
-    display_order = get_dynamic_display_order(groups)
 
+    # Турнирные данные читаем раньше display_order: из них берутся эталоны
+    # месяца для строки под каждой дисциплиной.
     try:
         tournament = await load_tournament_data()
     except Exception:
         logging.exception("TV board: панель турнира v2 недоступна")
-        tournament = {"month_key": None, "classes": [], "overall": []}
+        tournament = {"month_key": None, "classes": [], "overall": [], "benchmarks": {}, "participants": 0}
+
+    display_order = get_dynamic_display_order(groups, tournament.get("benchmarks"))
 
     return {
         "groups": groups,
