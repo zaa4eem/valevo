@@ -15,8 +15,8 @@ from data.tournament import CLASS_LADDER
 from services.tournament import month_bounds, rank_month_overall
 from database.db import (
     get_all_class_benchmarks,
-    get_month_participants,
-    get_pilot_by_telegram_id,
+    get_all_month_bests,
+    get_all_pilots_indexed,
 )
 
 # Используем те же пути, что и основной бот (config.py), а не путь относительно
@@ -1560,12 +1560,17 @@ async def load_tournament_data() -> dict:
         logging.exception("TV board: не удалось загрузить общий зачёт месяца")
         ranking = []
 
+    # Справочник пилотов читаем одним запросом, а не по одному на строку:
+    # табло перезапрашивает данные каждые 30 секунд круглосуточно.
+    try:
+        pilots_by_id = await get_all_pilots_indexed()
+    except Exception:
+        logging.exception("TV board: не удалось загрузить справочник пилотов")
+        pilots_by_id = {}
+
     overall = []
     for row in ranking:
-        try:
-            pilot = await get_pilot_by_telegram_id(row["telegram_id"]) or {}
-        except Exception:
-            pilot = {}
+        pilot = pilots_by_id.get(row["telegram_id"]) or {}
         name = clean_name(pilot.get("display_name"), pilot.get("username"))
         number = clean_number(pilot.get("pilot_number"))
         overall.append({
@@ -1595,11 +1600,15 @@ async def load_tournament_data() -> dict:
     # "Пилотов в турнире" для строки под общим зачётом: у кого есть хотя бы
     # один засчитанный круг в турнирном классе за этот месяц — то есть человек
     # уже поехал, даже если эталон в его классе пока не задан и баллов нет.
+    #
+    # Один пакетный запрос вместо шести (по классу на каждый): страница табло
+    # перезапрашивается каждые 30 секунд, и лишние запросы здесь копятся
+    # круглосуточно на клубном ПК.
     participant_ids: set[int] = set()
     try:
-        for class_name in CLASS_LADDER:
-            for row in await get_month_participants(class_name, start_iso, end_iso):
-                participant_ids.add(row["telegram_id"])
+        for (telegram_id, discipline) in await get_all_month_bests(start_iso, end_iso):
+            if discipline in CLASS_LADDER:
+                participant_ids.add(telegram_id)
     except Exception:
         logging.exception("TV board: не удалось посчитать участников месяца")
 

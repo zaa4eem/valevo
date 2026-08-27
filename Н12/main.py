@@ -1,5 +1,4 @@
 import asyncio
-import html
 import logging
 import os
 import sys
@@ -14,13 +13,25 @@ from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
 from handlers import booking, time_requests
 
-from config import ADMIN_IDS, BOT_TOKEN, MOSCOW_TZ, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
+from config import (
+    ADMIN_IDS,
+    BOT_TOKEN,
+    MOSCOW_TZ,
+    SEASON_CLOSE_DAY,
+    SEASON_CLOSE_HOUR,
+    SEASON_CLOSE_MINUTE,
+    validate_required_settings,
+    YCLIENTS_SYNC_INTERVAL_MINUTES,
+    YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
+)
 from database.db import init_db
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
+from services.standings_watch import flush_standings_notifications
 from services.experience_rewards import process_completed_bookings
 from services.yclients_auto import auto_sync_all_pilots, process_pending_yclients_operations
 from services.bonus_expiration import expire_season_bonuses
+from utils.error_reporter import report_admin_error
 from utils.log_config import LoggingMiddleware, setup_logging
 from utils.menu_updater_middleware import MenuUpdaterMiddleware
 from utils.chat_hygiene import ChatHygieneMiddleware
@@ -59,7 +70,13 @@ def _register_routers(dp: Dispatcher) -> None:
 
 def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
     """Ловит необработанные исключения хендлеров, чтобы они не терялись молча
-    и админы узнавали о проблеме сразу, а не из жалоб пользователей."""
+    и админы узнавали о проблеме сразу, а не из жалоб пользователей.
+
+    Текст ошибки проходит через error_reporter: вместо сырого
+    "TypeError: 'NoneType' object is not subscriptable" админ получает
+    описание на русском и конкретные шаги. Одинаковые ошибки, идущие пачкой,
+    схлопываются дедупликацией внутри error_reporter.
+    """
 
     @dp.errors()
     async def _on_error(event: ErrorEvent) -> bool:
@@ -68,16 +85,21 @@ def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
             "Необработанная ошибка при обработке update_id=%s", update_id,
             exc_info=event.exception,
         )
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Необработанная ошибка в боте (update_id={update_id}):\n"
-                    f"<code>{html.escape(type(event.exception).__name__)}: "
-                    f"{html.escape(str(event.exception))}</code>",
-                )
-            except Exception:
-                logger.warning("Не удалось уведомить админа %s об ошибке", admin_id)
+
+        user_hint = "—"
+        try:
+            source = event.update.message or event.update.callback_query if event.update else None
+            if source is not None and source.from_user:
+                user_hint = f"@{source.from_user.username or source.from_user.id}"
+        except Exception:
+            pass
+
+        await report_admin_error(
+            bot,
+            context="Обработка действия пользователя в боте",
+            error=event.exception,
+            details={"Пользователь": user_hint, "update_id": update_id},
+        )
         return True
 
 
@@ -89,7 +111,12 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.get_job("monthly_reset"):
         scheduler.add_job(
             perform_monthly_reset,
-            CronTrigger(day=20, hour=18, minute=1, timezone=moscow_tz),
+            CronTrigger(
+                day=SEASON_CLOSE_DAY,
+                hour=SEASON_CLOSE_HOUR,
+                minute=SEASON_CLOSE_MINUTE,
+                timezone=moscow_tz,
+            ),
             args=[bot],
             id="monthly_reset",
             replace_existing=True,
@@ -132,6 +159,22 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
+    # Отправка накопленных уведомлений о движении в общем зачёте. Дешёвая
+    # операция: читает готовую очередь, полного пересчёта зачёта здесь нет —
+    # он делается только по событию (засчитанный круг). Интервал 5 минут при
+    # дебаунсе 20 минут даёт задержку доставки максимум 25 минут.
+    if not scheduler.get_job("standings_notifications"):
+        scheduler.add_job(
+            flush_standings_notifications,
+            "interval",
+            minutes=5,
+            args=[bot],
+            id="standings_notifications",
+            replace_existing=True,
+            misfire_grace_time=600,
+            coalesce=True,
+        )
+
     if not scheduler.get_job("booking_reminders"):
         scheduler.add_job(
             booking.process_booking_reminders,
@@ -155,8 +198,24 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(booking.process_booking_reminders(bot)),
     ]
 
-    if now.day == 20 and now.hour >= 18:
-        logger.info("20-е число после 18:01 — проверяю ежемесячные начисления при старте.")
+    # Догоняем пропущенное закрытие, если бот был выключен в этот момент.
+    # Повторный запуск безопасен: награды защищены таблицей season_awards
+    # (плюс проверка по префиксу месяца для закрытий по прежней схеме), а
+    # релегация — флагом relegation_done:<месяц> в bot_settings. Раньше флага
+    # не было, и каждый перезапуск бота в день закрытия понижал ещё одну
+    # порцию пилотов поверх уже понижённых.
+    close_moment_passed = (
+        now.day > SEASON_CLOSE_DAY
+        or (
+            now.day == SEASON_CLOSE_DAY
+            and (now.hour, now.minute) >= (SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE)
+        )
+    )
+    if close_moment_passed:
+        logger.info(
+            "Момент закрытия месяца (%s-е %02d:%02d МСК) уже прошёл — проверяю начисления при старте.",
+            SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE,
+        )
         await perform_monthly_reset(bot)
 
     return background_tasks

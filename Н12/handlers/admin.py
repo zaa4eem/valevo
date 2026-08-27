@@ -16,9 +16,12 @@ from aiogram.types import (
 )
 
 from config import ADMIN_IDS, GROUP_ID
+from utils.error_reporter import format_admin_error
 from utils.message_style import DIVIDER, header
 from services.tournament import check_and_process_promotion, month_bounds, live_class_score
 from services.achievements import check_achievements_after_lap
+from services.standings_watch import rebaseline_standings, refresh_standings_after_lap
+from services.tournament import rank_month_overall
 from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
 from data.tournament import CLASS_LADDER
@@ -514,7 +517,8 @@ async def finish_lap(message: Message, state: FSMContext):
     try:
         promoted_to = await check_and_process_promotion(selected_tid, discipline, message.bot)
         await check_achievements_after_lap(
-            selected_tid, discipline, message.bot, track=track, lap_time_ms=lap_ms,
+            selected_tid, discipline, message.bot,
+            track=track, lap_time_ms=lap_ms, promoted_to=promoted_to,
         )
     except Exception:
         logger.exception("Ошибка турнирного движка после круга (admin, lap_id=%s)", lap_id)
@@ -1301,11 +1305,24 @@ async def benchmark_enter_time(message: Message, state: FSMContext):
 
     await state.clear()
 
+    # Смена эталона пересчитывает баллы всего класса разом и может перетряхнуть
+    # весь общий зачёт. Обновляем базовую линию БЕЗ рассылки: иначе половина
+    # клуба получила бы «вас сместили» из-за административного действия, а не
+    # из-за чьего-то круга. Пилоты узнают о новом эталоне из ТВ-табло и таблицы.
+    try:
+        month_key_now, start_iso, end_iso = month_bounds()
+        ranking = await rank_month_overall(month_key_now, start_iso, end_iso)
+        await rebaseline_standings(month_key_now, ranking)
+    except Exception:
+        logger.exception("Не удалось пересчитать базовую линию зачёта после смены эталона")
+
     await message.answer(
         f"{header('✅', 'Эталон обновлён')}\n\n"
         f"🏁 {class_name}\n"
         f"🗺 {track or '—'}\n"
-        f"⏱ {time_text}"
+        f"⏱ {time_text}\n\n"
+        "<i>Зачёт пересчитан. Уведомления о смещении по этой правке "
+        "пилотам не рассылались.</i>"
     )
 
     text, kb = await _build_benchmarks_screen()
@@ -1368,6 +1385,15 @@ async def send_notifications(bot, discipline, new_username, lap_text, selected_t
             await bot.send_message(selected_tid, notify_text)
         except Exception as e:
             logger.warning(f"Не удалось уведомить пилота {selected_tid}: {e}")
+
+    # Пересчёт зачёта для уведомлений о смещении в топ-5. Изменения только
+    # ставятся в очередь — отправкой занимается flush_standings_notifications
+    # после дебаунса, поэтому разбор пачки заявок подряд не рассылает волну
+    # сообщений на каждую заявку.
+    try:
+        await refresh_standings_after_lap(bot)
+    except Exception:
+        logger.exception("Не удалось обновить уведомления о зачёте после круга")
 
     if group_id:
         leaderboard = await build_leaderboard()
@@ -1459,8 +1485,14 @@ async def admin_close_weekcup_yes(callback: CallbackQuery):
         logger.exception("Ошибка при закрытии Week CUP")
 
         await callback.message.answer(
-            f"{header('❌', 'Ошибка при закрытии Week CUP')}\n\n"
-            f"<code>{exc}</code>"
+            format_admin_error(
+                context="Закрытие Week CUP",
+                error=exc,
+                extra_advice=(
+                    "Таблица Week CUP могла остаться незакрытой — проверьте результаты "
+                    "перед повторной попыткой, чтобы не начислить призы дважды."
+                ),
+            )
         )
 
         await callback.answer("Ошибка", show_alert=True)

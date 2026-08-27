@@ -123,6 +123,24 @@ REFERRAL_BONUS_RUB = _float_env("REFERRAL_BONUS_RUB", 250.0)
 MOSCOW_TZ = os.getenv("MOSCOW_TZ", "Europe/Moscow")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 
+# Момент закрытия турнирного месяца (МСК). Закрывается ПРЕДЫДУЩИЙ полный
+# календарный месяц, поэтому по умолчанию — 1-е число.
+#
+# Раньше закрытие было жёстко прошито на 20-е число 18:01, а зачёт считался по
+# календарному месяцу — из-за расхождения круги с 21-го по конец месяца не
+# попадали ни в одно закрытие. Если клубу нужно вернуть закрытие на другую
+# дату, менять надо только эти настройки: логика сама возьмёт предыдущий
+# полный месяц и останется согласованной.
+SEASON_CLOSE_DAY = max(1, min(28, _int_env("SEASON_CLOSE_DAY", 1)))
+SEASON_CLOSE_HOUR = max(0, min(23, _int_env("SEASON_CLOSE_HOUR", 3)))
+SEASON_CLOSE_MINUTE = max(0, min(59, _int_env("SEASON_CLOSE_MINUTE", 10)))
+
+# Тихие часы для уведомлений о турнирном зачёте (МСК): в это окно бот не пишет
+# пилотам о смещении в общем зачёте, накопленное уходит одним сообщением после.
+# Совпадает с окном, в котором уже закрыт приём заявок на время.
+STANDINGS_QUIET_FROM_HOUR = max(0, min(23, _int_env("STANDINGS_QUIET_FROM_HOUR", 1)))
+STANDINGS_QUIET_TO_HOUR = max(0, min(23, _int_env("STANDINGS_QUIET_TO_HOUR", 12)))
+
 
 def validate_required_settings() -> None:
     missing = []

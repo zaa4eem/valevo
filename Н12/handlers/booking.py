@@ -28,6 +28,7 @@ from database.db import get_db, get_pilot_by_telegram_id
 from keyboards.menu import get_menu
 from services.yclients_service import BASE_URL, REQUEST_TIMEOUT, _request, get_headers, normalize_phone
 from utils.chat_hygiene import schedule_fade_delete
+from utils.error_reporter import report_admin_error
 from utils.message_style import DIVIDER, header
 
 router = Router(name="booking")
@@ -1352,11 +1353,16 @@ async def user_cancel_booking(callback: CallbackQuery) -> None:
     ok, error = await _cancel_booking(booking)
     if not ok:
         await callback.answer("Не удалось удалить запись из Сервиса. Администратор уведомлён.", show_alert=True)
-        for admin_id in ADMIN_IDS:
-            try:
-                await callback.bot.send_message(admin_id, f"⚠️ Ошибка отмены брони #{booking_id}: {error}")
-            except Exception:
-                pass
+        await report_admin_error(
+            callback.bot,
+            context=f"Отмена брони #{booking_id} пилотом",
+            error=error,
+            details={"Пилот": callback.from_user.id, "Бронь": f"#{booking_id}"},
+            extra_advice=(
+                "Бронь в боте не отменена, запись в YCLIENTS осталась. "
+                "Удалите запись вручную и отмените бронь в админ-меню."
+            ),
+        )
         return
     await callback.answer("Бронь отменена")
     await callback.message.edit_text("❌ Бронь отменена. Записи удалены из Сервиса.")
@@ -1390,11 +1396,16 @@ async def reminder_cancel(callback: CallbackQuery) -> None:
     ok, error = await _cancel_booking(booking)
     if not ok:
         await callback.answer("Ошибка отмены. Администратор уведомлён.", show_alert=True)
-        for admin_id in ADMIN_IDS:
-            try:
-                await callback.bot.send_message(admin_id, f"⚠️ Ошибка отмены брони #{booking_id}: {error}")
-            except Exception:
-                pass
+        await report_admin_error(
+            callback.bot,
+            context=f"Отмена брони #{booking_id} пилотом",
+            error=error,
+            details={"Пилот": callback.from_user.id, "Бронь": f"#{booking_id}"},
+            extra_advice=(
+                "Бронь в боте не отменена, запись в YCLIENTS осталась. "
+                "Удалите запись вручную и отмените бронь в админ-меню."
+            ),
+        )
         return
     await callback.answer("Отменено")
     await callback.message.edit_text("❌ Бронь отменена, записи удалены из Сервиса.")

@@ -20,10 +20,13 @@ from aiogram.types import (
 
 from config import ADMIN_IDS, GROUP_ID, MOSCOW_TZ
 
+from data.tournament import is_class_unlocked
+
 from database.db import (
     add_lap,
     delete_lap,
     get_pilot_by_telegram_id,
+    get_pilot_class,
     get_all_disciplines,
     get_tracks_for_discipline,
     update_pilot_rating,
@@ -220,7 +223,16 @@ def request_caption(
     discipline: str,
     track: str,
     lap_time: str,
+    pilot_class: str | None = None,
 ) -> str:
+    """Карточка заявки для админа.
+
+    pilot_class показывается специально: выбор дисциплины в заявке ничем не
+    ограничен, а вес класса в общем зачёте растёт с ×1.0 (MX-5) до ×2.4 (GT3).
+    Без текущего класса в карточке админ физически не мог заметить, что пилот
+    из MX-5 заявляет время в GT3 и обходит всю лестницу — теперь такая заявка
+    подсвечена явным предупреждением.
+    """
     safe_name = html.escape(pilot_name)
     safe_discipline = html.escape(discipline)
     safe_track = html.escape(track)
@@ -232,14 +244,29 @@ def request_caption(
         else "—"
     )
 
+    class_line = ""
+    warning_line = ""
+    if pilot_class:
+        class_line = f"🎖 Класс пилота: <b>{html.escape(pilot_class)}</b>\n"
+        if not is_class_unlocked(pilot_class, discipline):
+            warning_line = (
+                f"\n⚠️ <b>ВНЕ СВОЕГО КЛАССА</b>\n"
+                f"Пилот в классе <b>{html.escape(pilot_class)}</b>, "
+                f"а заявляет время в <b>{safe_discipline}</b> — ступень выше открытой.\n"
+                f"Если принять, баллы уйдут в общий зачёт с весом этого класса "
+                f"в обход лестницы.\n"
+            )
+
     return (
         header("🏁", "Новая заявка на фиксацию времени") + "\n\n"
         f"🆔 Заявка: <b>#{request_id}</b>\n"
         f"👤 Пилот: <b>{safe_name}</b>\n"
         f"#️⃣ Номер пилота: <b>{number_text}</b>\n"
+        f"{class_line}"
         f"🏆 Дисциплина: <b>{safe_discipline}</b>\n"
         f"🗺 Трасса: <b>{safe_track}</b>\n"
-        f"⏱ Время: <b>{safe_lap_time}</b>\n\n"
+        f"⏱ Время: <b>{safe_lap_time}</b>\n"
+        f"{warning_line}\n"
         "📸 Фотография результата прикреплена выше.\n\n"
         "Проверьте фотографию и выберите решение."
     )
@@ -569,6 +596,12 @@ async def user_time_request_proof(
         photo_file_id=photo_file_id,
     )
 
+    try:
+        pilot_class = await get_pilot_class(message.from_user.id)
+    except Exception:
+        logger.exception("Не удалось определить класс пилота %s для карточки заявки", message.from_user.id)
+        pilot_class = None
+
     caption = request_caption(
         request_id=request_id,
         pilot_name=display_name,
@@ -576,6 +609,7 @@ async def user_time_request_proof(
         discipline=discipline,
         track=track,
         lap_time=lap_time_text,
+        pilot_class=pilot_class,
     )
 
     delivered = 0
@@ -738,6 +772,12 @@ async def admin_approve_time_request(
 
     lap_id = None
     rating_changes: dict[int, int] = {}
+    # Флаг "заявка уже переведена в approved". Нужен, чтобы не врать админу:
+    # restore_time_request_pending работает только по status='processing', то
+    # есть после успешного complete_time_request откат физически невозможен —
+    # а сообщение "Заявка возвращена на проверку" показывалось всё равно, и
+    # админ думал, что круг не записан, хотя он записан.
+    request_finalized = False
 
     try:
         discipline = request["discipline"]
@@ -760,7 +800,8 @@ async def admin_approve_time_request(
         try:
             promoted_to = await check_and_process_promotion(selected_tid, discipline, callback.bot)
             await check_achievements_after_lap(
-                selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
+                selected_tid, discipline, callback.bot,
+                track=track, lap_time_ms=lap_time_ms, promoted_to=promoted_to,
             )
         except Exception:
             logger.exception("Ошибка турнирного движка после круга (заявка #%s)", request_id)
@@ -775,6 +816,7 @@ async def admin_approve_time_request(
             admin_id=callback.from_user.id,
             lap_id=lap_id,
         )
+        request_finalized = True
 
         await edit_admin_request_message(
             callback,
@@ -826,6 +868,16 @@ async def admin_approve_time_request(
             request_id,
             exc,
         )
+
+        if request_finalized:
+            # Круг записан и заявка закрыта — упало что-то после этого
+            # (редактирование карточки, уведомления). Ничего не откатываем:
+            # удалить засчитанный круг из-за сбоя Telegram было бы хуже.
+            await callback.answer(
+                "Время записано, но часть уведомлений не ушла. Откат не требуется.",
+                show_alert=True,
+            )
+            return
 
         # Если круг успел записаться — удаляем.
         if lap_id is not None:
