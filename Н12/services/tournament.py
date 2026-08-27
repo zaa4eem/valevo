@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from config import MOSCOW_TZ
+from config import MOSCOW_TZ, SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE
 from data.tournament import (
     CLASS_LADDER,
     MAIN_SEQUENCE,
@@ -20,6 +20,7 @@ from data.tournament import (
     classes_gating_promotion,
     min_starts_for_class,
     month_bounds as _month_bounds,
+    previous_month_bounds as _previous_month_bounds,
     next_main_class,
 )
 from database.db import (
@@ -46,8 +47,28 @@ PROMOTION_RATING_BONUS = 10
 
 
 def month_bounds() -> tuple[str, str, str]:
-    """(ключ_месяца, начало_ISO, начало_следующего_месяца_ISO) по московскому времени."""
-    return _month_bounds(moscow_tz_name=MOSCOW_TZ)
+    """(ключ_сезона, начало_ISO, конец_ISO) для идущего сейчас сезона.
+
+    Сезон — интервал между двумя закрытиями (по регламенту 20-е 18:00 МСК),
+    а не календарный месяц. Момент закрытия берётся из конфига, чтобы дата
+    закрытия и границы зачёта не могли разойтись.
+    """
+    return _month_bounds(
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )
+
+
+def closing_season_bounds() -> tuple[str, str, str]:
+    """(ключ, начало, конец) сезона, который закрывается прямо сейчас."""
+    return _previous_month_bounds(
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )
 
 
 async def live_class_score(telegram_id: int, class_name: str, month_key: str, start_iso: str, end_iso: str) -> dict:

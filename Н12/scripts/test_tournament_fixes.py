@@ -15,6 +15,8 @@ import sys
 import tempfile
 from datetime import datetime, timedelta
 
+from pytz import timezone as tz
+
 # Изолированная БД и обязательные настройки — до импорта config.
 _TMP_DIR = tempfile.mkdtemp(prefix="valevo_test_")
 os.environ["DB_NAME"] = os.path.join(_TMP_DIR, "test.db")
@@ -133,20 +135,72 @@ def test_sql_timestamp() -> None:
 
 
 def test_month_bounds() -> None:
-    """Баг 1.2: закрытие месяца и границы зачёта расходились."""
-    print("\nprevious_month_bounds — закрытие полного месяца (баг 1.2)")
-    now = datetime(2026, 9, 1, 3, 10)
-    key, start, end = previous_month_bounds(now)
-    check("закрывается предыдущий месяц", key == "2026-08", key)
-    check("окно начинается 1 августа", start.startswith("2026-07-31") or start.startswith("2026-08-01"), start)
-    check("окно кончается началом сентября", end.startswith("2026-08-31") or end.startswith("2026-09-01"), end)
+    """Баг 1.2: закрытие сезона и границы зачёта расходились.
 
-    # Круг 25 августа обязан попадать в окно закрытия августа.
-    lap_25_aug = "2026-08-25 14:00:00"
-    check("круг 25 августа попадает в закрываемый месяц", start <= lap_25_aug < end)
+    Регламент клуба — закрытие 20-го в 18:00 МСК. Сезон определён как интервал
+    между двумя закрытиями, поэтому дата закрытия и границы зачёта — одно и то
+    же число и разойтись не могут.
+    """
+    print("\nГраницы сезона: от закрытия до закрытия, 20-е 18:00 МСК (баг 1.2)")
 
-    jan = datetime(2026, 1, 1, 3, 10)
-    check("переход через новый год", previous_month_bounds(jan)[0] == "2025-12")
+    msk = tz("Europe/Moscow")
+
+    def bounds(dt):
+        return month_bounds(msk.localize(dt))
+
+    # До закрытия августа идёт сезон, который августом и закроется.
+    key, start, end = bounds(datetime(2026, 8, 19, 12, 0))
+    check("19 августа — сезон 2026-08", key == "2026-08", key)
+    check("сезон начался с закрытия июля", start == "2026-07-20 15:00:00", start)
+    check("сезон кончается закрытием августа", end == "2026-08-20 15:00:00", end)
+
+    # За минуту до закрытия сезон ещё прежний.
+    check("20 августа 17:59 — всё ещё 2026-08", bounds(datetime(2026, 8, 20, 17, 59))[0] == "2026-08")
+
+    # Ровно в момент закрытия начинается новый сезон.
+    key2, start2, end2 = bounds(datetime(2026, 8, 20, 18, 0))
+    check("20 августа 18:00 — начался сезон 2026-09", key2 == "2026-09", key2)
+    check("новый сезон стартует ровно там, где кончился прежний", start2 == end, f"{start2} vs {end}")
+
+    # Главная проверка бага 1.2: дни после 20-го обязаны попадать в зачёт.
+    for label, lap in [
+        ("25 августа", "2026-08-25 11:00:00"),
+        ("31 августа", "2026-08-31 20:00:00"),
+        ("5 сентября", "2026-09-05 07:00:00"),
+    ]:
+        check(f"круг {label} попадает в сезон 2026-09", start2 <= lap < end2, lap)
+
+    # Непрерывность на длинном отрезке: без дыр и пересечений.
+    seams_ok = True
+    probe = datetime(2026, 3, 1, 12, 0)
+    prev_end = None
+    for _ in range(14):
+        k, s, e = bounds(probe)
+        if prev_end is not None and prev_end != s:
+            seams_ok = False
+        prev_end = e
+        probe = datetime.strptime(e, "%Y-%m-%d %H:%M:%S")
+        probe = probe.replace(hour=12) + timedelta(days=1)
+    check("14 сезонов подряд стыкуются без дыр", seams_ok)
+
+    # Закрытие: награждается сезон, который только что закончился.
+    def closing(dt):
+        return previous_month_bounds(msk.localize(dt))
+
+    check("в момент закрытия награждается 2026-08", closing(datetime(2026, 8, 20, 18, 0))[0] == "2026-08")
+    check("догон через час — тот же сезон", closing(datetime(2026, 8, 20, 19, 30))[0] == "2026-08")
+    check("догон через два дня — тот же сезон", closing(datetime(2026, 8, 22, 9, 0))[0] == "2026-08")
+    check("до закрытия награждается прошлый сезон", closing(datetime(2026, 8, 19, 12, 0))[0] == "2026-07")
+    check("переход через новый год", closing(datetime(2026, 1, 20, 18, 0))[0] == "2026-01")
+
+    # Закрываемый сезон должен покрывать полный интервал, включая дни после 20-го.
+    ckey, cstart, cend = closing(datetime(2026, 9, 20, 18, 0))
+    check("закрываемый сезон — 2026-09", ckey == "2026-09", ckey)
+    check("в него входит круг 25 августа", cstart <= "2026-08-25 11:00:00" < cend)
+    check("в него входит круг 19 сентября", cstart <= "2026-09-19 11:00:00" < cend)
+
+    # Февраль: момент закрытия существует в любом месяце (день ограничен 28).
+    check("февраль обрабатывается", bounds(datetime(2026, 2, 25, 12, 0))[0] == "2026-03")
 
 
 def test_class_gating() -> None:
@@ -345,7 +399,7 @@ def test_standings_logic() -> None:
     from services import standings_watch
 
     quiet = datetime(2026, 8, 27, 3, 0, tzinfo=None)
-    from pytz import timezone as tz
+
     msk = tz("Europe/Moscow")
 
     check("03:00 — тихие часы", standings_watch.is_quiet_hours(msk.localize(quiet)))

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from config import MOSCOW_TZ
+from config import MOSCOW_TZ, SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE
 from data.tournament import (
     CLASS_LADDER,
     MAIN_SEQUENCE,
@@ -34,6 +34,24 @@ from database.db import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _season_bounds(now=None) -> tuple[str, str, str]:
+    """Границы сезона с моментом закрытия из конфига.
+
+    Этот модуль зовёт data.tournament напрямую (импортировать
+    services.tournament на уровне модуля нельзя — он сам импортирует этот),
+    поэтому настройки закрытия приходится прокидывать здесь вручную. Без них
+    ачивки считались бы по другим границам, чем зачёт и закрытие сезона.
+    """
+    return month_bounds(
+        now=now,
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )
+
 
 LAP_MILESTONES = [1, 5, 10, 25, 50, 100, 200]
 
@@ -167,7 +185,7 @@ async def check_achievements_after_lap(
         # учтётся в одном месте и не в другом, и это два разных "истинных" балла.
         from services.tournament import live_class_score
 
-        month_key, start_iso, end_iso = month_bounds(moscow_tz_name=MOSCOW_TZ)
+        month_key, start_iso, end_iso = _season_bounds()
         result = await live_class_score(telegram_id, discipline_name, month_key, start_iso, end_iso)
         if result["qualifies"] and result["score"] is not None:
             if result["score"] >= 100:
@@ -228,10 +246,10 @@ async def check_achievements_month_end(bot=None, bounds: tuple[str, str, str] | 
     from services.tournament import month_participant_ids, rank_month_overall  # локальный импорт: избегаем цикла на уровне модуля
 
     # bounds приходит из закрытия месяца — там это ПРЕДЫДУЩИЙ календарный месяц
-    # (закрытие идёт 1-го числа). Без явной передачи month_bounds() вернул бы
+    # (закрытие идёт 20-го в 18:00). Без явной передачи month_bounds() вернул бы
     # только что начавшийся месяц, и ачивки за итоги месяца ("Чемпион месяца",
     # "Топ-5 месяца") считались бы по пустой таблице.
-    month_key, start_iso, end_iso = bounds or month_bounds(moscow_tz_name=MOSCOW_TZ)
+    month_key, start_iso, end_iso = bounds or _season_bounds()
     bags: dict[int, list] = {}
 
     def bag_for(telegram_id: int) -> list:
@@ -286,7 +304,7 @@ async def _check_streak(telegram_id: int, bag: list | None = None, month_key: st
             logger.warning("Некорректный month_key для стрика: %r", month_key)
     for _ in range(12):
         probe = moscow_now.replace(year=year, month=month, day=1)
-        _key, start_iso, end_iso = month_bounds(now=probe, moscow_tz_name=MOSCOW_TZ)
+        _key, start_iso, end_iso = _season_bounds(now=probe)
 
         met = False
         for class_name in CLASS_LADDER:

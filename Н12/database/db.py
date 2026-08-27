@@ -1942,6 +1942,78 @@ async def set_class_benchmark(class_name: str, month_key: str, track: str | None
     await db.close()
 
 
+async def carry_benchmarks_to_current_season() -> int:
+    """Переносит эталоны в ключ текущего сезона, если для него их ещё нет.
+
+    Зачем. Сезон теперь считается как интервал между закрытиями (20-е 18:00 →
+    20-е 18:00), а не как календарный месяц, и ключ сезона — месяц закрытия.
+    После 20-го числа ключ текущего сезона указывает на СЛЕДУЮЩИЙ месяц: 25
+    августа идёт сезон "2026-09". Эталоны, заданные админом по прежней схеме,
+    лежат под ключом "2026-08" — без переноса таблица лидеров и ТВ-табло сразу
+    после обновления показали бы "эталон не задан" и обнулили бы баллы всех
+    пилотов, хотя ничего не менялось.
+
+    Переносится только если для текущего сезона эталонов нет вообще: если админ
+    уже задал их сам, ничего не трогаем. Берём последнюю по времени запись
+    на каждый класс. Возвращает число перенесённых классов.
+    """
+    from config import MOSCOW_TZ, SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE
+    from data.tournament import month_bounds
+
+    season_key = month_bounds(
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )[0]
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM class_benchmarks WHERE month_key = ?", (season_key,)
+        )
+        existing = (await cursor.fetchone())[0]
+        await cursor.close()
+        if existing:
+            return 0
+
+        # Последний заданный эталон на каждый класс из любого прежнего периода.
+        cursor = await db.execute(
+            """
+            SELECT class_name, track, benchmark_ms, set_by_admin_id
+            FROM class_benchmarks
+            WHERE id IN (
+                SELECT MAX(id) FROM class_benchmarks
+                WHERE month_key < ?
+                GROUP BY class_name
+            )
+            """,
+            (season_key,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+
+        if not rows:
+            return 0
+
+        for class_name, track, benchmark_ms, admin_id in rows:
+            await db.execute(
+                """INSERT OR IGNORE INTO class_benchmarks
+                       (class_name, month_key, track, benchmark_ms, set_by_admin_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (class_name, season_key, track, benchmark_ms, admin_id),
+            )
+        await db.commit()
+        logger.info(
+            "Эталоны перенесены в ключ текущего сезона %s: %s классов. "
+            "Проверьте их в админ-меню «🎯 Эталоны месяца».",
+            season_key, len(rows),
+        )
+        return len(rows)
+    finally:
+        await db.close()
+
+
 async def get_class_benchmark(class_name: str, month_key: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(

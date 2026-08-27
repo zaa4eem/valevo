@@ -24,7 +24,7 @@ from config import (
     YCLIENTS_SYNC_INTERVAL_MINUTES,
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
-from database.db import init_db
+from database.db import carry_benchmarks_to_current_season, init_db
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
 from services.standings_watch import flush_standings_notifications
@@ -201,7 +201,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     # Догоняем пропущенное закрытие, если бот был выключен в этот момент.
     # Повторный запуск безопасен: награды защищены таблицей season_awards
     # (плюс проверка по префиксу месяца для закрытий по прежней схеме), а
-    # релегация — флагом relegation_done:<месяц> в bot_settings. Раньше флага
+    # релегация — флагом relegation_done:<сезон> в bot_settings. Раньше флага
     # не было, и каждый перезапуск бота в день закрытия понижал ещё одну
     # порцию пилотов поверх уже понижённых.
     close_moment_passed = (
@@ -213,7 +213,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     )
     if close_moment_passed:
         logger.info(
-            "Момент закрытия месяца (%s-е %02d:%02d МСК) уже прошёл — проверяю начисления при старте.",
+            "Момент закрытия сезона (%s-е %02d:%02d МСК) уже прошёл — проверяю начисления при старте.",
             SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE,
         )
         await perform_monthly_reset(bot)
@@ -226,6 +226,17 @@ async def main() -> None:
 
     await init_db()
     await booking.ensure_booking_schema()
+
+    # Разовый перенос эталонов в ключ текущего сезона. Сезон теперь считается
+    # от закрытия до закрытия, и после 20-го числа его ключ указывает на
+    # следующий месяц — без переноса эталоны, заданные по прежней схеме,
+    # оказались бы "не заданы" и обнулили бы баллы всех пилотов.
+    try:
+        carried = await carry_benchmarks_to_current_season()
+        if carried:
+            logger.info("Перенесено эталонов в текущий сезон: %s", carried)
+    except Exception:
+        logger.exception("Не удалось перенести эталоны в ключ текущего сезона")
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()

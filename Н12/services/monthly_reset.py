@@ -3,7 +3,15 @@ from datetime import datetime, timedelta
 
 from pytz import timezone
 
-from config import MOSCOW_TZ, SUPPORT_CHAT_ID, YCLIENTS_BONUS_RUB_PER_HOUR, SEASON_BONUS_EXPIRE_DAYS
+from config import (
+    MOSCOW_TZ,
+    SEASON_BONUS_EXPIRE_DAYS,
+    SEASON_CLOSE_DAY,
+    SEASON_CLOSE_HOUR,
+    SEASON_CLOSE_MINUTE,
+    SUPPORT_CHAT_ID,
+    YCLIENTS_BONUS_RUB_PER_HOUR,
+)
 from data.tournament import previous_month_bounds
 from database.db import (
     get_pilot_by_telegram_id,
@@ -14,6 +22,7 @@ from database.db import (
     create_pending_yclients_operation,
 )
 from services.tournament import (
+    closing_season_bounds,
     month_qualified_participant_ids,
     rank_month_overall,
     run_monthly_relegation,
@@ -36,16 +45,18 @@ def season_bonus_rub(bonus_hours: int) -> float:
 
 
 def current_season_key(now: datetime | None = None) -> str:
-    """Ключ сезона = календарный месяц, который закрывается.
+    """Ключ закрываемого сезона — месяц, в котором он закрывается ("2026-08").
 
-    Закрытие идёт 1-го числа за ПРЕДЫДУЩИЙ полный месяц, поэтому ключ равен
-    ключу закрываемого месяца ("2026-08"), а не месяца запуска.
+    Закрытие идёт 20-го в 18:00 МСК и закрывает сезон, начавшийся в прошлое
+    закрытие (20-го предыдущего месяца в 18:00). Ключ совпадает с месяцем
+    закрытия, поэтому "августовский сезон" — это тот, что закрывается
+    20 августа.
 
-    Раньше закрытие стояло на 20-е число в 18:01 и ключ был "2026-08-20-18".
-    Из-за этого круги с 21-го по конец месяца не попадали ни в одно закрытие:
+    Раньше ключ был "2026-08-20-18", а зачёт считался по календарному месяцу:
     август награждался 20 августа по данным 1–20 августа, а следующее закрытие
-    (20 сентября) смотрело уже на сентябрь. Десять дней гонок каждый месяц
-    не влияли ни на призы, ни на релегацию, хотя в таблице лидеров были видны.
+    смотрело уже на сентябрь — круги с 21-го по конец месяца не попадали ни в
+    одно закрытие. Теперь сезон и есть интервал между закрытиями, и терять
+    дни больше нечему.
 
     Награды за месяц, закрытый по старой схеме, повторно не выдаются:
     has_award_for_month сверяет наличие награды по префиксу месяца и видит
@@ -55,7 +66,13 @@ def current_season_key(now: datetime | None = None) -> str:
     now = now or datetime.now(moscow_tz)
     if now.tzinfo is None:
         now = moscow_tz.localize(now)
-    return previous_month_bounds(now, moscow_tz_name=MOSCOW_TZ)[0]
+    return previous_month_bounds(
+        now,
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )[0]
 
 
 async def _notify_admin(bot, text: str) -> None:
@@ -94,9 +111,11 @@ async def perform_monthly_reset(bot):
     - если YCLIENTS недоступен или карта Valevo Bonus не выдана, месяц всё равно закрывается,
       рейтинг и локальные бонусы начисляются, а ошибка пишется в БД/логи/админу.
     """
-    # Закрываем ПОЛНЫЙ предыдущий календарный месяц (1-е → 1-е), а не текущий
-    # незавершённый: джоба запускается 1-го числа нового месяца.
-    month_key, start_iso, end_iso = previous_month_bounds(moscow_tz_name=MOSCOW_TZ)
+    # Закрываем сезон, который заканчивается прямо сейчас: интервал от прошлого
+    # закрытия (20-е предыдущего месяца, 18:00 МСК) до этого. В момент закрытия
+    # month_bounds() уже отдаёт НОВЫЙ сезон, поэтому границы берём отдельной
+    # функцией — иначе награждался бы только что начавшийся пустой сезон.
+    month_key, start_iso, end_iso = closing_season_bounds()
     season_key = month_key
     logger.info("===== НАЧАЛО ЗАКРЫТИЯ МЕСЯЦА %s =====", season_key)
 
