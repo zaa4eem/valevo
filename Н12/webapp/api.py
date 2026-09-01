@@ -64,6 +64,7 @@ from services.leaderboard import get_tournament_leaderboard_data
 from services.nickname import sanitize_pilot_name
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.profile_service import get_profile_data
+from services.roulette import SPIN_COST_RUB, SpinError, prize_catalog, spin as roulette_spin
 from services.tournament import month_bounds
 from services.weekcup_service import close_weekcup
 from services.yclients_auto import auto_sync_pilot_with_yclients, issue_or_queue_valevo_bonus
@@ -230,6 +231,30 @@ async def api_leaderboard(_user: TelegramWebAppUser = Depends(get_current_user))
 @app.get("/api/top10")
 async def api_top10(_user: TelegramWebAppUser = Depends(get_current_user)) -> dict[str, Any]:
     return {"pilots": await get_top10_pilots()}
+
+
+# ============================================================================
+# РУЛЕТКА (реальные деньги — Valevo Bonus в YCLIENTS, см. services/roulette.py)
+# ============================================================================
+@app.get("/api/roulette")
+async def api_roulette_catalog(user: TelegramWebAppUser = Depends(get_current_user)) -> dict[str, Any]:
+    pilot = await get_pilot_by_telegram_id(user.id)
+    balance = 0.0
+    if pilot and pilot.get("yclients_client_id"):
+        try:
+            balance = await get_valevo_bonus_balance(pilot["yclients_client_id"])
+        except Exception:
+            logger.warning("Не удалось получить баланс для рулетки: telegram_id=%s", user.id)
+    return {"spin_cost": SPIN_COST_RUB, "balance": round(float(balance or 0), 2), "prizes": prize_catalog()}
+
+
+@app.post("/api/roulette/spin")
+async def api_roulette_spin(user: TelegramWebAppUser = Depends(get_current_user)) -> dict[str, Any]:
+    try:
+        result = await roulette_spin(user.id)
+    except SpinError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    return {"ok": True, **result}
 
 
 CLUB_INFO = {

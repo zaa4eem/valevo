@@ -175,6 +175,11 @@ function buildClubCard(club) {
     grid.appendChild(statTile(formatHoursValue(club.total_hours), "В клубе"));
     grid.appendChild(statTile(formatRub(club.bonus_balance), "Бонусы"));
     card.appendChild(grid);
+    card.appendChild(el("button", {
+        class: "btn btn-outline btn-sm",
+        style: "width:auto;margin:14px auto 0;",
+        onClick: () => { haptic("light"); push("roulette"); },
+    }, "🎰 Рулетка призов"));
     return card;
 }
 

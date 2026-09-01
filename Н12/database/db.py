@@ -164,6 +164,24 @@ async def init_db():
     """)
 
     await db.execute("""
+        CREATE TABLE IF NOT EXISTS roulette_spins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            cost_rub REAL NOT NULL,
+            prize_code TEXT NOT NULL,
+            prize_kind TEXT NOT NULL,
+            prize_value REAL NOT NULL,
+            prize_status TEXT NOT NULL DEFAULT 'ok',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_roulette_spins_telegram_id
+        ON roulette_spins(telegram_id, created_at)
+    """)
+
+    await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_time_requests_user_status
         ON time_requests(telegram_id, status)
     """)
@@ -2202,3 +2220,47 @@ async def restore_time_request_pending(request_id: int):
 
     await db.commit()
     await db.close()
+
+
+async def record_roulette_spin(
+    telegram_id: int,
+    cost_rub: float,
+    prize_code: str,
+    prize_kind: str,
+    prize_value: float,
+    prize_status: str = "ok",
+) -> None:
+    """Журнал спинов рулетки — обязателен для настоящих денег: если что-то
+    разойдётся с балансом в YCLIENTS, это единственное место, где видно,
+    кому что реально выпало и списалось."""
+    db = await get_db()
+    await db.execute(
+        """
+        INSERT INTO roulette_spins (telegram_id, cost_rub, prize_code, prize_kind, prize_value, prize_status)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (telegram_id, cost_rub, prize_code, prize_kind, prize_value, prize_status),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def get_pilot_spin_history(telegram_id: int, limit: int = 20) -> list[dict]:
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT prize_code, prize_kind, prize_value, prize_status, created_at
+        FROM roulette_spins
+        WHERE telegram_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (telegram_id, limit),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {"prize_code": r[0], "prize_kind": r[1], "prize_value": r[2], "prize_status": r[3], "created_at": r[4]}
+        for r in rows
+    ]

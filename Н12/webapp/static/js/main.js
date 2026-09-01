@@ -22,6 +22,7 @@ import "./screens/nickname.js";
 import "./screens/leaders.js";
 import "./screens/booking.js";
 import "./screens/timetrial.js";
+import "./screens/roulette.js";
 import "./screens/info.js";
 import "./screens/admin/shell.js";
 
