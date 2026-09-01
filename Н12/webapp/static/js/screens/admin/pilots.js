@@ -15,7 +15,7 @@ const LIST_LIMIT = 60;
 
 function pilotRow(p) {
     const name = p.display_name || (p.username ? `@${p.username}` : "Пилот");
-    const sub = `${p.username ? "@" + p.username : "без username"}${p.pilot_number ? " · #" + p.pilot_number : ""}`;
+    const sub = `${p.username ? "@" + p.username : "без username"}${p.pilot_number ? " · #" + p.pilot_number : ""}${p.tournament_class ? " · " + p.tournament_class : ""}`;
     return el("button", {
         class: "card-soft pilot-card",
         style: "width:100%;text-align:left;cursor:pointer;",
@@ -116,6 +116,7 @@ function drawDetail(container, p) {
         kv("Telegram ID", String(p.telegram_id)),
         kv("Номер пилота", p.pilot_number ? `#${p.pilot_number}` : "—"),
         kv("Телефон", p.phone || "—"),
+        kv("Класс турнира", p.tournament_class || "—"),
     ]);
     container.appendChild(idCard);
 

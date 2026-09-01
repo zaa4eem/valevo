@@ -14,6 +14,7 @@ import { haptic } from "../../telegram.js";
 import { renderDashboard } from "./dashboard.js";
 import { renderPilots } from "./pilots.js"; // this import also runs pilots.js's own registerScreen("admin-pilot-detail", ...)
 import { renderTracks } from "./tracks.js";
+import { renderBenchmarks } from "./benchmarks.js";
 import { renderTimeRequests } from "./timerequests.js";
 import { renderAdminBookings } from "./bookings.js";
 import { renderWeekCup } from "./weekcup.js";
@@ -23,6 +24,7 @@ const SECTIONS = [
     { key: "dashboard", label: "📊 Дашборд", render: renderDashboard },
     { key: "pilots", label: "👥 Пилоты", render: renderPilots },
     { key: "tracks", label: "🗺 Трассы", render: renderTracks },
+    { key: "benchmarks", label: "🎯 Эталоны", render: renderBenchmarks },
     { key: "timerequests", label: "⏱ Заявки времени", render: renderTimeRequests },
     { key: "bookings", label: "🎟 Брони", render: renderAdminBookings },
     { key: "weekcup", label: "🏁 Week Cup", render: renderWeekCup },

@@ -663,12 +663,6 @@ body.has-tabbar.has-mainbutton #view{ padding-bottom:calc(var(--tabbar-h) + 84px
     color:var(--text-faint);
 }
 .achv-badge.unlocked .achv-title{ color:var(--text-dim); }
-.achv-badge .achv-lock{
-    position:absolute;
-    margin-top:-30px;
-    margin-left:26px;
-    font-size:10px;
-}
 
 /* ---------------------------------------------------------------- */
 /* Skeleton loaders                                                   */

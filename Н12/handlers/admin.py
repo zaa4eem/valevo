@@ -512,10 +512,17 @@ async def finish_lap(message: Message, state: FSMContext):
 
     promoted_to = None
     try:
-        promoted_to = await check_and_process_promotion(selected_tid, discipline, message.bot)
-        await check_achievements_after_lap(
+        promoted_to = await check_and_process_promotion(
             selected_tid, discipline, message.bot, track=track, lap_time_ms=lap_ms,
         )
+        # При переходе check_and_process_promotion уже сама вызвала
+        # check_achievements_after_lap с тем же track/lap_time_ms — см. её
+        # докстринг; вызывать второй раз незачем и это шлёт пилоту лишнее
+        # отдельное сообщение о достижениях вместо одного собранного.
+        if promoted_to is None:
+            await check_achievements_after_lap(
+                selected_tid, discipline, message.bot, track=track, lap_time_ms=lap_ms,
+            )
     except Exception:
         logger.exception("Ошибка турнирного движка после круга (admin, lap_id=%s)", lap_id)
 

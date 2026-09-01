@@ -26,6 +26,7 @@ from database.db import (
     get_pilot_month_best,
     get_setting,
     has_prior_laps_on_track,
+    is_track_record,
     lifetime_disciplines_raced,
     set_setting,
     unlock_achievement,
@@ -153,6 +154,9 @@ async def check_achievements_after_lap(
         was_empty = not await has_prior_laps_on_track(discipline_name, track, before)
         if was_empty:
             await _award(telegram_id, "pioneer_empty_table", bag)
+
+        if await is_track_record(telegram_id, discipline_name, track, lap_time_ms):
+            await _award(telegram_id, "track_record", bag)
 
     if discipline_name in CLASS_LADDER:
         # Отложенный импорт — избегаем цикла на уровне модуля (services.tournament

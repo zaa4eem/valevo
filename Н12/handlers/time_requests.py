@@ -749,10 +749,18 @@ async def approve_time_request(bot: Bot, request_id: int, admin_id: int) -> tupl
 
         promoted_to = None
         try:
-            promoted_to = await check_and_process_promotion(selected_tid, discipline, callback.bot)
-            await check_achievements_after_lap(
+            promoted_to = await check_and_process_promotion(
                 selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
             )
+            # При переходе check_and_process_promotion уже сама вызвала
+            # check_achievements_after_lap с тем же track/lap_time_ms — вызывать
+            # второй раз незачем (unlock_achievement идемпотентен, но пилоту
+            # иначе могут прилететь два отдельных сообщения о достижениях
+            # вместо одного собранного).
+            if promoted_to is None:
+                await check_achievements_after_lap(
+                    selected_tid, discipline, callback.bot, track=track, lap_time_ms=lap_time_ms,
+                )
         except Exception:
             logger.exception("Ошибка турнирного движка после круга (заявка #%s)", request_id)
 

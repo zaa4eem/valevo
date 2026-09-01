@@ -33,15 +33,19 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from config import BASE_DIR, BOT_TOKEN, SUPPORT_CHAT_ID
 import handlers.admin as admin_handlers
 import handlers.booking as booking
+import handlers.common as common_handlers
 import handlers.time_requests as time_requests
 from database.db import (
     add_track,
     create_pilot,
+    create_support_message,
+    get_all_class_benchmarks,
     get_all_disciplines,
     get_all_pilots,
     get_db,
     get_pilot_by_number,
     get_pilot_by_telegram_id,
+    get_pilot_class,
     get_pending_time_request,
     get_pending_time_requests_for_admin,
     get_time_request,
@@ -50,17 +54,21 @@ from database.db import (
     get_tracks_for_discipline,
     expire_old_time_requests,
     remove_track,
+    set_class_benchmark,
     update_display_name,
     update_pilot_number,
     update_pilot_rating,
 )
+from data.tournament import CLASS_LADDER
 from services.leaderboard import get_tournament_leaderboard_data
 from services.nickname import sanitize_pilot_name
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.profile_service import get_profile_data
+from services.tournament import month_bounds
 from services.weekcup_service import close_weekcup
 from services.yclients_auto import auto_sync_pilot_with_yclients, issue_or_queue_valevo_bonus
 from services.yclients_service import get_valevo_bonus_balance
+from utils.time_parser import time_to_ms
 from webapp.auth import InitDataError, TelegramWebAppUser, authenticate
 
 logger = logging.getLogger(__name__)
@@ -254,7 +262,18 @@ async def api_support(
 
     user_info = f"Обращение от @{user.username or 'нет юзернейма'} (ID: {user.id}) [мини-апп]"
     try:
-        await bot.send_message(SUPPORT_CHAT_ID, f"{user_info}\n\n{html.escape(text)}")
+        # Тот же путь, что и у обращений из чата бота (handlers/common.py:
+        # handle_support_message) — заводим запись в support_messages и
+        # добавляем кнопку "✉️ Ответить", иначе админ не сможет ответить
+        # пилоту через существующий флоу (support:reply:...), а обращение
+        # из мини-аппа улетит в чат поддержки просто текстом без возможности
+        # ответить одной кнопкой.
+        support_message_id = await create_support_message(user.id, user.username, text)
+        await bot.send_message(
+            SUPPORT_CHAT_ID,
+            f"{user_info}\n\n{html.escape(text)}",
+            reply_markup=common_handlers._support_admin_keyboard(support_message_id),
+        )
     except Exception:
         logger.exception("Не удалось переслать обращение поддержки из мини-аппа")
         raise HTTPException(status_code=502, detail="Не удалось отправить обращение") from None
@@ -493,11 +512,20 @@ async def api_admin_stats(_user: TelegramWebAppUser = Depends(require_admin)) ->
         row = await cursor.fetchone()
     finally:
         await db.close()
+
+    # Классы турнира без эталона этого месяца выпадают из живой таблицы
+    # целиком (services/tournament.py) — админ должен сразу видеть, если
+    # забыл настроить, а не узнавать об этом от пилотов.
+    month_key = month_bounds()[0]
+    benchmarks_set = len(await get_all_class_benchmarks(month_key))
+
     return {
         "total_pilots": len(pilots),
         "total_laps": total_laps,
         "total_disciplines": total_disciplines,
         "popular_discipline": f"{row[0]} ({row[1]} кругов)" if row else "—",
+        "benchmarks_set": benchmarks_set,
+        "benchmarks_total": len(CLASS_LADDER),
     }
 
 
@@ -514,6 +542,8 @@ async def api_admin_pilots(
         else:
             q_lower = query.lower()
             pilots = [p for p in pilots if q_lower in (p.get("username") or "").lower()]
+    for pilot in pilots:
+        pilot["tournament_class"] = await get_pilot_class(pilot["telegram_id"])
     return {"pilots": pilots}
 
 
@@ -540,6 +570,7 @@ async def api_admin_pilot_detail(
         "pilot_number": pilot.get("pilot_number"),
         "phone": pilot.get("phone"),
         "rating": pilot.get("rating", 0),
+        "tournament_class": await get_pilot_class(telegram_id),
         "bonus_balance": round(float(bonus_balance or 0), 2),
     }
 
@@ -661,6 +692,65 @@ async def api_admin_remove_track(
     _user: TelegramWebAppUser = Depends(require_admin),
 ) -> dict[str, Any]:
     await remove_track(body.discipline, body.track_name)
+    return {"ok": True}
+
+
+def _format_benchmark_ms(ms: int) -> str:
+    minutes = ms // 60000
+    seconds = (ms % 60000) // 1000
+    millis = ms % 1000
+    return f"{minutes}:{seconds:02d}.{millis:03d}"
+
+
+@app.get("/api/admin/benchmarks")
+async def api_admin_benchmarks(_user: TelegramWebAppUser = Depends(require_admin)) -> dict[str, Any]:
+    """Эталоны месяца по классам турнира (та же экранная модель, что и
+    бот-команда «🎯 Эталоны месяца» — см. handlers/admin.py:_build_benchmarks_screen),
+    но как JSON для админ-панели мини-аппы вместо чат-сообщения с кнопками."""
+    month_key = month_bounds()[0]
+    benchmarks = await get_all_class_benchmarks(month_key)
+
+    classes = []
+    for class_name, cfg in CLASS_LADDER.items():
+        bench = benchmarks.get(class_name)
+        classes.append({
+            "class_name": class_name,
+            "side_of": cfg.get("side_of"),
+            "track": bench.get("track") if bench else None,
+            "benchmark_ms": bench.get("benchmark_ms") if bench else None,
+            "benchmark_text": _format_benchmark_ms(bench["benchmark_ms"]) if bench else None,
+        })
+    return {"month_key": month_key, "classes": classes}
+
+
+class BenchmarkBody(BaseModel):
+    class_name: str
+    track: str | None = None
+    time_text: str
+
+
+@app.post("/api/admin/benchmarks")
+async def api_admin_set_benchmark(
+    body: BenchmarkBody,
+    user: TelegramWebAppUser = Depends(require_admin),
+) -> dict[str, Any]:
+    if body.class_name not in CLASS_LADDER:
+        raise HTTPException(status_code=400, detail="Неизвестный класс")
+
+    try:
+        benchmark_ms = time_to_ms(body.time_text)
+    except Exception:
+        return {"ok": False, "error": "Неверный формат времени. Пример: 01:18.565"}
+
+    track = (body.track or "").strip() or None
+    month_key = month_bounds()[0]
+    await set_class_benchmark(
+        class_name=body.class_name,
+        month_key=month_key,
+        track=track,
+        benchmark_ms=benchmark_ms,
+        admin_id=user.id,
+    )
     return {"ok": True}
 
 

@@ -175,9 +175,24 @@ async def month_qualified_participant_ids(start_iso: str, end_iso: str) -> set[i
     return qualified
 
 
-async def check_and_process_promotion(telegram_id: int, discipline_name: str, bot=None) -> str | None:
+async def check_and_process_promotion(
+    telegram_id: int,
+    discipline_name: str,
+    bot=None,
+    *,
+    track: str | None = None,
+    lap_time_ms: int | None = None,
+) -> str | None:
     """Вызывается после каждого засчитанного круга. Если это повлияло на переход —
-    выполняет его и уведомляет пилота. Возвращает название нового класса или None."""
+    выполняет его и уведомляет пилота. Возвращает название нового класса или None.
+
+    track/lap_time_ms прокидываются дальше в check_achievements_after_lap на
+    случай перехода — иначе на переходном круге "первопроходец"/"хозяин
+    трассы" (обеим нужны именно эти два параметра) молча не проверялись бы:
+    вызывающий код (handlers/time_requests.py, handlers/admin.py) сам не
+    зовёт check_achievements_after_lap повторно, когда переход произошёл,
+    чтобы не звать одни и те же проверки дважды и не слать пилоту два
+    отдельных сообщения о достижениях вместо одного."""
     if discipline_name not in CLASS_LADDER:
         return None
 
@@ -219,7 +234,8 @@ async def check_and_process_promotion(telegram_id: int, discipline_name: str, bo
 
             try:
                 await check_achievements_after_lap(
-                    telegram_id, discipline_name, bot, promoted_to=target,
+                    telegram_id, discipline_name, bot,
+                    track=track, lap_time_ms=lap_time_ms, promoted_to=target,
                 )
             except Exception:
                 logger.exception("Ошибка проверки ачивок после перехода пилота %s", telegram_id)

@@ -2086,6 +2086,26 @@ async def has_prior_laps_on_track(discipline: str, track: str, before_created_at
     return row is not None
 
 
+async def is_track_record(telegram_id: int, discipline: str, track: str, lap_time_ms: int) -> bool:
+    """True, если lap_time_ms быстрее (или равен) лучшего результата всех
+    ОСТАЛЬНЫХ пилотов на этой связке дисциплина/трасса — то есть пилот
+    становится №1 в личном зачёте трассы (ачивка "track_record")."""
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT MIN(l.lap_time_ms) FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE d.name = ? AND l.track = ? AND l.telegram_id != ?
+        """,
+        (discipline, track, telegram_id),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    best_others = row[0] if row else None
+    return best_others is None or lap_time_ms <= best_others
+
+
 async def count_month_improvements(telegram_id: int, discipline: str, start_iso: str, end_iso: str) -> int:
     """Сколько раз за месяц личный лучший круг в дисциплине реально улучшался
     (а не просто повторялся хуже прежнего)."""

@@ -94,6 +94,11 @@ function buildHero(p) {
             ? el("span", { class: "pilot-number" }, `#${p.pilot_number}`)
             : el("span", { class: "badge badge-muted" }, "№ не присвоен"),
     ]));
+    if (p.tournament_class) {
+        card.appendChild(el("div", { class: "pilot-badge-row" }, [
+            el("span", { class: "badge badge-cyan" }, `🏁 ${p.tournament_class}`),
+        ]));
+    }
 
     card.appendChild(el("div", { class: "rank-emoji" }, rank.current_emoji));
     card.appendChild(el("div", { class: "profile-name-row" }, [
