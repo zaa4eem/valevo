@@ -11,7 +11,7 @@ from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
-from handlers import booking, time_requests
+from handlers import booking, super_admin, time_requests
 
 from config import (
     ADMIN_IDS,
@@ -24,7 +24,7 @@ from config import (
     YCLIENTS_SYNC_INTERVAL_MINUTES,
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
-from database.db import carry_benchmarks_to_current_season, init_db
+from database.db import carry_benchmarks_to_current_season, init_db, set_setting
 from database.maintenance import run_scheduled_backup
 from handlers import admin, bookings_admin, common, profile_experience
 from services.db_watchdog import check_database_writable
@@ -55,6 +55,7 @@ def _register_middlewares(dp: Dispatcher) -> None:
         bookings_admin.router,
         profile_experience.router,
         common.router,
+        super_admin.router,
     ):
         router.message.outer_middleware(updater)
         router.callback_query.outer_middleware(updater)
@@ -68,6 +69,7 @@ def _register_routers(dp: Dispatcher) -> None:
     dp.include_router(bookings_admin.router)
     dp.include_router(profile_experience.router)
     dp.include_router(common.router)
+    dp.include_router(super_admin.router)
 
 
 def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
@@ -292,6 +294,15 @@ async def main() -> None:
     except OSError:
         build_time = "неизвестно"
     logger.info("Бот запущен (сборка от %s)", build_time)
+
+    # Время старта — для панели "🩺 Статус бота" супер-админа. Пишем в
+    # bot_settings, а не храним в памяти процесса: так значение переживёт
+    # даже случай, когда сам процесс перезапустится, и всегда отражает
+    # именно момент последнего фактического старта.
+    try:
+        await set_setting("bot_started_at", datetime.now(timezone(MOSCOW_TZ)).strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        logger.exception("Не удалось записать время старта бота")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:

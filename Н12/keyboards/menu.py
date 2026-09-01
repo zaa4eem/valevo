@@ -3,7 +3,7 @@ from aiogram.types import (
     KeyboardButton
 )
 
-from config import ADMIN_IDS
+from config import ADMIN_IDS, SUPER_ADMIN_IDS
 
 
 def get_menu(user_id):
@@ -32,6 +32,17 @@ def get_menu(user_id):
             [
                 KeyboardButton(
                     text="🛠 Панель администратора"
+                )
+            ]
+        )
+
+    # Отдельная кнопка для узкого круга супер-админов — независимо от того,
+    # состоит ли человек ещё и в ADMIN_IDS.
+    if user_id in SUPER_ADMIN_IDS:
+        keyboard.append(
+            [
+                KeyboardButton(
+                    text="👑 Супер-админ"
                 )
             ]
         )

@@ -1,6 +1,7 @@
 import aiosqlite
 import random
 import logging
+from datetime import datetime
 
 from config import DB_NAME
 logger = logging.getLogger(__name__)
@@ -191,6 +192,27 @@ async def init_db():
     await db.execute("""
         CREATE INDEX IF NOT EXISTS idx_standings_pending
         ON standings_notify_state(pending_since)
+    """)
+
+    # Аудит ручных действий супер-админа (сейчас — только коррекция рейтинга).
+    # Причина обязательна на уровне UI-хендлера — здесь она NOT NULL для
+    # того же на уровне схемы: без записанной причины ручная правка баллов
+    # неотличима от бага, когда через месяц кто-то спросит "а почему у него
+    # 133, а не 130".
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS admin_action_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_telegram_id INTEGER NOT NULL,
+            target_telegram_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            delta INTEGER,
+            reason TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_admin_action_log_target
+        ON admin_action_log(target_telegram_id, created_at)
     """)
 
     # Индексы по laps. Все горячие запросы турнира фильтруют круги по пилоту,
@@ -2530,6 +2552,175 @@ async def set_standings_notify_enabled(telegram_id: int, enabled: bool) -> None:
     )
     await db.commit()
     await db.close()
+
+
+# --- Супер-админ: ручная коррекция рейтинга + финансовая отчётность ---
+async def log_admin_action(
+    actor_telegram_id: int,
+    target_telegram_id: int,
+    action_type: str,
+    reason: str,
+    delta: int | None = None,
+) -> None:
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO admin_action_log
+               (actor_telegram_id, target_telegram_id, action_type, delta, reason)
+           VALUES (?, ?, ?, ?, ?)""",
+        (actor_telegram_id, target_telegram_id, action_type, delta, reason),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def get_admin_action_log(target_telegram_id: int | None = None, limit: int = 20) -> list[dict]:
+    """История ручных правок — по конкретному пилоту или последние N по всем."""
+    db = await get_db()
+    if target_telegram_id is not None:
+        cursor = await db.execute(
+            """SELECT actor_telegram_id, target_telegram_id, action_type, delta, reason, created_at
+               FROM admin_action_log WHERE target_telegram_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (target_telegram_id, limit),
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT actor_telegram_id, target_telegram_id, action_type, delta, reason, created_at
+               FROM admin_action_log ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "actor_telegram_id": r[0], "target_telegram_id": r[1], "action_type": r[2],
+            "delta": r[3], "reason": r[4], "created_at": r[5],
+        }
+        for r in rows
+    ]
+
+
+async def apply_rating_correction(
+    actor_telegram_id: int, target_telegram_id: int, delta: int, reason: str,
+) -> int | None:
+    """Атомарно меняет рейтинг пилота и пишет причину в аудит-лог одной
+    транзакцией — чтобы правка баллов никогда не осталась без объяснения
+    в логе (либо применяется и логируется вместе, либо не происходит ничего).
+    Возвращает новый рейтинг, либо None если пилот не найден."""
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "UPDATE pilots SET rating = rating + ? WHERE telegram_id = ?",
+            (delta, target_telegram_id),
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return None
+        await db.execute(
+            """INSERT INTO admin_action_log
+                   (actor_telegram_id, target_telegram_id, action_type, delta, reason)
+               VALUES (?, ?, 'rating_correction', ?, ?)""",
+            (actor_telegram_id, target_telegram_id, delta, reason),
+        )
+        cursor = await db.execute(
+            "SELECT rating FROM pilots WHERE telegram_id = ?", (target_telegram_id,)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        await db.commit()
+        return int(row[0]) if row else None
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+async def get_bonus_wallet_history(telegram_id: int, limit: int = 20) -> list[dict]:
+    """Начисления/списания Valevo Bonus конкретного пилота с причиной и
+    источником — то, что просили в отчётности: "логи списаний и начислений
+    и причины и источники"."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT source, amount, spent, remaining, expires_at, expired_at,
+                  yclients_status, reason, created_at
+           FROM bonus_wallet WHERE telegram_id = ?
+           ORDER BY id DESC LIMIT ?""",
+        (telegram_id, limit),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "source": r[0], "amount": r[1], "spent": r[2], "remaining": r[3],
+            "expires_at": r[4], "expired_at": r[5], "yclients_status": r[6],
+            "reason": r[7], "created_at": r[8],
+        }
+        for r in rows
+    ]
+
+
+async def get_bonus_wallet_summary() -> dict:
+    """Агрегат по всем пилотам сразу: сколько всего начислено/потрачено/ещё
+    доступно/в очереди — верхнеуровневая сводка для супер-админа."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT
+               COALESCE(SUM(amount), 0),
+               COALESCE(SUM(spent), 0),
+               COALESCE(SUM(CASE WHEN expired_at IS NULL THEN remaining ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN yclients_status = 'pending' THEN amount ELSE 0 END), 0),
+               COUNT(*)
+           FROM bonus_wallet"""
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return {
+        "total_issued": row[0], "total_spent": row[1],
+        "total_available": row[2], "total_pending": row[3], "entries": row[4],
+    }
+
+
+async def get_season_awards_history(telegram_id: int, limit: int = 12) -> list[dict]:
+    """Сезонные награды пилота — место, бонусные часы, рейтинг, статус выплаты."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT season_key, place, bonus_hours, rating_delta, reason,
+                  yclients_bonus_rub, yclients_status, created_at
+           FROM season_awards WHERE telegram_id = ?
+           ORDER BY id DESC LIMIT ?""",
+        (telegram_id, limit),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "season_key": r[0], "place": r[1], "bonus_hours": r[2], "rating_delta": r[3],
+            "reason": r[4], "yclients_bonus_rub": r[5], "yclients_status": r[6], "created_at": r[7],
+        }
+        for r in rows
+    ]
+
+
+async def get_backup_dir_status() -> dict:
+    """Имя и время самого свежего файла бэкапа — для сводки статуса бота."""
+    from config import BACKUP_DIR
+    if not BACKUP_DIR.exists():
+        return {"latest": None, "count": 0}
+    files = sorted(BACKUP_DIR.glob("valevo_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return {"latest": None, "count": 0}
+    latest = files[0]
+    return {
+        "latest": latest.name,
+        "latest_mtime": datetime.fromtimestamp(latest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(files),
+    }
 
 
 async def restore_time_request_pending(request_id: int):

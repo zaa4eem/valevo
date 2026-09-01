@@ -51,6 +51,7 @@ from database.db import (  # noqa: E402
     claim_season_award,
     get_db,
     init_db,
+    update_pilot_number,
 )
 from services.tournament import (  # noqa: E402
     class_rank_key,
@@ -512,6 +513,65 @@ async def test_db_watchdog() -> None:
     db_watchdog._last_ok = None
 
 
+async def test_super_admin_backend() -> None:
+    print("\nПанель супер-админа: коррекция рейтинга и отчётность")
+    from database.db import (
+        add_bonus_wallet_entry,
+        apply_rating_correction,
+        claim_season_award,
+        get_admin_action_log,
+        get_bonus_wallet_history,
+        get_bonus_wallet_summary,
+        get_season_awards_history,
+    )
+    from handlers.super_admin import _find_pilot, is_super_admin
+
+    await create_pilot(9001, "sa_test_pilot", "79990000001")
+
+    # --- поиск пилота: по номеру и по username, с/без @ ---
+    await update_pilot_number(9001, 777)
+    found_by_number = await _find_pilot("777")
+    found_by_number_hash = await _find_pilot("#777")
+    found_by_username = await _find_pilot("sa_test_pilot")
+    found_by_at_username = await _find_pilot("@sa_test_pilot")
+    check("поиск по номеру находит пилота", found_by_number is not None and found_by_number["telegram_id"] == 9001)
+    check("поиск по номеру с решёткой тоже работает", found_by_number_hash is None or found_by_number_hash["telegram_id"] == 9001)
+    check("поиск по username находит пилота", found_by_username is not None and found_by_username["telegram_id"] == 9001)
+    check("поиск по @username находит пилота", found_by_at_username is not None and found_by_at_username["telegram_id"] == 9001)
+    check("несуществующий пилот не находится", await _find_pilot("nonexistent_xyz") is None)
+
+    # --- коррекция рейтинга: атомарность и аудит-лог ---
+    new_rating = await apply_rating_correction(actor_telegram_id=1, target_telegram_id=9001, delta=15, reason="тест: компенсация за баг")
+    check("рейтинг применился", new_rating == 15, str(new_rating))
+
+    missing = await apply_rating_correction(actor_telegram_id=1, target_telegram_id=999999, delta=10, reason="тест на несуществующего")
+    check("коррекция несуществующего пилота возвращает None", missing is None)
+
+    log = await get_admin_action_log(target_telegram_id=9001)
+    check("правка записалась в аудит-лог", len(log) == 1, str(log))
+    check("причина сохранена без искажений", log[0]["reason"] == "тест: компенсация за баг")
+    check("delta сохранена верно", log[0]["delta"] == 15)
+
+    # Провал не должен оставлять следа в логе (атомарность транзакции).
+    log_after_missing = await get_admin_action_log(target_telegram_id=999999)
+    check("несостоявшаяся коррекция не пишется в лог", len(log_after_missing) == 0)
+
+    # --- финансовая отчётность: причины и источники ---
+    await add_bonus_wallet_entry(9001, None, "test_source", 500.0, expires_at=None, reason="тестовое начисление")
+    wallet = await get_bonus_wallet_history(9001)
+    check("запись кошелька видна с причиной и источником", len(wallet) == 1 and wallet[0]["reason"] == "тестовое начисление")
+
+    summary = await get_bonus_wallet_summary()
+    check("сводка учитывает начисление", summary["total_issued"] >= 500.0, str(summary))
+
+    await claim_season_award("2026-99", 9001, 3, 5, 10, "podium", yclients_bonus_rub=750)
+    awards = await get_season_awards_history(9001)
+    check("сезонная награда видна в истории", len(awards) == 1 and awards[0]["place"] == 3)
+
+    # --- доступ строго по списку ---
+    check("случайный id не считается супер-админом", not is_super_admin(424242))
+
+
 def main() -> int:
     print("=" * 70)
     print("ТЕСТЫ ТУРНИРНОЙ СИСТЕМЫ VALEVO")
@@ -529,6 +589,7 @@ def main() -> int:
 
     asyncio.run(test_db_backed())
     asyncio.run(test_db_watchdog())
+    asyncio.run(test_super_admin_backend())
 
     print("\n" + "=" * 70)
     if failed:

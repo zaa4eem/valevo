@@ -103,6 +103,15 @@ def _float_env(name: str, default: float = 0.0) -> float:
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_IDS = _int_list(os.getenv("ADMIN_IDS", ""))
 SUPPORT_CHAT_ID = _int_env("SUPPORT_CHAT_ID", ADMIN_IDS[0] if ADMIN_IDS else 0)
+
+# Отдельный, более узкий круг людей поверх обычных админов — доступ к панели
+# «👑 Супер-админ»: ручная коррекция рейтинга и финансовая отчётность (баланс
+# Valevo Bonus, история начислений/списаний с причинами, статус бота).
+# Список независим от ADMIN_IDS: супер-админу не обязательно разбирать
+# обычные заявки на время, а обычному админу — видеть финансовую отчётность.
+# Если нужно и то, и другое одному человеку — его telegram_id прописывается
+# в обоих списках.
+SUPER_ADMIN_IDS = _int_list(os.getenv("SUPER_ADMIN_IDS", ""))
 GROUP_ID = _int_env("GROUP_ID", 0)
 MENU_VERSION = _int_env("MENU_VERSION", 3)
 
