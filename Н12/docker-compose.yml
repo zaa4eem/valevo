@@ -26,6 +26,21 @@ services:
       - ./valevo.db:/app/valevo.db
       - ./logs:/app/logs
       - ./backups:/app/backups
-    ports:
-      - "127.0.0.1:8020:8020"
+    # Наружу порт 8020 не публикуется вообще — трафик идёт через общий
+    # nginx-proxy (deploy/docker-compose.proxy.yml) по внутренней сети
+    # `proxy`, который сам находит этот контейнер по VIRTUAL_HOST/VIRTUAL_PORT.
+    environment:
+      - VIRTUAL_HOST=${WEBAPP_DOMAIN}
+      - VIRTUAL_PORT=8020
+      - LETSENCRYPT_HOST=${WEBAPP_DOMAIN}
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL}
+    networks:
+      - default
+      - proxy
     stop_grace_period: 30s
+
+networks:
+  default: {}
+  proxy:
+    name: proxy
+    external: true

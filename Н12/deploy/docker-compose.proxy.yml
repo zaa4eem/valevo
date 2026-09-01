@@ -1,0 +1,57 @@
+# Общий reverse-proxy для ВСЕХ ботов на этом сервере — деплоится в Portainer
+# ОДИН раз как отдельный стек (например "proxy"), до стека самого бота.
+#
+# nginx-proxy сам собирает конфиг nginx из VIRTUAL_HOST/VIRTUAL_PORT
+# лейблов/переменных окружения контейнеров в сети `proxy` — не нужно вручную
+# писать/копировать nginx.conf под каждого нового бота или домен.
+# acme-companion сам получает и продлевает сертификаты Let's Encrypt через
+# LETSENCRYPT_HOST/LETSENCRYPT_EMAIL на тех же контейнерах.
+#
+# Подходит именно для AlmaLinux/RHEL-хоста: нет зависимости от Ubuntu-раскладки
+# nginx (sites-available/sites-enabled) и не нужен системный nginx вообще.
+#
+# Сеть `proxy` создаётся заранее один раз:
+#   docker network create proxy
+# (или как часть первого деплоя стека, см. deploy/PORTAINER_DEPLOY.md)
+
+services:
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy:1.6
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs:ro
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+    networks:
+      - proxy
+
+  acme-companion:
+    image: nginxproxy/acme-companion:2.4
+    container_name: nginx-proxy-acme
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - proxy-certs:/etc/nginx/certs
+      - proxy-vhost:/etc/nginx/vhost.d
+      - proxy-html:/usr/share/nginx/html
+      - proxy-acme:/etc/acme.sh
+    environment:
+      - NGINX_PROXY_CONTAINER=nginx-proxy
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+
+volumes:
+  proxy-certs:
+  proxy-vhost:
+  proxy-html:
+  proxy-acme:
