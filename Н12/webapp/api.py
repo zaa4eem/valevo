@@ -120,6 +120,12 @@ async def get_current_user(authorization: str | None = Header(default=None)) -> 
     try:
         return authenticate(init_data)
     except InitDataError as exc:
+        # Причина 401 раньше нигде не логировалась — пилот видел только общий
+        # "Не удалось подтвердить личность", а на сервере не было видно, это
+        # неверная подпись (чаще всего BOT_TOKEN не совпадает с тем ботом,
+        # через которого реально открыли мини-апп), протухшая initData или
+        # заголовок вообще не дошёл в ожидаемом виде.
+        logger.warning("initData не прошла проверку: %s", exc)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
