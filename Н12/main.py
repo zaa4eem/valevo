@@ -25,7 +25,9 @@ from config import (
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
 from database.db import carry_benchmarks_to_current_season, init_db
+from database.maintenance import run_scheduled_backup
 from handlers import admin, bookings_admin, common, profile_experience
+from services.db_watchdog import check_database_writable
 from services.monthly_reset import perform_monthly_reset
 from services.standings_watch import flush_standings_notifications
 from services.experience_rewards import process_completed_bookings
@@ -175,6 +177,38 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
+    # Проактивная проверка записи в базу — раньше о сбое узнавали только из
+    # потока ошибок от реальных пользовательских действий (см. инцидент
+    # 1 сентября 2026 с readonly-базой). Интервал 15 минут — быстрая реакция,
+    # не нагружает лишним.
+    if not scheduler.get_job("db_watchdog"):
+        scheduler.add_job(
+            check_database_writable,
+            "interval",
+            minutes=15,
+            args=[bot],
+            id="db_watchdog",
+            replace_existing=True,
+            misfire_grace_time=300,
+            coalesce=True,
+        )
+
+    # Ежедневный бэкап базы + чистка старых копий. create_sqlite_backup()
+    # существовала в проекте и раньше, но её никто не вызывал по расписанию —
+    # без бэкапа единственная защита от потери данных была "не потерять
+    # флешку". 04:20 МСК — гарантированно тихое время, не пересекается ни с
+    # одной другой плановой задачей.
+    if not scheduler.get_job("db_backup"):
+        scheduler.add_job(
+            run_scheduled_backup,
+            CronTrigger(hour=4, minute=20, timezone=moscow_tz),
+            args=[bot],
+            id="db_backup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+
     if not scheduler.get_job("booking_reminders"):
         scheduler.add_job(
             booking.process_booking_reminders,
@@ -196,6 +230,10 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(process_pending_yclients_operations(bot)),
         asyncio.create_task(expire_season_bonuses(bot)),
         asyncio.create_task(booking.process_booking_reminders(bot)),
+        # Проверить запись в базу сразу при старте, не дожидаясь первого
+        # плана через 15 минут — если бот запустился на уже сломанной базе,
+        # админ должен узнать об этом в первую же минуту, а не спустя четверть часа.
+        asyncio.create_task(check_database_writable(bot)),
     ]
 
     # Догоняем пропущенное закрытие, если бот был выключен в этот момент.

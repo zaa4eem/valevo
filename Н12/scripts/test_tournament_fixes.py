@@ -441,6 +441,77 @@ def test_config_sanity() -> None:
     check("минимум стартов везде задан", all(cfg["min_starts"] >= 1 for cfg in CLASS_LADDER.values()))
 
 
+def test_backup_pruning() -> None:
+    print("\nprune_old_backups — чистка старых копий")
+    from database.maintenance import prune_old_backups
+    from config import BACKUP_DIR
+    import time
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    fresh = BACKUP_DIR / "valevo_fresh_test.db"
+    old = BACKUP_DIR / "valevo_old_test.db"
+    fresh.write_text("x")
+    old.write_text("x")
+
+    old_time = time.time() - 20 * 86400
+    os.utime(old, (old_time, old_time))
+
+    removed = prune_old_backups(keep_days=14, prefix="valevo")
+    check("старая копия удалена", not old.exists())
+    check("свежая копия осталась", fresh.exists())
+    check("счётчик удалённых верный", removed >= 1, str(removed))
+
+    fresh.unlink(missing_ok=True)
+
+
+async def test_db_watchdog() -> None:
+    print("\ndb_watchdog — проактивный контроль записи (инцидент 1 сентября)")
+    from services import db_watchdog
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, chat_id, text):
+            self.sent.append((chat_id, text))
+
+    # Сброс глобального состояния между прогонами теста.
+    db_watchdog._last_ok = None
+    bot = FakeBot()
+
+    ok = await db_watchdog.check_database_writable(bot)
+    check("рабочая база проходит проверку", ok is True)
+    check("на успехе сообщений не шлём", len(bot.sent) == 0, str(bot.sent))
+
+    # Симулируем сбой записи (ровно тот случай, что был на проде).
+    import database.db as real_db
+
+    async def broken_set_setting(key, value):
+        raise Exception("attempt to write a readonly database")
+
+    original = real_db.set_setting
+    db_watchdog.set_setting = broken_set_setting
+    try:
+        ok = await db_watchdog.check_database_writable(bot)
+        check("сбой записи детектится", ok is False)
+        check("админ получает сообщение при первом сбое", len(bot.sent) >= 1)
+
+        bot.sent.clear()
+        ok_again = await db_watchdog.check_database_writable(bot)
+        check("повторный сбой НЕ дублирует сообщение", ok_again is False and len(bot.sent) == 0)
+    finally:
+        db_watchdog.set_setting = original
+
+    # Восстановление — должно прислать отдельное сообщение "снова работает".
+    bot.sent.clear()
+    ok = await db_watchdog.check_database_writable(bot)
+    check("после восстановления проверка снова проходит", ok is True)
+    check("о восстановлении сообщили отдельно", len(bot.sent) == 1, str(bot.sent))
+    check("текст восстановления понятен", "снова доступна" in bot.sent[0][1])
+
+    db_watchdog._last_ok = None
+
+
 def main() -> int:
     print("=" * 70)
     print("ТЕСТЫ ТУРНИРНОЙ СИСТЕМЫ VALEVO")
@@ -454,8 +525,10 @@ def main() -> int:
     test_error_reporter()
     test_standings_logic()
     test_config_sanity()
+    test_backup_pruning()
 
     asyncio.run(test_db_backed())
+    asyncio.run(test_db_watchdog())
 
     print("\n" + "=" * 70)
     if failed:
