@@ -19,7 +19,7 @@ from database.db import (
     get_pilot_class, get_pilot_achievements,
     get_standings_notify_enabled, set_standings_notify_enabled,
 )
-from services.leaderboard import build_leaderboard
+from services.leaderboard import LEADERBOARD_PAGES, build_leaderboard_page
 from keyboards.menu import get_menu
 from keyboards.profile_menu import build_profile_menu, profile_menu
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
@@ -280,14 +280,64 @@ async def registration_phone(message: Message, state: FSMContext):
 
 
 # ---------- Таблица лидеров ----------
+# Короткие подписи на кнопках-страницах — "Общий зачёт" в полный рост не
+# влезает рядом с шестью названиями классов на одной строке.
+_LEADERBOARD_PAGE_LABELS = {"overall": "Общий"}
+
+
+def _leaderboard_page_label(key: str) -> str:
+    return _LEADERBOARD_PAGE_LABELS.get(key, key)
+
+
+def _leaderboard_keyboard(active: str) -> InlineKeyboardMarkup:
+    """Переключатель страниц таблицы лидеров: общий зачёт + по классу.
+
+    Раньше кнопка отправляла один длинный текст со всеми классами и баллами
+    сразу. Теперь это набор страниц одного и того же сообщения — переключение
+    редактирует его на месте, а не шлёт новое сообщение на каждый клик."""
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for key in LEADERBOARD_PAGES:
+        label = _leaderboard_page_label(key)
+        text = f"• {label} •" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"lbpage:{key}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(F.text == "🏆 Таблица лидеров")
 async def leaderboard_button(message: Message):
     try:
-        text = await build_leaderboard()
-        await message.answer(text)
+        text = await build_leaderboard_page("overall")
+        await message.answer(text, reply_markup=_leaderboard_keyboard("overall"))
     except Exception as e:
         logger.error(f"Leaderboard error: {e}")
         await message.answer("❌ Не удалось загрузить таблицу лидеров.")
+
+
+@router.callback_query(F.data.startswith("lbpage:"))
+async def leaderboard_page_switch(callback: CallbackQuery):
+    key = callback.data.split(":", 1)[1]
+    if key not in LEADERBOARD_PAGES:
+        await callback.answer()
+        return
+    try:
+        text = await build_leaderboard_page(key)
+    except Exception:
+        logger.exception("Leaderboard page switch error")
+        await callback.answer("Не удалось загрузить страницу", show_alert=True)
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=_leaderboard_keyboard(key))
+    except Exception:
+        # Тот же текст, что уже на экране (повторный клик по активной странице) —
+        # Telegram запрещает редактирование "в то же самое", это не ошибка.
+        pass
+    await callback.answer()
 
 # ---------- Профиль ----------
 from services.yclients_service import get_client, get_client_total_hours, get_valevo_bonus_balance

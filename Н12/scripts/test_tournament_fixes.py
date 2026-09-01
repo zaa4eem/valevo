@@ -572,6 +572,40 @@ async def test_super_admin_backend() -> None:
     check("случайный id не считается супер-админом", not is_super_admin(424242))
 
 
+def test_format_ms_to_time() -> None:
+    print("\nformat_ms_to_time — обратная к time_to_ms")
+    from utils.time_parser import format_ms_to_time, time_to_ms
+
+    check("100000 мс = 1:40.000", format_ms_to_time(100_000) == "1:40.000", format_ms_to_time(100_000))
+    check("94000 мс = 1:34.000", format_ms_to_time(94_000) == "1:34.000")
+    check("округление до мс не теряется", format_ms_to_time(144_900) == "2:24.900")
+    for text in ("1:40.000", "1:34.000", "2:24.900", "0:59.999"):
+        check(f"round-trip {text}", format_ms_to_time(time_to_ms(text)) == text)
+
+
+async def test_leaderboard_pages() -> None:
+    print("\nСтраницы таблицы лидеров — времена по классам, упрощённый общий зачёт")
+    from services.leaderboard import LEADERBOARD_PAGES, build_leaderboard_page
+
+    check("страницы начинаются с общего зачёта", LEADERBOARD_PAGES[0] == "overall")
+    check("каждый класс лестницы — своя страница", set(LEADERBOARD_PAGES[1:]) == set(CLASS_LADDER.keys()))
+
+    month_key, start_iso, end_iso = month_bounds()
+    await _seed(month_key, datetime.strptime(start_iso, SQL_TS_FMT))
+
+    overall_text = await build_leaderboard_page("overall")
+    check("общий зачёт без формулы по классам", "×" not in overall_text, overall_text)
+    check("общий зачёт объясняет расчёт одной фразой внизу", "Итог —" in overall_text)
+    check("общий зачёт показывает место и балл", "130" in overall_text)
+
+    mx5_text = await build_leaderboard_page("MX-5")
+    check("страница класса выдаёт РЕАЛЬНОЕ время, не баллы", "1:3" in mx5_text and "130" not in mx5_text, mx5_text)
+    check("самый быстрый круг наверху", mx5_text.index("1:30.000") < mx5_text.index("1:32.000"))
+
+    empty_class_text = await build_leaderboard_page("GT3")
+    check("класс без результатов сообщает об этом", "пока нет результатов" in empty_class_text.lower())
+
+
 def main() -> int:
     print("=" * 70)
     print("ТЕСТЫ ТУРНИРНОЙ СИСТЕМЫ VALEVO")
@@ -586,10 +620,12 @@ def main() -> int:
     test_standings_logic()
     test_config_sanity()
     test_backup_pruning()
+    test_format_ms_to_time()
 
     asyncio.run(test_db_backed())
     asyncio.run(test_db_watchdog())
     asyncio.run(test_super_admin_backend())
+    asyncio.run(test_leaderboard_pages())
 
     print("\n" + "=" * 70)
     if failed:

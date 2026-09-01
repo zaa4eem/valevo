@@ -4,9 +4,13 @@ from data.tournament import CLASS_LADDER, min_starts_for_class
 from database.db import get_all_pilot_display_names
 from services.tournament import load_month_snapshot, month_bounds, rank_month_overall
 from utils.message_style import DIVIDER
+from utils.time_parser import format_ms_to_time
 
 MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
 OVERALL_TOP_N = 10
+
+# Порядок страниц интерактивной таблицы лидеров (кнопка "🏆 Таблица лидеров").
+LEADERBOARD_PAGES = ["overall", *CLASS_LADDER.keys()]
 
 
 def _format_score(total: float) -> str:
@@ -103,6 +107,84 @@ async def build_leaderboard() -> str:
         + f"\n\n{DIVIDER}\n\n"
         + overall_block
     )
+
+
+async def build_leaderboard_page(page_key: str) -> str:
+    """Одна страница интерактивной таблицы лидеров (кнопка "🏆 Таблица лидеров").
+
+    page_key == "overall" — упрощённый общий зачёт (место + итог, без разбора
+    по классам). Любое другое значение — название класса из CLASS_LADDER:
+    топ-5 этого класса по фактическому ВРЕМЕНИ круга, не по баллам — раньше
+    кнопка выдавала баллы, что смешивало "кто быстрее" с "как считается зачёт".
+    Эти два вопроса теперь разведены по разным страницам.
+    """
+    month_key, start_iso, end_iso = month_bounds()
+    if page_key == "overall":
+        return await _build_overall_page(month_key, start_iso, end_iso)
+
+    snapshot = await load_month_snapshot(month_key, start_iso, end_iso)
+    names = await get_all_pilot_display_names()
+    return await _build_class_time_page(page_key, snapshot, names)
+
+
+async def _build_overall_page(month_key: str, start_iso: str, end_iso: str) -> str:
+    """Общий зачёт без раскладки по классам — только место и итоговый балл.
+
+    Раньше под каждым итогом шла строка вида "MX-5 130+6×1 + BTCC 117+10×1.4" —
+    формула для тех, кто хочет разобраться, но шум для тех, кто просто хочет
+    увидеть место. Разбор для желающих остался в services.leaderboard через
+    build_leaderboard() (полная версия, уходит в группу после каждого круга);
+    здесь — только итог плюс одна общая пометка внизу, как это считается.
+    """
+    ranked = await rank_month_overall(month_key, start_iso, end_iso)
+
+    lines = ["🏆 <b>ОБЩИЙ ЗАЧЁТ СЕЗОНА</b>", DIVIDER, ""]
+    if not ranked:
+        lines.append("Пока никто не набрал зачётных баллов в этом сезоне.")
+    else:
+        names = await get_all_pilot_display_names()
+        for i, r in enumerate(ranked[:OVERALL_TOP_N]):
+            display = _name_from(names, r["telegram_id"])
+            mark = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+            lines.append(f"{mark} {html.escape(display)} — <b>{_format_score(r['total'])}</b>")
+
+    lines.append("")
+    lines.append(
+        "ℹ️ Итог — сумма баллов по каждому классу, где выполнен минимум стартов "
+        "сезона (100 баллов = точное попадание в эталон месяца, дальше ±5 за "
+        "каждый процент быстрее/медленнее), умноженная на вес класса, плюс "
+        "бонус за место в личном зачёте этого класса."
+    )
+    return "\n".join(lines)
+
+
+async def _build_class_time_page(class_name: str, snapshot, names: dict[int, str]) -> str:
+    """Топ-5 класса по фактическому времени круга.
+
+    В отличие от общего зачёта, здесь не важен ни эталон, ни минимум стартов —
+    просто кто реально быстрее проехал в этом сезоне, тем же языком, которым
+    об этом думает пилот на трассе."""
+    ranked = [
+        (telegram_id, best_ms)
+        for (telegram_id, discipline), (best_ms, starts) in snapshot.bests.items()
+        if discipline == class_name and best_ms is not None and starts > 0
+    ]
+
+    role = CLASS_LADDER[class_name].get("side_of")
+    title = f"{class_name} (доп. для {role})" if role else class_name
+    lines = [f"🏁 <b>{html.escape(title)}</b>", DIVIDER, ""]
+
+    if not ranked:
+        lines.append("В этом сезоне пока нет результатов в этом классе.")
+        return "\n".join(lines)
+
+    ranked.sort(key=lambda row: (row[1], row[0]))
+    for i, (telegram_id, best_ms) in enumerate(ranked[:5]):
+        mark = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
+        display = _name_from(names, telegram_id)
+        lines.append(f"{mark} {html.escape(display)} — <b>{format_ms_to_time(best_ms)}</b>")
+
+    return "\n".join(lines)
 
 
 async def _build_overall_standings_block(month_key: str, start_iso: str, end_iso: str, names: dict[int, str] | None = None) -> str:

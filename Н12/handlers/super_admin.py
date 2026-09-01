@@ -27,6 +27,7 @@ from config import BACKUP_DIR, DATA_DIR, MOSCOW_TZ, SUPER_ADMIN_IDS
 from data.tournament import CLASS_LADDER
 from database.db import (
     apply_rating_correction,
+    clear_all_laps,
     get_admin_action_log,
     get_backup_dir_status,
     get_bonus_wallet_history,
@@ -39,6 +40,8 @@ from database.db import (
     get_setting,
 )
 from services.tournament import month_bounds
+from services.weekcup_service import close_weekcup
+from utils.error_reporter import format_admin_error
 from utils.message_style import DIVIDER, header
 
 router = Router()
@@ -55,6 +58,8 @@ def super_admin_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💰 Финансовая сводка", callback_data="sa:finance:overview")],
         [InlineKeyboardButton(text="🩺 Статус бота", callback_data="sa:status")],
         [InlineKeyboardButton(text="📜 Журнал правок", callback_data="sa:log")],
+        [InlineKeyboardButton(text="🏆 Закрыть Week CUP", callback_data="sa:weekcup:start")],
+        [InlineKeyboardButton(text="🗑 Очистить таблицу", callback_data="sa:clear_table:start")],
     ])
 
 
@@ -423,3 +428,97 @@ async def action_log(callback: CallbackQuery, state: FSMContext):
         ]),
     )
     await callback.answer()
+
+
+# ======================== ОЧИСТКА ТАБЛИЦЫ ========================
+# Перенесено сюда из обычной админ-панели: необратимая операция сразу над
+# всей таблицей результатов, а не над одной записью — по уровню риска это
+# ближе к супер-админу, чем к повседневной модерации заявок.
+
+class ClearTableConfirm(StatesGroup):
+    wait = State()
+
+
+@router.callback_query(F.data == "sa:clear_table:start")
+async def clear_table_start(callback: CallbackQuery, state: FSMContext):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await state.set_state(ClearTableConfirm.wait)
+    await callback.message.edit_text(
+        f"{header('⚠️', 'Очистка таблицы')}\n\n"
+        "Вы уверены, что хотите удалить ВСЕ круги из таблицы?\n"
+        "Напишите в точности: <code>Я уверен что я делаю</code>",
+        reply_markup=_cancel_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.message(ClearTableConfirm.wait)
+async def clear_table_confirm(message: Message, state: FSMContext):
+    if not is_super_admin(message.from_user.id):
+        await state.clear()
+        return
+    if (message.text or "").strip() == "Я уверен что я делаю":
+        await clear_all_laps()
+        await message.answer(
+            "✅ Таблица рекордов полностью очищена. Рейтинг пилотов сохранён.",
+            reply_markup=super_admin_menu(),
+        )
+    else:
+        await message.answer("❌ Текст не совпадает. Операция отменена.", reply_markup=super_admin_menu())
+    await state.clear()
+
+
+# ======================== ЗАКРЫТИЕ WEEK CUP ========================
+# Перенесено сюда из обычной админ-панели: разово закрывает сезон Week CUP
+# целиком (топ-3, призы, очистка таблицы) — необратимо и затрагивает деньги.
+
+@router.callback_query(F.data == "sa:weekcup:start")
+async def weekcup_close_start(callback: CallbackQuery, state: FSMContext):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await state.clear()
+    await callback.message.edit_text(
+        f"{header('⚠️', 'Закрыть Week CUP?')}\n\n"
+        "Будет выполнено:\n"
+        "1. Зафиксирован TOP-3.\n"
+        "2. 1 месту уйдёт сообщение про суперприз.\n"
+        "3. 2 месту будет начислено 1000 ₽.\n"
+        "4. 3 месту будет начислено 750 ₽.\n"
+        "5. Таблица Week CUP будет очищена.\n\n"
+        "Остальные дисциплины не будут затронуты.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, закрыть Week CUP", callback_data="sa:weekcup:yes")],
+            [InlineKeyboardButton(text="❌ Отмена", callback_data="sa:cancel")],
+        ]),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "sa:weekcup:yes")
+async def weekcup_close_confirm(callback: CallbackQuery):
+    if not is_super_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    await callback.message.edit_text("⏳ Закрываю Week CUP...")
+
+    try:
+        report = await close_weekcup(callback.bot)
+        await callback.message.answer(report, reply_markup=super_admin_menu())
+        await callback.answer("Week CUP закрыт")
+    except Exception as exc:
+        logger.exception("Ошибка при закрытии Week CUP")
+        await callback.message.answer(
+            format_admin_error(
+                context="Закрытие Week CUP",
+                error=exc,
+                extra_advice=(
+                    "Таблица Week CUP могла остаться незакрытой — проверьте результаты "
+                    "перед повторной попыткой, чтобы не начислить призы дважды."
+                ),
+            )
+        )
+        await callback.answer("Ошибка", show_alert=True)

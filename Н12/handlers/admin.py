@@ -16,13 +16,11 @@ from aiogram.types import (
 )
 
 from config import ADMIN_IDS, GROUP_ID
-from utils.error_reporter import format_admin_error
 from utils.message_style import DIVIDER, header
 from services.tournament import check_and_process_promotion, month_bounds, live_class_score
 from services.achievements import check_achievements_after_lap
 from services.standings_watch import rebaseline_standings, refresh_standings_after_lap
 from services.tournament import rank_month_overall
-from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
 from data.tournament import CLASS_LADDER
 from keyboards.menu import get_menu
@@ -38,7 +36,7 @@ from database.db import (
     add_lap, delete_lap, get_pilot_by_username, get_all_pilots,
     get_pilot_by_telegram_id, get_pilot_by_number,
     update_pilot_rating, update_pilot_number,
-    clear_all_laps, get_db,
+    get_db,
     add_track, remove_track, get_all_disciplines, get_tracks_for_discipline,
     get_disciplines_with_current_results, get_current_discipline_results,
     get_current_ranked_lap,
@@ -103,9 +101,6 @@ class ChangePilotNumber(StatesGroup):
 class BalanceAction(StatesGroup):
     waiting_for_amount = State()
 
-class ClearTableConfirm(StatesGroup):
-    wait = State()
-
 class Broadcast(StatesGroup):
     waiting_for_text = State()
     confirm = State()
@@ -134,34 +129,7 @@ async def admin_panel(message: Message):
 async def back_to_menu(message: Message):
     await message.answer("🏁 Главное меню", reply_markup=get_menu(message.from_user.id))
 
-# ======================== ОЧИСТКА ТАБЛИЦЫ ========================
-@router.message(F.text == "🗑 Очистить таблицу")
-async def clear_table_start(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id): return
-    await state.set_state(ClearTableConfirm.wait)
-    await message.answer(
-        f"{header('⚠️', 'Очистка таблицы')}\n\n"
-        "Вы уверены, что хотите удалить ВСЕ круги из таблицы?\n"
-        "Напишите в точности: Я уверен что я делаю\n\n"
-        "Для отмены нажмите '🔙 Назад'."
-    )
-
-@router.message(ClearTableConfirm.wait, F.text == "🔙 Назад")
-async def clear_table_cancel(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Операция отменена.", reply_markup=admin_menu)
-
-@router.message(ClearTableConfirm.wait)
-async def clear_table_confirm(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await state.clear()
-        return
-    if (message.text or "").strip() == "Я уверен что я делаю":
-        await clear_all_laps()
-        await message.answer("✅ Таблица рекордов полностью очищена. Рейтинг пилотов сохранён.", reply_markup=admin_menu)
-    else:
-        await message.answer("❌ Текст не совпадает. Операция отменена.", reply_markup=admin_menu)
-    await state.clear()
+# Очистка таблицы перенесена в панель "👑 Супер-админ" (handlers/super_admin.py).
 
 # ======================== РАССЫЛКА ========================
 @router.message(F.text == "📢 Рассылка")
@@ -1403,96 +1371,4 @@ async def send_notifications(bot, discipline, new_username, lap_text, selected_t
             await bot.send_message(group_id, leaderboard)
         except Exception as e: logger.warning(f"Ошибка отправки в группу: {e}")
 
-def is_weekcup_close_button(text: str | None) -> bool:
-    if not text:
-        return False
-
-    t = text.lower().replace("ё", "е").strip()
-
-    return (
-        "закрыть" in t
-        and (
-            "week" in t
-            or "cup" in t
-            or "вик" in t
-            or "кап" in t
-            or "недель" in t
-        )
-    )
-
-
-@router.message(F.text.func(is_weekcup_close_button))
-async def admin_close_weekcup_button(message: Message, state: FSMContext):
-    if not is_admin(message.from_user.id):
-        await message.answer("⛔ Доступ запрещён")
-        return
-
-    await state.clear()
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Да, закрыть Week CUP",
-                    callback_data="admin_close_weekcup_yes"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="❌ Отмена",
-                    callback_data="admin_close_weekcup_cancel"
-                )
-            ]
-        ]
-    )
-
-    await message.answer(
-        f"{header('⚠️', 'Закрыть Week CUP?')}\n\n"
-        "Будет выполнено:\n"
-        "1. Зафиксирован TOP-3.\n"
-        "2. 1 месту уйдёт сообщение про суперприз.\n"
-        "3. 2 месту будет начислено 1000 ₽.\n"
-        "4. 3 месту будет начислено 750 ₽.\n"
-        "5. Таблица Week CUP будет очищена.\n\n"
-        "Остальные дисциплины не будут затронуты.",
-        reply_markup=keyboard
-    )
-
-
-@router.callback_query(F.data == "admin_close_weekcup_cancel")
-async def admin_close_weekcup_cancel(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-
-    await callback.message.edit_text("❌ Закрытие Week CUP отменено.")
-    await callback.answer()
-
-
-@router.callback_query(F.data == "admin_close_weekcup_yes")
-async def admin_close_weekcup_yes(callback: CallbackQuery):
-    if not is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
-
-    await callback.message.edit_text("⏳ Закрываю Week CUP...")
-
-    try:
-        report = await close_weekcup(callback.bot)
-        await callback.message.answer(report)
-        await callback.answer("Week CUP закрыт")
-    except Exception as exc:
-        logger.exception("Ошибка при закрытии Week CUP")
-
-        await callback.message.answer(
-            format_admin_error(
-                context="Закрытие Week CUP",
-                error=exc,
-                extra_advice=(
-                    "Таблица Week CUP могла остаться незакрытой — проверьте результаты "
-                    "перед повторной попыткой, чтобы не начислить призы дважды."
-                ),
-            )
-        )
-
-        await callback.answer("Ошибка", show_alert=True)
+# Закрытие Week CUP перенесено в панель "👑 Супер-админ" (handlers/super_admin.py).
