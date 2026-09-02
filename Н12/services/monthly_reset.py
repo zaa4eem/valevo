@@ -3,21 +3,32 @@ from datetime import datetime, timedelta
 
 from pytz import timezone
 
-from config import MOSCOW_TZ, SUPPORT_CHAT_ID, YCLIENTS_BONUS_RUB_PER_HOUR, SEASON_BONUS_EXPIRE_DAYS
+from config import (
+    MOSCOW_TZ,
+    SEASON_BONUS_EXPIRE_DAYS,
+    SEASON_CLOSE_DAY,
+    SEASON_CLOSE_HOUR,
+    SEASON_CLOSE_MINUTE,
+    SUPPORT_CHAT_ID,
+    YCLIENTS_BONUS_RUB_PER_HOUR,
+)
+from data.tournament import previous_month_bounds
 from database.db import (
     get_pilot_by_telegram_id,
     get_season_award,
+    has_award_for_month,
     claim_season_award,
     update_season_award_yclients,
     create_pending_yclients_operation,
 )
 from services.tournament import (
-    month_bounds,
+    closing_season_bounds,
     month_qualified_participant_ids,
     rank_month_overall,
     run_monthly_relegation,
 )
 from services.yclients_service import issue_season_cashback
+from utils.error_reporter import report_admin_error
 from utils.message_style import DIVIDER
 
 logger = logging.getLogger(__name__)
@@ -34,16 +45,34 @@ def season_bonus_rub(bonus_hours: int) -> float:
 
 
 def current_season_key(now: datetime | None = None) -> str:
-    """Ключ сезона по фактическому моменту закрытия.
+    """Ключ закрываемого сезона — месяц, в котором он закрывается ("2026-08").
 
-    Закрытие происходит 20 числа в 18:01 МСК. Ключ фиксируется по месяцу закрытия,
-    чтобы повторный запуск в этот же день не начислил награды повторно.
+    Закрытие идёт 20-го в 18:00 МСК и закрывает сезон, начавшийся в прошлое
+    закрытие (20-го предыдущего месяца в 18:00). Ключ совпадает с месяцем
+    закрытия, поэтому "августовский сезон" — это тот, что закрывается
+    20 августа.
+
+    Раньше ключ был "2026-08-20-18", а зачёт считался по календарному месяцу:
+    август награждался 20 августа по данным 1–20 августа, а следующее закрытие
+    смотрело уже на сентябрь — круги с 21-го по конец месяца не попадали ни в
+    одно закрытие. Теперь сезон и есть интервал между закрытиями, и терять
+    дни больше нечему.
+
+    Награды за месяц, закрытый по старой схеме, повторно не выдаются:
+    has_award_for_month сверяет наличие награды по префиксу месяца и видит
+    оба формата ключа.
     """
     moscow_tz = timezone(MOSCOW_TZ)
     now = now or datetime.now(moscow_tz)
     if now.tzinfo is None:
         now = moscow_tz.localize(now)
-    return now.astimezone(moscow_tz).strftime("%Y-%m-20-18")
+    return previous_month_bounds(
+        now,
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )[0]
 
 
 async def _notify_admin(bot, text: str) -> None:
@@ -82,10 +111,14 @@ async def perform_monthly_reset(bot):
     - если YCLIENTS недоступен или карта Valevo Bonus не выдана, месяц всё равно закрывается,
       рейтинг и локальные бонусы начисляются, а ошибка пишется в БД/логи/админу.
     """
-    season_key = current_season_key()
+    # Закрываем сезон, который заканчивается прямо сейчас: интервал от прошлого
+    # закрытия (20-е предыдущего месяца, 18:00 МСК) до этого. В момент закрытия
+    # month_bounds() уже отдаёт НОВЫЙ сезон, поэтому границы берём отдельной
+    # функцией — иначе награждался бы только что начавшийся пустой сезон.
+    month_key, start_iso, end_iso = closing_season_bounds()
+    season_key = month_key
     logger.info("===== НАЧАЛО ЗАКРЫТИЯ МЕСЯЦА %s =====", season_key)
 
-    month_key, start_iso, end_iso = month_bounds()
     ranking = await rank_month_overall(month_key, start_iso, end_iso)
     awarded_pilots: set[int] = set()
 
@@ -103,6 +136,16 @@ async def perform_monthly_reset(bot):
         rating_delta = RATING_POINTS[index]
         bonus_rub = season_bonus_rub(bonus_hours)
 
+        # Месяц мог быть закрыт ещё по старой схеме (season_key "2026-08-20-18").
+        # Проверяем по префиксу месяца, иначе смена формата ключа привела бы
+        # к повторной выдаче призов и денег за уже закрытый август.
+        if await has_award_for_month(month_key, tid, "podium") and await get_season_award(season_key, tid, "podium") is None:
+            logger.info(
+                "Пилот %s уже получал podium за %s по прежней схеме закрытия — пропускаю",
+                tid, month_key,
+            )
+            continue
+
         existing_award = await get_season_award(season_key, tid, "podium")
         if existing_award is not None:
             award_status = existing_award.get("yclients_status")
@@ -116,13 +159,12 @@ async def perform_monthly_reset(bot):
                     "Пилот %s: статус YCLIENTS-выплаты за %s остался 'issuing' — "
                     "не повторяем автоматически, требуется ручная проверка", tid, season_key,
                 )
-                await _notify_admin(
+                await report_admin_error(
                     bot,
-                    "⚠️ <b>Неизвестный статус выплаты Valevo Bonus</b>\n\n"
-                    f"Пилот: {tid}\nСезон: {season_key}\n\n"
-                    "Предыдущий запуск закрытия месяца упал ровно между вызовом YCLIENTS "
-                    "и сохранением результата — неизвестно, прошло ли списание. "
-                    "Авто-выплата приостановлена, проверьте баланс Valevo Bonus вручную.",
+                    context=f"Закрытие месяца {season_key}, выплата за {index} место",
+                    error="issuing",
+                    details={"Пилот": tid, "Сезон": season_key},
+                    dedup_key=f"issuing:{season_key}:{tid}",
                 )
                 continue
             if award_status != "pending":
@@ -199,14 +241,19 @@ async def perform_monthly_reset(bot):
                 last_error=y_error or y_status,
             )
             logger.warning("YCLIENTS bonus not issued for %s: %s", tid, yclients_result)
-            await _notify_admin(
+            await report_admin_error(
                 bot,
-                "⚠️ <b>Valevo Bonus не начислен автоматически</b>\n\n"
-                f"Пилот: {tid}\n"
-                f"Место: {index}\n"
-                f"Награда: {bonus_hours} ч / {bonus_rub:g} 💎\n"
-                f"Причина: {y_error or y_status}\n\n"
-                "Проверь, выдана ли клиенту карта Valevo Bonus в YCLIENTS.",
+                context=f"Закрытие месяца {season_key}: награда за {index} место",
+                error=y_error or y_status,
+                details={
+                    "Пилот": tid,
+                    "Место": index,
+                    "Награда": f"{bonus_hours} ч / {bonus_rub:g} 💎",
+                },
+                extra_advice=(
+                    "Начисление сохранено в очереди — деньги не потеряны. "
+                    "После устранения причины нажмите «🔁 Повторить очередь»."
+                ),
             )
 
         try:
@@ -231,6 +278,10 @@ async def perform_monthly_reset(bot):
     qualified_ids = await month_qualified_participant_ids(start_iso, end_iso)
     for tid in qualified_ids:
         if tid in awarded_pilots:
+            continue
+
+        if await has_award_for_month(month_key, tid, "participation"):
+            logger.info("Пилот %s уже получал participation за %s — пропускаю", tid, month_key)
             continue
 
         claimed = await claim_season_award(
@@ -258,7 +309,9 @@ async def perform_monthly_reset(bot):
             logger.warning("Не удалось уведомить участника %s: %s", tid, exc)
 
     try:
-        await run_monthly_relegation(bot)
+        # Границы передаём явно: релегация должна оценивать тот же закрытый
+        # месяц, что и награды, а не только начавшийся новый.
+        await run_monthly_relegation(bot, bounds=(month_key, start_iso, end_iso))
     except Exception:
         logger.exception("Ошибка при релегации по итогам месяца %s", season_key)
 

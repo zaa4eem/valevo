@@ -34,3 +34,11 @@ def time_to_ms(time_str: str) -> int:
     )
 
     return total_ms
+
+
+def format_ms_to_time(total_ms: int) -> str:
+    """Обратная к time_to_ms: миллисекунды → "1:20.000"."""
+    total_ms = int(total_ms)
+    minutes, rest_ms = divmod(total_ms, 60000)
+    seconds, millis = divmod(rest_ms, 1000)
+    return f"{minutes}:{seconds:02d}.{millis:03d}"

@@ -1,6 +1,7 @@
 import aiosqlite
 import random
 import logging
+from datetime import datetime
 
 from config import DB_NAME
 logger = logging.getLogger(__name__)
@@ -163,6 +164,77 @@ async def init_db():
         )
     """)
 
+    # Состояние уведомлений об общем зачёте. Ключевое поле — notified_place:
+    # это место, о котором пилоту РЕАЛЬНО сообщили, а не то, которое он занимал
+    # секунду назад. Сравнение идёт именно с ним, поэтому цепочка 2→3→2 внутри
+    # одного вечера не порождает ни одного сообщения: пилот вернулся туда, где
+    # был по его же данным.
+    #
+    # pending_* — состояние, ожидающее отправки (дебаунс). Админ обычно
+    # разбирает несколько заявок подряд, и без паузы каждая заявка рассылала бы
+    # свою волну уведомлений.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS standings_notify_state (
+            telegram_id INTEGER PRIMARY KEY,
+            month_key TEXT NOT NULL,
+            notified_place INTEGER,
+            notified_total REAL,
+            notified_at TEXT,
+            pending_place INTEGER,
+            pending_total REAL,
+            pending_rival TEXT,
+            pending_since TEXT,
+            sent_day TEXT,
+            sent_today INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_standings_pending
+        ON standings_notify_state(pending_since)
+    """)
+
+    # Аудит ручных действий супер-админа (сейчас — только коррекция рейтинга).
+    # Причина обязательна на уровне UI-хендлера — здесь она NOT NULL для
+    # того же на уровне схемы: без записанной причины ручная правка баллов
+    # неотличима от бага, когда через месяц кто-то спросит "а почему у него
+    # 133, а не 130".
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS admin_action_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_telegram_id INTEGER NOT NULL,
+            target_telegram_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            delta INTEGER,
+            reason TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_admin_action_log_target
+        ON admin_action_log(target_telegram_id, created_at)
+    """)
+
+    # Индексы по laps. Все горячие запросы турнира фильтруют круги по пилоту,
+    # дисциплине и дате — без индексов каждый из них шёл полным сканом таблицы,
+    # а на один рендер ТВ-табло таких запросов уходили сотни.
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_laps_pilot_disc_time
+        ON laps(telegram_id, discipline_id, created_at)
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_laps_disc_time
+        ON laps(discipline_id, created_at)
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_laps_created_at
+        ON laps(created_at)
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_laps_disc_track_time
+        ON laps(discipline_id, track, lap_time_ms)
+    """)
+
     await db.execute("""
         CREATE TABLE IF NOT EXISTS roulette_spins (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,6 +303,9 @@ async def init_db():
     await safe_add("bonus_static_minutes INTEGER DEFAULT 0", "bonus_static_minutes")
     await safe_add("experience_minutes INTEGER DEFAULT 0", "experience_minutes")
     await safe_add("menu_version INTEGER DEFAULT 0", "menu_version")
+    # Персональный выключатель уведомлений о движении в общем зачёте. Лучше дать
+    # человеку отключить один тип сообщений, чем получить mute бота целиком.
+    await safe_add("notify_standings INTEGER DEFAULT 1", "notify_standings")
 
     async def safe_add_to_table(table_name: str, col_sql: str, col_name: str):
         cursor = await db.execute(f"PRAGMA table_info({table_name})")
@@ -970,6 +1045,33 @@ async def has_season_award(season_key, telegram_id, reason):
     return row is not None
 
 
+async def has_award_for_month(month_key, telegram_id, reason):
+    """Выдавалась ли пилоту награда за этот КАЛЕНДАРНЫЙ месяц любым закрытием.
+
+    Нужна из-за смены схемы закрытия сезона. Раньше закрытие шло 20-го числа и
+    season_key выглядел как "2026-08-20-18"; теперь закрытие идёт 1-го числа за
+    предыдущий полный месяц и season_key равен просто "2026-08". Если бы мы
+    проверяли только новый ключ, месяц, уже закрытый по старой схеме, был бы
+    награждён второй раз. Проверка по префиксу месяца ловит оба формата.
+
+    LIKE с явным ESCAPE: month_key приходит из strftime и служебных символов
+    содержать не может, но подстановка в шаблон без экранирования — плохая
+    привычка, которая однажды выстрелит.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT 1 FROM season_awards
+           WHERE telegram_id = ? AND reason = ?
+             AND season_key LIKE ? ESCAPE '\\'
+           LIMIT 1""",
+        (telegram_id, reason, f"{month_key}%")
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return row is not None
+
+
 async def get_season_award(season_key, telegram_id, reason):
     db = await get_db()
     cursor = await db.execute(
@@ -1169,7 +1271,9 @@ async def add_track(discipline: str, track_name: str):
         "SELECT id FROM tracks WHERE discipline_id = ? AND name = ?",
         (disc_id, track_name)
     )
-    if await cursor.fetchone():
+    existing = await cursor.fetchone()
+    await cursor.close()
+    if existing:
         await db.close()
         return False, "exists"
     await db.execute(
@@ -1941,6 +2045,78 @@ async def set_class_benchmark(class_name: str, month_key: str, track: str | None
     await db.close()
 
 
+async def carry_benchmarks_to_current_season() -> int:
+    """Переносит эталоны в ключ текущего сезона, если для него их ещё нет.
+
+    Зачем. Сезон теперь считается как интервал между закрытиями (20-е 18:00 →
+    20-е 18:00), а не как календарный месяц, и ключ сезона — месяц закрытия.
+    После 20-го числа ключ текущего сезона указывает на СЛЕДУЮЩИЙ месяц: 25
+    августа идёт сезон "2026-09". Эталоны, заданные админом по прежней схеме,
+    лежат под ключом "2026-08" — без переноса таблица лидеров и ТВ-табло сразу
+    после обновления показали бы "эталон не задан" и обнулили бы баллы всех
+    пилотов, хотя ничего не менялось.
+
+    Переносится только если для текущего сезона эталонов нет вообще: если админ
+    уже задал их сам, ничего не трогаем. Берём последнюю по времени запись
+    на каждый класс. Возвращает число перенесённых классов.
+    """
+    from config import MOSCOW_TZ, SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE
+    from data.tournament import month_bounds
+
+    season_key = month_bounds(
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )[0]
+
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM class_benchmarks WHERE month_key = ?", (season_key,)
+        )
+        existing = (await cursor.fetchone())[0]
+        await cursor.close()
+        if existing:
+            return 0
+
+        # Последний заданный эталон на каждый класс из любого прежнего периода.
+        cursor = await db.execute(
+            """
+            SELECT class_name, track, benchmark_ms, set_by_admin_id
+            FROM class_benchmarks
+            WHERE id IN (
+                SELECT MAX(id) FROM class_benchmarks
+                WHERE month_key < ?
+                GROUP BY class_name
+            )
+            """,
+            (season_key,),
+        )
+        rows = await cursor.fetchall()
+        await cursor.close()
+
+        if not rows:
+            return 0
+
+        for class_name, track, benchmark_ms, admin_id in rows:
+            await db.execute(
+                """INSERT OR IGNORE INTO class_benchmarks
+                       (class_name, month_key, track, benchmark_ms, set_by_admin_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (class_name, season_key, track, benchmark_ms, admin_id),
+            )
+        await db.commit()
+        logger.info(
+            "Эталоны перенесены в ключ текущего сезона %s: %s классов. "
+            "Проверьте их в админ-меню «🎯 Эталоны месяца».",
+            season_key, len(rows),
+        )
+        return len(rows)
+    finally:
+        await db.close()
+
+
 async def get_class_benchmark(class_name: str, month_key: str) -> dict | None:
     db = await get_db()
     cursor = await db.execute(
@@ -1986,6 +2162,61 @@ async def get_all_pilot_classes() -> dict[int, str]:
     await cursor.close()
     await db.close()
     return {tid: cls for tid, cls in rows}
+
+
+async def get_all_pilots_indexed() -> dict[int, dict]:
+    """{telegram_id: строка пилота} — для мест, где нужны и имя, и номер сразу
+    (ТВ-табло подписывает каждую строку общего зачёта именем и номером)."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT telegram_id, display_name, username, pilot_number FROM pilots WHERE telegram_id IS NOT NULL"
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {
+        int(telegram_id): {
+            "telegram_id": int(telegram_id),
+            "display_name": display_name,
+            "username": username,
+            "pilot_number": pilot_number,
+        }
+        for telegram_id, display_name, username, pilot_number in rows
+    }
+
+
+async def get_all_pilot_display_names() -> dict[int, str]:
+    """{telegram_id: отображаемое имя} для всех пилотов одним запросом.
+
+    Таблица лидеров и ТВ-табло подписывают каждую строку именем пилота, и
+    раньше на каждую строку шёл отдельный get_pilot_by_telegram_id — по два-три
+    десятка запросов на один рендер, причём табло перезапрашивает данные каждые
+    30 секунд.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT telegram_id,
+                  COALESCE(NULLIF(TRIM(display_name), ''),
+                           NULLIF(TRIM(username), ''),
+                           CAST(telegram_id AS TEXT)) AS shown
+           FROM pilots WHERE telegram_id IS NOT NULL"""
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {int(telegram_id): str(shown) for telegram_id, shown in rows}
+
+
+async def get_all_promoted_months() -> dict[int, str | None]:
+    """{telegram_id: месяц перехода в текущий класс} для всех пилотов одним
+    запросом. Релегация проверяет это для каждого кандидата на понижение —
+    раньше на каждого открывалось отдельное соединение прямо в цикле."""
+    db = await get_db()
+    cursor = await db.execute("SELECT telegram_id, promoted_month_key FROM pilot_class_status")
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {int(telegram_id): month_key for telegram_id, month_key in rows}
 
 
 async def set_pilot_class(telegram_id: int, new_class: str, month_key: str | None = None) -> None:
@@ -2045,6 +2276,56 @@ async def get_month_participants(discipline: str, month_start_iso: str, month_en
     await cursor.close()
     await db.close()
     return [{"telegram_id": tid, "best_ms": best_ms, "starts": starts} for tid, best_ms, starts in rows]
+
+
+async def get_all_month_bests(month_start_iso: str, month_end_iso: str) -> dict[tuple[int, str], tuple[int | None, int]]:
+    """Лучшие круги и число стартов ВСЕХ пилотов по ВСЕМ дисциплинам за месяц
+    одним запросом: {(telegram_id, дисциплина): (лучший_ms, стартов)}.
+
+    Заменяет N×6 отдельных вызовов get_pilot_month_best при расчёте общего
+    зачёта. Раньше полный расчёт зачёта открывал примерно 36×N соединений к
+    SQLite (каждая функция в этом модуле открывает своё), и ТВ-табло дёргало
+    этот расчёт каждые 30 секунд — на 20 пилотах это ~770 соединений на рендер.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """
+        SELECT l.telegram_id, d.name, MIN(l.lap_time_ms), COUNT(*)
+        FROM laps l
+        JOIN disciplines d ON d.id = l.discipline_id
+        WHERE l.created_at >= ? AND l.created_at < ?
+          AND l.telegram_id IS NOT NULL
+        GROUP BY l.telegram_id, d.name
+        """,
+        (month_start_iso, month_end_iso),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {
+        (int(telegram_id), discipline): (
+            int(best_ms) if best_ms is not None else None,
+            int(starts or 0),
+        )
+        for telegram_id, discipline, best_ms, starts in rows
+    }
+
+
+async def get_pilots_active_before(month_start_iso: str) -> set[int]:
+    """Пилоты, у которых есть хотя бы один круг ДО начала месяца.
+
+    Пакетная замена is_first_active_month: бонус новичка в MX-5 получают все,
+    кого в этом множестве нет.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT DISTINCT telegram_id FROM laps WHERE created_at < ? AND telegram_id IS NOT NULL",
+        (month_start_iso,),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return {int(row[0]) for row in rows}
 
 
 async def is_first_active_month(telegram_id: int, month_start_iso: str) -> bool:
@@ -2197,6 +2478,350 @@ async def set_setting(key: str, value: str) -> None:
     )
     await db.commit()
     await db.close()
+
+
+# --- Уведомления об общем зачёте месяца ---
+async def get_standings_notify_state(month_key: str) -> dict[int, dict]:
+    """Всё состояние уведомлений за месяц одним запросом: {telegram_id: строка}.
+
+    Читается целиком, потому что диффер всё равно сравнивает состояние по всем
+    пилотам сразу — построчные запросы дали бы N походов в базу на каждый
+    засчитанный круг.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT telegram_id, month_key, notified_place, notified_total, notified_at,
+                  pending_place, pending_total, pending_rival, pending_since,
+                  sent_day, sent_today
+           FROM standings_notify_state WHERE month_key = ?""",
+        (month_key,),
+    )
+    rows = await cursor.fetchall()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return {row[0]: dict(zip(columns, row)) for row in rows}
+
+
+async def set_standings_baseline(month_key: str, places: dict[int, tuple[int | None, float]]) -> None:
+    """Записывает состояние как уже оповещённое, БЕЗ отправки сообщений.
+
+    Нужно при первом расчёте в новом месяце и при первом запуске после
+    обновления бота: иначе весь текущий топ-5 разом получил бы «вы вошли в
+    топ-5», хотя ничего только что не изменилось.
+    """
+    if not places:
+        return
+    db = await get_db()
+    try:
+        for telegram_id, (place, total) in places.items():
+            await db.execute(
+                """INSERT INTO standings_notify_state
+                       (telegram_id, month_key, notified_place, notified_total, notified_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(telegram_id) DO UPDATE SET
+                       month_key = excluded.month_key,
+                       notified_place = excluded.notified_place,
+                       notified_total = excluded.notified_total,
+                       notified_at = CURRENT_TIMESTAMP,
+                       pending_place = NULL,
+                       pending_total = NULL,
+                       pending_rival = NULL,
+                       pending_since = NULL""",
+                (telegram_id, month_key, place, total),
+            )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def queue_standings_change(
+    telegram_id: int,
+    month_key: str,
+    place: int | None,
+    total: float,
+    rival: str | None,
+) -> None:
+    """Ставит изменение в очередь на отправку (дебаунс).
+
+    pending_since НЕ обновляется, если ожидание уже идёт: иначе поток заявок
+    подряд бесконечно отодвигал бы момент отправки, и пилот не узнал бы ничего
+    до самого затишья.
+    """
+    db = await get_db()
+    try:
+        await db.execute(
+            """INSERT INTO standings_notify_state
+                   (telegram_id, month_key, pending_place, pending_total, pending_rival, pending_since)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(telegram_id) DO UPDATE SET
+                   month_key = excluded.month_key,
+                   pending_place = excluded.pending_place,
+                   pending_total = excluded.pending_total,
+                   pending_rival = excluded.pending_rival,
+                   pending_since = COALESCE(standings_notify_state.pending_since, CURRENT_TIMESTAMP)""",
+            (telegram_id, month_key, place, total, rival),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_due_standings_changes(month_key: str) -> list[dict]:
+    """Все строки с ожидающим отправки изменением за текущий месяц."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT telegram_id, month_key, notified_place, notified_total, notified_at,
+                  pending_place, pending_total, pending_rival, pending_since,
+                  sent_day, sent_today
+           FROM standings_notify_state
+           WHERE month_key = ? AND pending_since IS NOT NULL""",
+        (month_key,),
+    )
+    rows = await cursor.fetchall()
+    columns = [d[0] for d in cursor.description]
+    await cursor.close()
+    await db.close()
+    return [dict(zip(columns, row)) for row in rows]
+
+
+async def clear_standings_pending(telegram_id: int) -> None:
+    """Снимает ожидание без отправки — состояние откатилось к уже известному."""
+    db = await get_db()
+    await db.execute(
+        """UPDATE standings_notify_state
+           SET pending_place = NULL, pending_total = NULL,
+               pending_rival = NULL, pending_since = NULL
+           WHERE telegram_id = ?""",
+        (telegram_id,),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def mark_standings_notified(
+    telegram_id: int,
+    place: int | None,
+    total: float,
+    day_key: str,
+) -> None:
+    """Фиксирует факт отправки: новое "оповещённое" место + суточный счётчик."""
+    db = await get_db()
+    await db.execute(
+        """UPDATE standings_notify_state
+           SET notified_place = ?, notified_total = ?, notified_at = CURRENT_TIMESTAMP,
+               pending_place = NULL, pending_total = NULL,
+               pending_rival = NULL, pending_since = NULL,
+               sent_today = CASE WHEN sent_day = ? THEN sent_today + 1 ELSE 1 END,
+               sent_day = ?
+           WHERE telegram_id = ?""",
+        (place, total, day_key, day_key, telegram_id),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def reset_standings_state_for_new_month(month_key: str) -> None:
+    """Чистит состояние прошлых месяцев.
+
+    Без этого на старте нового месяца все обнулённые пилоты выглядели бы как
+    «выпавшие из топ-5» и получили бы уведомление о смещении, которого не было.
+    """
+    db = await get_db()
+    await db.execute("DELETE FROM standings_notify_state WHERE month_key != ?", (month_key,))
+    await db.commit()
+    await db.close()
+
+
+async def get_standings_notify_enabled(telegram_id: int) -> bool:
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COALESCE(notify_standings, 1) FROM pilots WHERE telegram_id = ?",
+        (telegram_id,),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return bool(row[0]) if row else True
+
+
+async def set_standings_notify_enabled(telegram_id: int, enabled: bool) -> None:
+    db = await get_db()
+    await db.execute(
+        "UPDATE pilots SET notify_standings = ? WHERE telegram_id = ?",
+        (1 if enabled else 0, telegram_id),
+    )
+    await db.commit()
+    await db.close()
+
+
+# --- Супер-админ: ручная коррекция рейтинга + финансовая отчётность ---
+async def log_admin_action(
+    actor_telegram_id: int,
+    target_telegram_id: int,
+    action_type: str,
+    reason: str,
+    delta: int | None = None,
+) -> None:
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO admin_action_log
+               (actor_telegram_id, target_telegram_id, action_type, delta, reason)
+           VALUES (?, ?, ?, ?, ?)""",
+        (actor_telegram_id, target_telegram_id, action_type, delta, reason),
+    )
+    await db.commit()
+    await db.close()
+
+
+async def get_admin_action_log(target_telegram_id: int | None = None, limit: int = 20) -> list[dict]:
+    """История ручных правок — по конкретному пилоту или последние N по всем."""
+    db = await get_db()
+    if target_telegram_id is not None:
+        cursor = await db.execute(
+            """SELECT actor_telegram_id, target_telegram_id, action_type, delta, reason, created_at
+               FROM admin_action_log WHERE target_telegram_id = ?
+               ORDER BY id DESC LIMIT ?""",
+            (target_telegram_id, limit),
+        )
+    else:
+        cursor = await db.execute(
+            """SELECT actor_telegram_id, target_telegram_id, action_type, delta, reason, created_at
+               FROM admin_action_log ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "actor_telegram_id": r[0], "target_telegram_id": r[1], "action_type": r[2],
+            "delta": r[3], "reason": r[4], "created_at": r[5],
+        }
+        for r in rows
+    ]
+
+
+async def apply_rating_correction(
+    actor_telegram_id: int, target_telegram_id: int, delta: int, reason: str,
+) -> int | None:
+    """Атомарно меняет рейтинг пилота и пишет причину в аудит-лог одной
+    транзакцией — чтобы правка баллов никогда не осталась без объяснения
+    в логе (либо применяется и логируется вместе, либо не происходит ничего).
+    Возвращает новый рейтинг, либо None если пилот не найден."""
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "UPDATE pilots SET rating = rating + ? WHERE telegram_id = ?",
+            (delta, target_telegram_id),
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return None
+        await db.execute(
+            """INSERT INTO admin_action_log
+                   (actor_telegram_id, target_telegram_id, action_type, delta, reason)
+               VALUES (?, ?, 'rating_correction', ?, ?)""",
+            (actor_telegram_id, target_telegram_id, delta, reason),
+        )
+        cursor = await db.execute(
+            "SELECT rating FROM pilots WHERE telegram_id = ?", (target_telegram_id,)
+        )
+        row = await cursor.fetchone()
+        await cursor.close()
+        await db.commit()
+        return int(row[0]) if row else None
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+async def get_bonus_wallet_history(telegram_id: int, limit: int = 20) -> list[dict]:
+    """Начисления/списания Valevo Bonus конкретного пилота с причиной и
+    источником — то, что просили в отчётности: "логи списаний и начислений
+    и причины и источники"."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT source, amount, spent, remaining, expires_at, expired_at,
+                  yclients_status, reason, created_at
+           FROM bonus_wallet WHERE telegram_id = ?
+           ORDER BY id DESC LIMIT ?""",
+        (telegram_id, limit),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "source": r[0], "amount": r[1], "spent": r[2], "remaining": r[3],
+            "expires_at": r[4], "expired_at": r[5], "yclients_status": r[6],
+            "reason": r[7], "created_at": r[8],
+        }
+        for r in rows
+    ]
+
+
+async def get_bonus_wallet_summary() -> dict:
+    """Агрегат по всем пилотам сразу: сколько всего начислено/потрачено/ещё
+    доступно/в очереди — верхнеуровневая сводка для супер-админа."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT
+               COALESCE(SUM(amount), 0),
+               COALESCE(SUM(spent), 0),
+               COALESCE(SUM(CASE WHEN expired_at IS NULL THEN remaining ELSE 0 END), 0),
+               COALESCE(SUM(CASE WHEN yclients_status = 'pending' THEN amount ELSE 0 END), 0),
+               COUNT(*)
+           FROM bonus_wallet"""
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+    await db.close()
+    return {
+        "total_issued": row[0], "total_spent": row[1],
+        "total_available": row[2], "total_pending": row[3], "entries": row[4],
+    }
+
+
+async def get_season_awards_history(telegram_id: int, limit: int = 12) -> list[dict]:
+    """Сезонные награды пилота — место, бонусные часы, рейтинг, статус выплаты."""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT season_key, place, bonus_hours, rating_delta, reason,
+                  yclients_bonus_rub, yclients_status, created_at
+           FROM season_awards WHERE telegram_id = ?
+           ORDER BY id DESC LIMIT ?""",
+        (telegram_id, limit),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {
+            "season_key": r[0], "place": r[1], "bonus_hours": r[2], "rating_delta": r[3],
+            "reason": r[4], "yclients_bonus_rub": r[5], "yclients_status": r[6], "created_at": r[7],
+        }
+        for r in rows
+    ]
+
+
+async def get_backup_dir_status() -> dict:
+    """Имя и время самого свежего файла бэкапа — для сводки статуса бота."""
+    from config import BACKUP_DIR
+    if not BACKUP_DIR.exists():
+        return {"latest": None, "count": 0}
+    files = sorted(BACKUP_DIR.glob("valevo_*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not files:
+        return {"latest": None, "count": 0}
+    latest = files[0]
+    return {
+        "latest": latest.name,
+        "latest_mtime": datetime.fromtimestamp(latest.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(files),
+    }
 
 
 async def restore_time_request_pending(request_id: int):

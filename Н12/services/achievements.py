@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import logging
 
-from config import MOSCOW_TZ
+from config import MOSCOW_TZ, SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE
 from data.tournament import (
     CLASS_LADDER,
     MAIN_SEQUENCE,
     SIDE_DISCIPLINES,
     min_starts_for_class,
     month_bounds,
+    sql_timestamp,
 )
 from database.db import (
     count_lifetime_laps,
@@ -35,6 +36,24 @@ from database.db import (
 from keyboards.menu import webapp_deep_link_keyboard
 
 logger = logging.getLogger(__name__)
+
+
+def _season_bounds(now=None) -> tuple[str, str, str]:
+    """Границы сезона с моментом закрытия из конфига.
+
+    Этот модуль зовёт data.tournament напрямую (импортировать
+    services.tournament на уровне модуля нельзя — он сам импортирует этот),
+    поэтому настройки закрытия приходится прокидывать здесь вручную. Без них
+    ачивки считались бы по другим границам, чем зачёт и закрытие сезона.
+    """
+    return month_bounds(
+        now=now,
+        moscow_tz_name=MOSCOW_TZ,
+        close_day=SEASON_CLOSE_DAY,
+        close_hour=SEASON_CLOSE_HOUR,
+        close_minute=SEASON_CLOSE_MINUTE,
+    )
+
 
 LAP_MILESTONES = [1, 5, 10, 25, 50, 100, 200]
 
@@ -149,8 +168,14 @@ async def check_achievements_after_lap(
 
     if track and lap_time_ms is not None:
         # created_at "перед этим кругом" — берём с небольшим запасом, круг только что вставлен.
-        from datetime import datetime, timedelta
-        before = (datetime.utcnow() - timedelta(seconds=1)).isoformat()
+        #
+        # Граница обязана быть в формате SQLite ("YYYY-MM-DD HH:MM:SS"), а не
+        # isoformat(): с разделителем 'T' строковое сравнение created_at < граница
+        # срабатывало для ЛЮБОЙ записи того же дня (пробел 0x20 < 'T' 0x54),
+        # включая только что вставленный круг — was_empty всегда получался False,
+        # и ачивка "Первопроходец" не открывалась вообще никогда.
+        from datetime import datetime, timedelta, timezone as _dt_timezone
+        before = sql_timestamp(datetime.now(_dt_timezone.utc) - timedelta(seconds=1))
         was_empty = not await has_prior_laps_on_track(discipline_name, track, before)
         if was_empty:
             await _award(telegram_id, "pioneer_empty_table", bag)
@@ -165,7 +190,7 @@ async def check_achievements_after_lap(
         # учтётся в одном месте и не в другом, и это два разных "истинных" балла.
         from services.tournament import live_class_score
 
-        month_key, start_iso, end_iso = month_bounds(moscow_tz_name=MOSCOW_TZ)
+        month_key, start_iso, end_iso = _season_bounds()
         result = await live_class_score(telegram_id, discipline_name, month_key, start_iso, end_iso)
         if result["qualifies"] and result["score"] is not None:
             if result["score"] >= 100:
@@ -218,14 +243,18 @@ async def grant_manual_achievement(telegram_id: int, code: str, bot=None) -> boo
     return True
 
 
-async def check_achievements_month_end(bot=None) -> None:
+async def check_achievements_month_end(bot=None, bounds: tuple[str, str, str] | None = None) -> None:
     """Проверки, зависящие от итогов месяца — вызывается из ежемесячной джобы
     закрытия сезона (после релегации). Ранжирование месяца и стрик могут оба
     открыть ачивку одному и тому же пилоту за один прогон — копим в общий bag
     на пилота между обеими проверками и шлём одно сообщение в конце, а не два."""
     from services.tournament import month_participant_ids, rank_month_overall  # локальный импорт: избегаем цикла на уровне модуля
 
-    month_key, start_iso, end_iso = month_bounds(moscow_tz_name=MOSCOW_TZ)
+    # bounds приходит из закрытия месяца — там это ПРЕДЫДУЩИЙ календарный месяц
+    # (закрытие идёт 20-го в 18:00). Без явной передачи month_bounds() вернул бы
+    # только что начавшийся месяц, и ачивки за итоги месяца ("Чемпион месяца",
+    # "Топ-5 месяца") считались бы по пустой таблице.
+    month_key, start_iso, end_iso = bounds or _season_bounds()
     bags: dict[int, list] = {}
 
     def bag_for(telegram_id: int) -> list:
@@ -242,30 +271,45 @@ async def check_achievements_month_end(bot=None) -> None:
         if rank <= 5:
             await _award(telegram_id, "top5_month", bag)
 
+    # Стрик отсчитываем от закрываемого месяца, а не от "сейчас": закрытие идёт
+    # 1-го числа нового месяца, и без этого цикл начинался бы с пустого месяца,
+    # обрывался на первом же шаге и стрик-ачивки не выдавались бы никогда.
     for telegram_id in await month_participant_ids(start_iso, end_iso):
-        await _check_streak(telegram_id, bag_for(telegram_id))
+        await _check_streak(telegram_id, bag_for(telegram_id), month_key=month_key)
 
     for telegram_id, bag in bags.items():
         await _flush_achievements(telegram_id, bot, bag)
 
 
-async def _check_streak(telegram_id: int, bag: list | None = None) -> None:
-    """Считает подряд идущие месяцы (включая текущий) с выполненным минимумом
-    стартов хотя бы в одной дисциплине."""
-    from datetime import datetime
+async def _check_streak(telegram_id: int, bag: list | None = None, month_key: str | None = None) -> None:
+    """Считает подряд идущие месяцы (включая закрываемый) с выполненным
+    минимумом стартов хотя бы в одной дисциплине.
+
+    month_key ("YYYY-MM") задаёт месяц, с которого начинать отсчёт назад.
+    Передаётся из закрытия сезона, где это ПРЕДЫДУЩИЙ месяц относительно
+    календарного "сейчас" — иначе отсчёт стартовал бы с ещё пустого месяца
+    и обрывался на первом шаге.
+    """
+    from datetime import datetime, timezone as _dt_timezone
 
     moscow_now = None
     try:
         from pytz import timezone as _tz
         moscow_now = datetime.now(_tz(MOSCOW_TZ))
     except Exception:
-        moscow_now = datetime.utcnow()
+        moscow_now = datetime.now(_dt_timezone.utc)
 
     streak = 0
     year, month = moscow_now.year, moscow_now.month
+    if month_key:
+        try:
+            year_text, month_text = month_key.split("-", 1)
+            year, month = int(year_text), int(month_text)
+        except (ValueError, AttributeError):
+            logger.warning("Некорректный month_key для стрика: %r", month_key)
     for _ in range(12):
         probe = moscow_now.replace(year=year, month=month, day=1)
-        _key, start_iso, end_iso = month_bounds(now=probe, moscow_tz_name=MOSCOW_TZ)
+        _key, start_iso, end_iso = _season_bounds(now=probe)
 
         met = False
         for class_name in CLASS_LADDER:

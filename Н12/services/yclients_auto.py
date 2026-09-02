@@ -9,10 +9,12 @@ from database.db import (
     claim_pending_yclients_operation,
     create_pending_yclients_operation,
     get_pending_yclients_operations,
+    get_pilot_by_telegram_id,
     get_unsynced_pilots,
     log_yclients_sync,
     update_pending_yclients_operation,
 )
+from utils.error_reporter import report_admin_error
 from services.yclients_service import (
     change_valevo_bonus,
     ensure_valevo_bonus_card,
@@ -141,49 +143,126 @@ async def issue_or_queue_valevo_bonus(
 _pending_ops_lock = asyncio.Lock()
 
 
+# После стольких неудачных попыток операция перестаёт бесконечно крутиться в
+# очереди и уходит в статус 'failed' с уведомлением админу. При 6-часовом
+# интервале повторов это примерно пять суток попыток — временный сбой API за
+# это время точно успеет пройти, а вот структурная проблема (нет клиента в
+# YCLIENTS, запрещён выпуск карт) сама не рассосётся и требует человека.
+MAX_PENDING_ATTEMPTS = 20
+
+
 async def process_pending_yclients_operations(bot=None, limit: int = 100) -> dict:
     """Повторяет операции, которые не прошли из-за отсутствия карты/временной ошибки API."""
     if _pending_ops_lock.locked():
         return {"ok": False, "status": "already_running"}
     async with _pending_ops_lock:
-        return await _process_pending_yclients_operations_locked(limit=limit)
+        return await _process_pending_yclients_operations_locked(bot=bot, limit=limit)
 
 
-async def _process_pending_yclients_operations_locked(limit: int = 100) -> dict:
+async def _resolve_client_id(op: dict) -> int | None:
+    """Актуальный yclients_client_id для операции.
+
+    Операция могла быть поставлена в очередь, когда пилот ещё не был связан с
+    YCLIENTS (client_id = NULL). Сам по себе client_id в строке очереди никогда
+    не появится, поэтому раньше такая операция уходила в 'retry' на каждом
+    проходе вечно. Теперь перед повтором подтягиваем связь из pilots — её мог
+    проставить автосинк или админ вручную уже после постановки в очередь.
+    """
+    if op.get("yclients_client_id"):
+        return op["yclients_client_id"]
+    if not op.get("telegram_id"):
+        return None
+    try:
+        pilot = await get_pilot_by_telegram_id(op["telegram_id"])
+    except Exception:
+        logger.exception("Не удалось перечитать пилота %s для операции #%s", op.get("telegram_id"), op.get("id"))
+        return None
+    return (pilot or {}).get("yclients_client_id")
+
+
+async def _give_up_on_operation(bot, op: dict, last_error: str | None) -> None:
+    """Снимает операцию с повторов и зовёт админа разобраться руками."""
+    await update_pending_yclients_operation(op["id"], "failed", last_error=last_error)
+    logger.error(
+        "Операция #%s (%s) снята с повторов после %s попыток: %s",
+        op["id"], op["operation_type"], op.get("attempts"), last_error,
+    )
+    if bot is None:
+        return
+    await report_admin_error(
+        bot,
+        context=f"Очередь YCLIENTS, операция #{op['id']} ({op['operation_type']})",
+        error=last_error,
+        details={
+            "Пилот": op.get("telegram_id") or "—",
+            "Сумма": f"{op.get('amount') or 0:g} 💎",
+            "Попыток": op.get("attempts"),
+        },
+        extra_advice=(
+            "Операция снята с автоповторов, чтобы не крутиться в очереди бесконечно. "
+            "Деньги не начислены. После устранения причины начислите вручную "
+            "или создайте операцию заново."
+        ),
+    )
+
+
+async def _process_pending_yclients_operations_locked(bot=None, limit: int = 100) -> dict:
     ops = await get_pending_yclients_operations(limit=limit)
-    done = failed = 0
+    done = failed = given_up = 0
     for op in ops:
         if not await claim_pending_yclients_operation(op["id"]):
             # Кто-то другой уже забрал эту операцию в обработку.
             continue
+
+        attempts = int(op.get("attempts") or 0)
+        client_id = await _resolve_client_id(op)
+
+        if client_id is None:
+            reason = "no_client_id"
+            if attempts + 1 >= MAX_PENDING_ATTEMPTS:
+                await _give_up_on_operation(bot, op, reason)
+                given_up += 1
+            else:
+                await update_pending_yclients_operation(op["id"], "retry", last_error=reason)
+                failed += 1
+            await asyncio.sleep(0.15)
+            continue
+
         try:
             if op["operation_type"] == "ensure_card":
-                ensured = await ensure_valevo_bonus_card(op["yclients_client_id"])
-                if ensured.get("ok"):
-                    card = ensured.get("card") or {}
-                    await update_pending_yclients_operation(op["id"], "done", yclients_card_id=str(card.get("id")))
-                    done += 1
-                else:
-                    await update_pending_yclients_operation(op["id"], "retry", last_error=ensured.get("message"))
-                    failed += 1
+                ensured = await ensure_valevo_bonus_card(client_id)
+                ok = bool(ensured.get("ok"))
+                error_text = ensured.get("message")
+                card_id = str((ensured.get("card") or {}).get("id")) if ok else None
             elif op["operation_type"] == "bonus":
-                # TODO(human): если op["yclients_client_id"] отсутствует (клиент не был
-                # найден по телефону на момент начисления), change_valevo_bonus сразу
-                # вернёт ok=False status=no_client_id, и эта операция будет уходить в
-                # "retry" бесконечно на каждом проходе — client_id тут никогда не
-                # появится сам. Нужно решить: подставлять актуальный client_id пилота
-                # (если он появился в pilots после ручной/авто синхронизации) перед
-                # повтором, либо ограничить число попыток и уведомлять админа.
-                result = await change_valevo_bonus(op["yclients_client_id"], op["amount"], title=op.get("title") or "Valevo Bonus")
-                if result.get("ok"):
-                    await update_pending_yclients_operation(op["id"], "done", yclients_card_id=str(result.get("card_id")))
-                    done += 1
-                else:
-                    await update_pending_yclients_operation(op["id"], "retry", last_error=result.get("message") or result.get("status"))
-                    failed += 1
+                result = await change_valevo_bonus(
+                    client_id, op["amount"], title=op.get("title") or "Valevo Bonus",
+                )
+                ok = bool(result.get("ok"))
+                error_text = result.get("message") or result.get("status")
+                card_id = str(result.get("card_id")) if ok else None
+            else:
+                await _give_up_on_operation(bot, op, f"unknown_operation_type:{op['operation_type']}")
+                given_up += 1
+                await asyncio.sleep(0.15)
+                continue
+
+            if ok:
+                await update_pending_yclients_operation(op["id"], "done", yclients_card_id=card_id)
+                done += 1
+            elif attempts + 1 >= MAX_PENDING_ATTEMPTS:
+                await _give_up_on_operation(bot, op, error_text)
+                given_up += 1
+            else:
+                await update_pending_yclients_operation(op["id"], "retry", last_error=error_text)
+                failed += 1
         except Exception as exc:
             logger.exception("process pending op failed: %s", op)
-            await update_pending_yclients_operation(op["id"], "retry", last_error=repr(exc))
-            failed += 1
+            if attempts + 1 >= MAX_PENDING_ATTEMPTS:
+                await _give_up_on_operation(bot, op, repr(exc))
+                given_up += 1
+            else:
+                await update_pending_yclients_operation(op["id"], "retry", last_error=repr(exc))
+                failed += 1
         await asyncio.sleep(0.15)
-    return {"ok": True, "processed": len(ops), "done": done, "failed": failed}
+    return {"ok": True, "processed": len(ops), "done": done, "failed": failed, "given_up": given_up}

@@ -6,7 +6,7 @@ from aiogram.types import (
     WebAppInfo,
 )
 
-from config import ADMIN_IDS, WEBAPP_BASE_URL
+from config import ADMIN_IDS, SUPER_ADMIN_IDS, WEBAPP_BASE_URL
 
 
 def webapp_deep_link_keyboard(tab: str, text: str) -> InlineKeyboardMarkup | None:
@@ -59,6 +59,17 @@ def get_menu(user_id):
             [
                 KeyboardButton(
                     text="🛠 Панель администратора"
+                )
+            ]
+        )
+
+    # Отдельная кнопка для узкого круга супер-админов — независимо от того,
+    # состоит ли человек ещё и в ADMIN_IDS.
+    if user_id in SUPER_ADMIN_IDS:
+        keyboard.append(
+            [
+                KeyboardButton(
+                    text="👑 Супер-админ"
                 )
             ]
         )

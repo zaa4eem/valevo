@@ -17,10 +17,11 @@ from database.db import (
     create_support_message, get_support_message, claim_support_message_for_reply,
     release_support_message, complete_support_message,
     get_pilot_class, get_pilot_achievements,
+    get_standings_notify_enabled, set_standings_notify_enabled,
 )
-from services.leaderboard import build_leaderboard
+from services.leaderboard import LEADERBOARD_PAGES, build_leaderboard_page
 from keyboards.menu import get_menu
-from keyboards.profile_menu import profile_menu
+from keyboards.profile_menu import build_profile_menu, profile_menu
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.yclients_auto import auto_sync_pilot_with_yclients
 from services.profile_service import format_phone_display, get_profile_data
@@ -282,14 +283,64 @@ async def registration_phone(message: Message, state: FSMContext):
 
 
 # ---------- Таблица лидеров ----------
+# Короткие подписи на кнопках-страницах — "Общий зачёт" в полный рост не
+# влезает рядом с шестью названиями классов на одной строке.
+_LEADERBOARD_PAGE_LABELS = {"overall": "Общий"}
+
+
+def _leaderboard_page_label(key: str) -> str:
+    return _LEADERBOARD_PAGE_LABELS.get(key, key)
+
+
+def _leaderboard_keyboard(active: str) -> InlineKeyboardMarkup:
+    """Переключатель страниц таблицы лидеров: общий зачёт + по классу.
+
+    Раньше кнопка отправляла один длинный текст со всеми классами и баллами
+    сразу. Теперь это набор страниц одного и того же сообщения — переключение
+    редактирует его на месте, а не шлёт новое сообщение на каждый клик."""
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for key in LEADERBOARD_PAGES:
+        label = _leaderboard_page_label(key)
+        text = f"• {label} •" if key == active else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"lbpage:{key}"))
+        if len(row) == 3:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @router.message(F.text == "🏆 Таблица лидеров")
 async def leaderboard_button(message: Message):
     try:
-        text = await build_leaderboard()
-        await message.answer(text)
+        text = await build_leaderboard_page("overall")
+        await message.answer(text, reply_markup=_leaderboard_keyboard("overall"))
     except Exception as e:
         logger.error(f"Leaderboard error: {e}")
         await message.answer("❌ Не удалось загрузить таблицу лидеров.")
+
+
+@router.callback_query(F.data.startswith("lbpage:"))
+async def leaderboard_page_switch(callback: CallbackQuery):
+    key = callback.data.split(":", 1)[1]
+    if key not in LEADERBOARD_PAGES:
+        await callback.answer()
+        return
+    try:
+        text = await build_leaderboard_page(key)
+    except Exception:
+        logger.exception("Leaderboard page switch error")
+        await callback.answer("Не удалось загрузить страницу", show_alert=True)
+        return
+    try:
+        await callback.message.edit_text(text, reply_markup=_leaderboard_keyboard(key))
+    except Exception:
+        # Тот же текст, что уже на экране (повторный клик по активной странице) —
+        # Telegram запрещает редактирование "в то же самое", это не ошибка.
+        pass
+    await callback.answer()
 
 # ---------- Профиль ----------
 DIVIDER = "━━━━━━━━━━━━━━━━━━"
@@ -558,6 +609,16 @@ async def _build_profile_text(user_id: int, fallback_username: str | None) -> st
     ])
 
 
+async def _profile_keyboard(telegram_id: int) -> InlineKeyboardMarkup:
+    """Меню профиля с актуальным состоянием переключателя уведомлений."""
+    try:
+        enabled = await get_standings_notify_enabled(telegram_id)
+    except Exception:
+        logger.exception("Не удалось прочитать настройку уведомлений пилота %s", telegram_id)
+        enabled = True
+    return build_profile_menu(enabled)
+
+
 @router.message(F.text == "👤 Профиль")
 async def profile(message: Message, state: FSMContext):
     try:
@@ -565,7 +626,7 @@ async def profile(message: Message, state: FSMContext):
         if text is None:
             await message.answer("❌ Профиль не найден. Используйте /start.")
             return
-        await message.answer(text, reply_markup=profile_menu)
+        await message.answer(text, reply_markup=await _profile_keyboard(message.from_user.id))
     except Exception as e:
         logger.exception("Profile error: %s", e)
         await message.answer("❌ Ошибка при загрузке профиля.")
@@ -579,7 +640,9 @@ async def refresh_profile(callback: CallbackQuery):
             await callback.answer("Профиль не найден", show_alert=True)
             return
         try:
-            await callback.message.edit_text(text, reply_markup=profile_menu)
+            await callback.message.edit_text(
+                text, reply_markup=await _profile_keyboard(callback.from_user.id),
+            )
             await callback.answer("Обновлено")
         except Exception:
             # Текст не изменился с прошлого обновления — Telegram запрещает
@@ -588,6 +651,33 @@ async def refresh_profile(callback: CallbackQuery):
     except Exception as e:
         logger.exception("Refresh profile error: %s", e)
         await callback.answer("Не удалось обновить профиль", show_alert=True)
+
+
+@router.callback_query(F.data == "toggle_standings_notify")
+async def toggle_standings_notify(callback: CallbackQuery):
+    """Включает/выключает уведомления о движении в общем зачёте месяца."""
+    try:
+        enabled = await get_standings_notify_enabled(callback.from_user.id)
+        await set_standings_notify_enabled(callback.from_user.id, not enabled)
+    except Exception:
+        logger.exception("Не удалось переключить уведомления пилота %s", callback.from_user.id)
+        await callback.answer("Не удалось изменить настройку", show_alert=True)
+        return
+
+    await callback.answer(
+        "Уведомления о зачёте выключены" if enabled else "Уведомления о зачёте включены"
+    )
+
+    try:
+        text = await _build_profile_text(callback.from_user.id, callback.from_user.username)
+        if text is not None:
+            await callback.message.edit_text(
+                text, reply_markup=await _profile_keyboard(callback.from_user.id),
+            )
+    except Exception:
+        # Кнопка уже переключена и пользователь это увидел во всплывашке —
+        # неудачная перерисовка сообщения не повод показывать ошибку.
+        logger.info("Не удалось перерисовать профиль после переключения уведомлений")
 
 # ---------- Информация ----------
 @router.message(F.text == "❓ Информация")

@@ -14,11 +14,7 @@ admin_menu = ReplyKeyboardMarkup(
             KeyboardButton(text="➖ Удалить трассу")
         ],
         [
-            KeyboardButton(text="🗑 Удалить время"),
-            KeyboardButton(text="🗑 Очистить таблицу")
-        ],
-        [
-            KeyboardButton(text="🏆 Закрыть Week CUP")
+            KeyboardButton(text="🗑 Удалить время")
         ],
         [
             KeyboardButton(text="🎯 Эталоны месяца")
@@ -30,3 +26,7 @@ admin_menu = ReplyKeyboardMarkup(
     resize_keyboard=True,
     one_time_keyboard=False
 )
+# "🗑 Очистить таблицу" и "🏆 Закрыть Week CUP" перенесены в панель
+# "👑 Супер-админ" (SUPER_ADMIN_IDS) — это необратимые операции сразу над
+# всей таблицей/сезоном, а не над одной записью, поэтому уровень доступа к
+# ним выше обычного ADMIN_IDS.

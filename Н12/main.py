@@ -1,5 +1,4 @@
 import asyncio
-import html
 import logging
 import os
 import sys
@@ -12,15 +11,30 @@ from aiogram.types import ErrorEvent, MenuButtonWebApp, WebAppInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
-from handlers import booking, time_requests
+from handlers import booking, super_admin, time_requests
 
-from config import ADMIN_IDS, BOT_TOKEN, MOSCOW_TZ, WEBAPP_BASE_URL, validate_required_settings, YCLIENTS_SYNC_INTERVAL_MINUTES, YCLIENTS_CARD_RETRY_INTERVAL_MINUTES
-from database.db import init_db
+from config import (
+    ADMIN_IDS,
+    BOT_TOKEN,
+    MOSCOW_TZ,
+    SEASON_CLOSE_DAY,
+    SEASON_CLOSE_HOUR,
+    SEASON_CLOSE_MINUTE,
+    WEBAPP_BASE_URL,
+    validate_required_settings,
+    YCLIENTS_SYNC_INTERVAL_MINUTES,
+    YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
+)
+from database.db import carry_benchmarks_to_current_season, init_db, set_setting
+from database.maintenance import run_scheduled_backup
 from handlers import admin, bookings_admin, common, profile_experience
+from services.db_watchdog import check_database_writable
 from services.monthly_reset import perform_monthly_reset
+from services.standings_watch import flush_standings_notifications
 from services.experience_rewards import process_completed_bookings
 from services.yclients_auto import auto_sync_all_pilots, process_pending_yclients_operations
 from services.bonus_expiration import expire_season_bonuses
+from utils.error_reporter import report_admin_error
 from utils.log_config import LoggingMiddleware, setup_logging
 from utils.menu_updater_middleware import MenuUpdaterMiddleware
 from utils.chat_hygiene import ChatHygieneMiddleware
@@ -42,6 +56,7 @@ def _register_middlewares(dp: Dispatcher) -> None:
         bookings_admin.router,
         profile_experience.router,
         common.router,
+        super_admin.router,
     ):
         router.message.outer_middleware(updater)
         router.callback_query.outer_middleware(updater)
@@ -55,11 +70,18 @@ def _register_routers(dp: Dispatcher) -> None:
     dp.include_router(bookings_admin.router)
     dp.include_router(profile_experience.router)
     dp.include_router(common.router)
+    dp.include_router(super_admin.router)
 
 
 def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
     """Ловит необработанные исключения хендлеров, чтобы они не терялись молча
-    и админы узнавали о проблеме сразу, а не из жалоб пользователей."""
+    и админы узнавали о проблеме сразу, а не из жалоб пользователей.
+
+    Текст ошибки проходит через error_reporter: вместо сырого
+    "TypeError: 'NoneType' object is not subscriptable" админ получает
+    описание на русском и конкретные шаги. Одинаковые ошибки, идущие пачкой,
+    схлопываются дедупликацией внутри error_reporter.
+    """
 
     @dp.errors()
     async def _on_error(event: ErrorEvent) -> bool:
@@ -68,16 +90,21 @@ def _register_error_handler(dp: Dispatcher, bot: Bot) -> None:
             "Необработанная ошибка при обработке update_id=%s", update_id,
             exc_info=event.exception,
         )
-        for admin_id in ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Необработанная ошибка в боте (update_id={update_id}):\n"
-                    f"<code>{html.escape(type(event.exception).__name__)}: "
-                    f"{html.escape(str(event.exception))}</code>",
-                )
-            except Exception:
-                logger.warning("Не удалось уведомить админа %s об ошибке", admin_id)
+
+        user_hint = "—"
+        try:
+            source = event.update.message or event.update.callback_query if event.update else None
+            if source is not None and source.from_user:
+                user_hint = f"@{source.from_user.username or source.from_user.id}"
+        except Exception:
+            pass
+
+        await report_admin_error(
+            bot,
+            context="Обработка действия пользователя в боте",
+            error=event.exception,
+            details={"Пользователь": user_hint, "update_id": update_id},
+        )
         return True
 
 
@@ -107,7 +134,12 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.get_job("monthly_reset"):
         scheduler.add_job(
             perform_monthly_reset,
-            CronTrigger(day=20, hour=18, minute=1, timezone=moscow_tz),
+            CronTrigger(
+                day=SEASON_CLOSE_DAY,
+                hour=SEASON_CLOSE_HOUR,
+                minute=SEASON_CLOSE_MINUTE,
+                timezone=moscow_tz,
+            ),
             args=[bot],
             id="monthly_reset",
             replace_existing=True,
@@ -150,6 +182,54 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
+    # Отправка накопленных уведомлений о движении в общем зачёте. Дешёвая
+    # операция: читает готовую очередь, полного пересчёта зачёта здесь нет —
+    # он делается только по событию (засчитанный круг). Интервал 5 минут при
+    # дебаунсе 20 минут даёт задержку доставки максимум 25 минут.
+    if not scheduler.get_job("standings_notifications"):
+        scheduler.add_job(
+            flush_standings_notifications,
+            "interval",
+            minutes=5,
+            args=[bot],
+            id="standings_notifications",
+            replace_existing=True,
+            misfire_grace_time=600,
+            coalesce=True,
+        )
+
+    # Проактивная проверка записи в базу — раньше о сбое узнавали только из
+    # потока ошибок от реальных пользовательских действий (см. инцидент
+    # 1 сентября 2026 с readonly-базой). Интервал 15 минут — быстрая реакция,
+    # не нагружает лишним.
+    if not scheduler.get_job("db_watchdog"):
+        scheduler.add_job(
+            check_database_writable,
+            "interval",
+            minutes=15,
+            args=[bot],
+            id="db_watchdog",
+            replace_existing=True,
+            misfire_grace_time=300,
+            coalesce=True,
+        )
+
+    # Ежедневный бэкап базы + чистка старых копий. create_sqlite_backup()
+    # существовала в проекте и раньше, но её никто не вызывал по расписанию —
+    # без бэкапа единственная защита от потери данных была "не потерять
+    # флешку". 04:20 МСК — гарантированно тихое время, не пересекается ни с
+    # одной другой плановой задачей.
+    if not scheduler.get_job("db_backup"):
+        scheduler.add_job(
+            run_scheduled_backup,
+            CronTrigger(hour=4, minute=20, timezone=moscow_tz),
+            args=[bot],
+            id="db_backup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+        )
+
     if not scheduler.get_job("booking_reminders"):
         scheduler.add_job(
             booking.process_booking_reminders,
@@ -171,10 +251,30 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(process_pending_yclients_operations(bot)),
         asyncio.create_task(expire_season_bonuses(bot)),
         asyncio.create_task(booking.process_booking_reminders(bot)),
+        # Проверить запись в базу сразу при старте, не дожидаясь первого
+        # плана через 15 минут — если бот запустился на уже сломанной базе,
+        # админ должен узнать об этом в первую же минуту, а не спустя четверть часа.
+        asyncio.create_task(check_database_writable(bot)),
     ]
 
-    if now.day == 20 and now.hour >= 18:
-        logger.info("20-е число после 18:01 — проверяю ежемесячные начисления при старте.")
+    # Догоняем пропущенное закрытие, если бот был выключен в этот момент.
+    # Повторный запуск безопасен: награды защищены таблицей season_awards
+    # (плюс проверка по префиксу месяца для закрытий по прежней схеме), а
+    # релегация — флагом relegation_done:<сезон> в bot_settings. Раньше флага
+    # не было, и каждый перезапуск бота в день закрытия понижал ещё одну
+    # порцию пилотов поверх уже понижённых.
+    close_moment_passed = (
+        now.day > SEASON_CLOSE_DAY
+        or (
+            now.day == SEASON_CLOSE_DAY
+            and (now.hour, now.minute) >= (SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE)
+        )
+    )
+    if close_moment_passed:
+        logger.info(
+            "Момент закрытия сезона (%s-е %02d:%02d МСК) уже прошёл — проверяю начисления при старте.",
+            SEASON_CLOSE_DAY, SEASON_CLOSE_HOUR, SEASON_CLOSE_MINUTE,
+        )
         await perform_monthly_reset(bot)
 
     return background_tasks
@@ -185,6 +285,17 @@ async def main() -> None:
 
     await init_db()
     await booking.ensure_booking_schema()
+
+    # Разовый перенос эталонов в ключ текущего сезона. Сезон теперь считается
+    # от закрытия до закрытия, и после 20-го числа его ключ указывает на
+    # следующий месяц — без переноса эталоны, заданные по прежней схеме,
+    # оказались бы "не заданы" и обнулили бы баллы всех пилотов.
+    try:
+        carried = await carry_benchmarks_to_current_season()
+        if carried:
+            logger.info("Перенесено эталонов в текущий сезон: %s", carried)
+    except Exception:
+        logger.exception("Не удалось перенести эталоны в ключ текущего сезона")
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
@@ -203,6 +314,15 @@ async def main() -> None:
     except OSError:
         build_time = "неизвестно"
     logger.info("Бот запущен (сборка от %s)", build_time)
+
+    # Время старта — для панели "🩺 Статус бота" супер-админа. Пишем в
+    # bot_settings, а не храним в памяти процесса: так значение переживёт
+    # даже случай, когда сам процесс перезапустится, и всегда отражает
+    # именно момент последнего фактического старта.
+    try:
+        await set_setting("bot_started_at", datetime.now(timezone(MOSCOW_TZ)).strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        logger.exception("Не удалось записать время старта бота")
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
