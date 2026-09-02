@@ -26,12 +26,12 @@ export function Navbar() {
     >
       <div
         className="z-container"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60 }}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60, gap: 12 }}
       >
-        <Link href="/" style={{ fontWeight: 900, fontSize: 'var(--z-fs-lg)', letterSpacing: 1 }}>
+        <Link href="/" style={{ fontWeight: 900, fontSize: 'var(--z-fs-lg)', letterSpacing: 1, flexShrink: 0 }}>
           ZAA<span className="z-accent-text">4</span>EEM
         </Link>
-        <nav className="z-navbar-links">
+        <nav className="z-navbar-links" style={{ minWidth: 0 }}>
           {links.map((link) => (
             <Link
               key={link.href}
@@ -42,10 +42,19 @@ export function Navbar() {
             </Link>
           ))}
         </nav>
-        <div>
+        <div style={{ flexShrink: 0 }}>
           {user ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <Link href={`/u/${user.id}`} style={{ fontSize: 'var(--z-fs-sm)' }}>
+            <div className="z-navbar-user" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Link
+                href={`/u/${user.id}`}
+                style={{
+                  fontSize: 'var(--z-fs-sm)',
+                  maxWidth: 96,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {user.displayName}
               </Link>
               {user.role === 'OWNER' && (

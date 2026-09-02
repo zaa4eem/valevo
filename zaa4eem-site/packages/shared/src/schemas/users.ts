@@ -4,6 +4,7 @@ export const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(60).optional(),
   avatarUrl: z.string().url().nullable().optional(),
   bio: z.string().max(500).nullable().optional(),
+  statusText: z.string().max(80).nullable().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
@@ -13,6 +14,7 @@ export const publicProfileSchema = z.object({
   displayName: z.string(),
   avatarUrl: z.string().nullable(),
   bio: z.string().nullable(),
+  statusText: z.string().nullable(),
   createdAt: z.string(),
   stats: z.object({
     ideasSubmittedCount: z.number().int().nonnegative(),

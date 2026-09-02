@@ -24,21 +24,31 @@ const canRun = Boolean(process.env.DATABASE_URL);
     await app.close();
   });
 
-  it('non-owner cannot publish a post', async () => {
-    const res = await request(app.getHttpServer())
+  it('lets a non-owner publish a post, then blocks a second one within 12h', async () => {
+    const email = `sub-${Date.now()}@test.dev`;
+    const register = await request(app.getHttpServer())
       .post('/api/auth/register')
-      .send({ email: `sub-${Date.now()}@test.dev`, password: 'password123', displayName: 'Sub' });
+      .send({ email, password: 'password123', displayName: 'Sub' });
+
+    const created = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${register.body.accessToken}`)
+      .send({ body: 'my first post', publish: true })
+      .expect(201);
+
+    const feed = await request(app.getHttpServer()).get('/api/posts').expect(200);
+    expect(feed.body.some((post: any) => post.id === created.body.id)).toBe(true);
 
     await request(app.getHttpServer())
       .post('/api/posts')
-      .set('Authorization', `Bearer ${res.body.accessToken}`)
-      .send({ body: 'trying to post', publish: true })
+      .set('Authorization', `Bearer ${register.body.accessToken}`)
+      .send({ body: 'trying again immediately', publish: true })
       .expect(403);
   });
 
-  it('owner can publish a post visible on the public feed', async () => {
+  it('owner can publish repeatedly without the 12h cooldown', async () => {
     const email = `owner-${Date.now()}@test.dev`;
-    const register = await request(app.getHttpServer())
+    await request(app.getHttpServer())
       .post('/api/auth/register')
       .send({ email, password: 'password123', displayName: 'Owner' });
 
@@ -57,5 +67,54 @@ const canRun = Boolean(process.env.DATABASE_URL);
 
     const feed = await request(app.getHttpServer()).get('/api/posts').expect(200);
     expect(feed.body.some((post: any) => post.id === created.body.id)).toBe(true);
+
+    await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${login.body.accessToken}`)
+      .send({ body: 'Второй пост подряд', publish: true })
+      .expect(201);
+  });
+
+  it('lets a post author (not just the owner) like and comment on posts', async () => {
+    const authorEmail = `postauthor-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: authorEmail, password: 'password123', displayName: 'Post Author' });
+
+    const post = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ body: 'like and comment me', publish: true })
+      .expect(201);
+
+    const liker = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `liker-${Date.now()}@test.dev`, password: 'password123', displayName: 'Liker' });
+
+    await request(app.getHttpServer())
+      .post(`/api/posts/${post.body.id}/like`)
+      .set('Authorization', `Bearer ${liker.body.accessToken}`)
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .post(`/api/posts/${post.body.id}/like`)
+      .set('Authorization', `Bearer ${liker.body.accessToken}`)
+      .expect(409);
+
+    const comment = await request(app.getHttpServer())
+      .post(`/api/posts/${post.body.id}/comments`)
+      .set('Authorization', `Bearer ${liker.body.accessToken}`)
+      .send({ body: 'nice post!' })
+      .expect(201);
+
+    const comments = await request(app.getHttpServer())
+      .get(`/api/posts/${post.body.id}/comments`)
+      .expect(200);
+    expect(comments.body.some((c: any) => c.id === comment.body.id)).toBe(true);
+
+    const feed = await request(app.getHttpServer()).get('/api/posts').expect(200);
+    const feedPost = feed.body.find((p: any) => p.id === post.body.id);
+    expect(feedPost.likeCount).toBe(1);
+    expect(feedPost.commentCount).toBe(1);
   });
 });

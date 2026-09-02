@@ -61,6 +61,9 @@ body {
   color: var(--z-text);
   font-family: var(--z-font-sans);
   -webkit-font-smoothing: antialiased;
+  /* Telegram's WebView reports viewport-fit=cover (see layout.tsx) — keep
+     content clear of notches/home-indicators on devices that have them. */
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 a {
@@ -194,5 +197,37 @@ img {
 
   .z-game-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* Touch targets grow to Apple/Google's ~44px minimum; text controls stay
+     comfortable to hit on a phone screen inside the Telegram Mini App. */
+  .z-btn-accent,
+  .z-btn-ghost,
+  .z-btn-danger {
+    min-height: 44px;
+    padding: 10px 16px;
+  }
+
+  .z-input,
+  .z-textarea {
+    font-size: 16px; /* prevents iOS Safari/WebView from auto-zooming on focus */
+  }
+
+  h1 {
+    font-size: var(--z-fs-2xl);
+  }
+}
+
+@media (max-width: 420px) {
+  .z-navbar-links {
+    gap: 10px;
+  }
+
+  .z-navbar-user {
+    gap: 8px !important;
+  }
+
+  .z-navbar-user a {
+    max-width: 56px !important;
   }
 }

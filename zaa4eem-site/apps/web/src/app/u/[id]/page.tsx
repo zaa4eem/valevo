@@ -67,6 +67,11 @@ export default function PublicProfilePage() {
                 </span>
               )}
             </h1>
+            {profile.statusText && (
+              <p style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)', margin: '4px 0 0', fontStyle: 'italic' }}>
+                {profile.statusText}
+              </p>
+            )}
             {profile.bio && <p style={{ color: 'var(--z-text-muted)', margin: '4px 0 0' }}>{profile.bio}</p>}
           </div>
         </div>

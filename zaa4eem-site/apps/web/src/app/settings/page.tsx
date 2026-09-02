@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { updateProfileSchema, type PublicProfile } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -11,10 +11,13 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
-  const [avatarUrl, setAvatarUrl] = useState('');
+  const [statusText, setStatusText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -23,7 +26,7 @@ export default function SettingsPage() {
         setProfile(p);
         setDisplayName(p.displayName);
         setBio(p.bio ?? '');
-        setAvatarUrl(p.avatarUrl ?? '');
+        setStatusText(p.statusText ?? '');
       },
       () => setLoadError(true),
     );
@@ -42,7 +45,7 @@ export default function SettingsPage() {
     const parsed = updateProfileSchema.safeParse({
       displayName,
       bio: bio || null,
-      avatarUrl: avatarUrl || null,
+      statusText: statusText || null,
     });
     if (!parsed.success) {
       setError(parsed.error.issues[0]?.message ?? 'Проверьте поля формы');
@@ -57,22 +60,96 @@ export default function SettingsPage() {
     }
   }
 
+  async function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarError(null);
+    setAvatarUploading(true);
+    try {
+      const form = new FormData();
+      form.append('avatar', file);
+      const updated = await api.upload<PublicProfile>('/users/me/avatar', form);
+      setProfile(updated);
+    } catch (err) {
+      setAvatarError(err instanceof ApiError ? err.message : 'Не удалось загрузить аватар');
+    } finally {
+      setAvatarUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
   return (
     <div style={{ maxWidth: 480 }}>
       <h1>Настройки профиля</h1>
       <Card>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+          <div
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: '50%',
+              background: 'var(--z-accent-soft)',
+              display: 'grid',
+              placeItems: 'center',
+              fontWeight: 800,
+              fontSize: 'var(--z-fs-xl)',
+              color: 'var(--z-accent)',
+              flexShrink: 0,
+              overflow: 'hidden',
+            }}
+          >
+            {profile.avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profile.avatarUrl}
+                alt={profile.displayName}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              profile.displayName.charAt(0).toUpperCase()
+            )}
+          </div>
+          <div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={onAvatarChange}
+              disabled={avatarUploading}
+              style={{ display: 'none' }}
+              id="avatar-input"
+            />
+            <label htmlFor="avatar-input" className="z-btn-ghost" style={{ cursor: 'pointer' }}>
+              {avatarUploading ? 'Загрузка…' : 'Сменить аватар'}
+            </label>
+            {avatarError && (
+              <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 6 }}>
+                {avatarError}
+              </div>
+            )}
+          </div>
+        </div>
+
         <form onSubmit={onSave} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <label>
             <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>Имя</div>
             <input className="z-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
           </label>
           <label>
-            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>О себе</div>
-            <textarea className="z-textarea" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} />
+            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
+              Статус (рядом с ником)
+            </div>
+            <input
+              className="z-input"
+              value={statusText}
+              onChange={(e) => setStatusText(e.target.value)}
+              placeholder="например: играю в снейк 🐍"
+              maxLength={80}
+            />
           </label>
           <label>
-            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>Ссылка на аватар</div>
-            <input className="z-input" value={avatarUrl} onChange={(e) => setAvatarUrl(e.target.value)} placeholder="https://…" />
+            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>О себе</div>
+            <textarea className="z-textarea" rows={4} value={bio} onChange={(e) => setBio(e.target.value)} />
           </label>
           {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
           {saved && <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>Сохранено!</div>}

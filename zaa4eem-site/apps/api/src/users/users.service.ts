@@ -48,7 +48,12 @@ export class UsersService {
 
   async updateProfile(
     userId: string,
-    data: { displayName?: string; avatarUrl?: string | null; bio?: string | null },
+    data: {
+      displayName?: string;
+      avatarUrl?: string | null;
+      bio?: string | null;
+      statusText?: string | null;
+    },
   ) {
     return this.prisma.user.update({ where: { id: userId }, data });
   }
@@ -91,6 +96,7 @@ export class UsersService {
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       bio: user.bio,
+      statusText: user.statusText,
       createdAt: user.createdAt.toISOString(),
       stats: {
         ideasSubmittedCount,

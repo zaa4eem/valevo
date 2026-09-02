@@ -53,6 +53,7 @@ model User {
   displayName       String
   avatarUrl         String?
   bio               String?
+  statusText        String?
   telegramId        BigInt?    @unique
   telegramUsername  String?
   email             String?    @unique
@@ -64,6 +65,8 @@ model User {
   ideas             Idea[]
   votes             Vote[]
   scores            Score[]
+  likes             Like[]
+  comments          Comment[]
   refreshTokens     RefreshToken[]
   moderationActions ModerationLogEntry[] @relation("ModerationActor")
 
@@ -83,15 +86,47 @@ model RefreshToken {
 }
 
 model Post {
-  id          String    @id @default(uuid())
-  authorId    String
-  author      User      @relation(fields: [authorId], references: [id])
-  body        String
-  publishedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id              String          @id @default(uuid())
+  authorId        String
+  author          User            @relation(fields: [authorId], references: [id])
+  body            String
+  moderationState ModerationState @default(CLEAN)
+  publishedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  likes           Like[]
+  comments        Comment[]
 
   @@index([publishedAt])
+  @@index([moderationState])
+  @@index([authorId, createdAt])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([postId, userId])
+}
+
+model Comment {
+  id              String          @id @default(uuid())
+  postId          String
+  post            Post            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId        String
+  author          User            @relation(fields: [authorId], references: [id])
+  body            String
+  moderationState ModerationState @default(CLEAN)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([postId, createdAt])
+  @@index([moderationState])
 }
 
 model Idea {

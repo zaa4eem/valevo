@@ -9,6 +9,7 @@ build/
 !.env.example
 apps/api/generated/
 apps/api/prisma/dev.db
+apps/api/uploads/
 *.tsbuildinfo
 test-results/
 playwright-report/

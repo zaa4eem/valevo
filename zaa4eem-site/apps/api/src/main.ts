@@ -1,12 +1,19 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
+import * as path from 'path';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false });
+
+  // Uploaded avatars live outside the `api` prefix (they're static files, not
+  // API responses) — served at /uploads/avatars/<file>, matching the URL
+  // avatar-storage.ts + UsersController build and store on the User row.
+  app.useStaticAssets(path.join(process.cwd(), 'uploads'), { prefix: '/uploads' });
 
   const webOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000')
     .split(',')

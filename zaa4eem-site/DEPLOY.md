@@ -73,8 +73,12 @@ Fill in:
 - `WEB_VIRTUAL_HOST=zaa4eem.ru,www.zaa4eem.ru`,
   `API_VIRTUAL_HOST=api.zaa4eem.ru`, `MINI_APP_URL=https://zaa4eem.ru`,
   `WEB_ORIGIN=https://zaa4eem.ru,https://www.zaa4eem.ru`,
-  `NEXT_PUBLIC_API_URL=https://api.zaa4eem.ru/api` — already correct in
+  `NEXT_PUBLIC_API_URL=https://api.zaa4eem.ru/api`,
+  `API_PUBLIC_URL=https://api.zaa4eem.ru` — already correct in
   `.env.example`, just confirm you didn't change the domain.
+  `API_PUBLIC_URL` (added in v1.0.1) is used server-side to build the
+  absolute URL for uploaded avatars; get the domain wrong here and avatars
+  will save with a broken image URL even though everything else works.
 - `OWNER_TELEGRAM_ID` and/or `OWNER_EMAIL` + `OWNER_PASSWORD` — whichever
   you want to log in with as the platform owner.
 
@@ -138,3 +142,7 @@ docker compose -f infra/docker-compose.yml exec api npm run prisma:migrate:deplo
   instead, `api` listens on `3001` and `web` on `3000` inside their
   containers — swap the `VIRTUAL_HOST`-based routing for whatever your new
   proxy needs.
+- Uploaded avatars (v1.0.1+) live on the named volume
+  `zaa4eem-api-uploads`, mounted at `/repo/apps/api/uploads` inside the
+  `api` container — they survive `docker compose up -d --build` rebuilds
+  the same way the Postgres data volume does.

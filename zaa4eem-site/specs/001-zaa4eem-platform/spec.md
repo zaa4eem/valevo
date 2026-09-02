@@ -330,12 +330,29 @@ Mini App.
 - **SC-007**: A returning player's best score and rank are visible on the
   leaderboard within 5 seconds of finishing a game session.
 
+## Post-MVP: v1.0.1
+
+Shipped after the MVP launch — supersedes the "comments/reactions/owner-only
+posting" assumptions below for the feed specifically (Ideas board scoping is
+unchanged):
+
+- Likes and comments on feed posts (comments pass the same moderation filter
+  as ideas/bios: held for owner review, never silently deleted).
+- Any logged-in user (not just the owner) may publish a feed post, limited to
+  one per 12 hours; the owner keeps unlimited/draft posting.
+- Real avatar image upload (JPEG/PNG/WEBP/GIF, 3MB limit) replacing the
+  URL-only avatar field.
+- A short "status" text next to a user's display name (profile + settings).
+- Mobile viewport tuning for the Telegram Mini App (pinned zoom, larger touch
+  targets, safe-area padding).
+
 ## Assumptions
 
 - Comments/reactions on posts and ideas, and direct messages between users,
   are explicitly **out of scope for MVP** (not selected when the social
   feature set was scoped) and are candidate Phase 2 features driven by the
-  Ideas board itself.
+  Ideas board itself. (Post comments/reactions shipped in v1.0.1 above —
+  idea comments and DMs remain out of scope.)
 - Guest (non-logged-in) users may browse the feed, Ideas board, and play the
   launch game, but must log in to submit ideas, vote, or save a score to a
   leaderboard — this "browse free, log in to participate" pattern is a

@@ -22,5 +22,27 @@ export const postSchema = z.object({
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
   }),
+  likeCount: z.number().int().nonnegative(),
+  commentCount: z.number().int().nonnegative(),
+  viewerHasLiked: z.boolean().optional(),
 });
 export type Post = z.infer<typeof postSchema>;
+
+export const createCommentSchema = z.object({
+  body: z.string().min(1).max(1000),
+});
+export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+export const commentSchema = z.object({
+  id: z.string().uuid(),
+  postId: z.string().uuid(),
+  body: z.string(),
+  moderationState: z.enum(['CLEAN', 'PENDING_REVIEW', 'APPROVED', 'REMOVED']),
+  createdAt: z.string(),
+  author: z.object({
+    id: z.string().uuid(),
+    displayName: z.string(),
+    avatarUrl: z.string().nullable(),
+  }),
+});
+export type Comment = z.infer<typeof commentSchema>;
