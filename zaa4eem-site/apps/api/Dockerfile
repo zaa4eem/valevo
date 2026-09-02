@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build context is the monorepo root (zaa4eem-site/), not this directory —
 # see infra/docker-compose.yml. Needed because npm workspaces require the
 # root package.json + lockfile to resolve @zaa4eem/shared.
@@ -13,7 +14,7 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/api/package.json apps/api/package.json
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY packages/shared packages/shared
 COPY apps/api apps/api
@@ -30,7 +31,7 @@ RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/api/package.json apps/api/package.json
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
 COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/apps/api/dist apps/api/dist

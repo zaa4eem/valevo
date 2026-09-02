@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Build context is the monorepo root (zaa4eem-site/) — see infra/docker-compose.yml.
 
 FROM node:20-slim AS build
@@ -5,7 +6,7 @@ WORKDIR /repo
 
 COPY package.json package-lock.json* ./
 COPY apps/bot/package.json apps/bot/package.json
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY apps/bot apps/bot
 RUN npm run build --workspace @zaa4eem/bot
@@ -16,7 +17,7 @@ ENV NODE_ENV=production
 
 COPY package.json package-lock.json* ./
 COPY apps/bot/package.json apps/bot/package.json
-RUN npm ci --omit=dev
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
 COPY --from=build /repo/apps/bot/dist apps/bot/dist
 
