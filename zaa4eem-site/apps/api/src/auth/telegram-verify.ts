@@ -57,7 +57,14 @@ export function verifyTelegramInitData(
   return { user, authDate };
 }
 
-/** Verifies the classic Telegram Login Widget payload (used on the plain website login page). */
+/**
+ * Verifies the classic Telegram Login Widget payload (used on the plain
+ * website login page). A valid HMAC alone isn't enough — without also
+ * checking `auth_date`, a captured (payload, hash) pair would stay valid
+ * forever and could be replayed to log in as that user at any point in the
+ * future. Mirrors the same freshness check verifyTelegramInitData applies
+ * to the Mini App path.
+ */
 export function verifyTelegramLoginWidget(
   data: Record<string, string | number>,
   botToken: string,
@@ -75,7 +82,14 @@ export function verifyTelegramLoginWidget(
 
   const computedBuf = Buffer.from(computedHash, 'hex');
   const providedBuf = Buffer.from(hash, 'hex');
-  return (
-    computedBuf.length === providedBuf.length && timingSafeEqual(computedBuf, providedBuf)
-  );
+  if (computedBuf.length !== providedBuf.length || !timingSafeEqual(computedBuf, providedBuf)) {
+    return false;
+  }
+
+  const authDate = Number(data.auth_date);
+  if (!authDate || Date.now() / 1000 - authDate > MAX_AUTH_AGE_SECONDS) {
+    return false;
+  }
+
+  return true;
 }

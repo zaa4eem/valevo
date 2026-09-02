@@ -1,5 +1,5 @@
-import { createHmac } from 'crypto';
-import { verifyTelegramInitData } from './telegram-verify';
+import { createHash, createHmac } from 'crypto';
+import { verifyTelegramInitData, verifyTelegramLoginWidget } from './telegram-verify';
 
 const BOT_TOKEN = 'test-bot-token-123456';
 
@@ -45,5 +45,48 @@ describe('verifyTelegramInitData', () => {
   it('rejects an expired auth_date', () => {
     const staleDate = (Math.floor(Date.now() / 1000) - 999_999).toString();
     expect(() => verifyTelegramInitData(buildInitData({ auth_date: staleDate }), BOT_TOKEN)).toThrow();
+  });
+});
+
+function buildWidgetPayload(overrides: Record<string, string> = {}): Record<string, string> {
+  const authDate = Math.floor(Date.now() / 1000).toString();
+  const fields: Record<string, string> = {
+    id: '42',
+    first_name: 'Zaa',
+    username: 'zaa4eem',
+    auth_date: authDate,
+    ...overrides,
+  };
+
+  const dataCheckString = Object.keys(fields)
+    .sort()
+    .map((key) => `${key}=${fields[key]}`)
+    .join('\n');
+
+  const secretKey = createHash('sha256').update(BOT_TOKEN).digest();
+  const hash = createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
+
+  return { ...fields, hash };
+}
+
+describe('verifyTelegramLoginWidget', () => {
+  it('accepts a correctly signed, fresh payload', () => {
+    expect(verifyTelegramLoginWidget(buildWidgetPayload(), BOT_TOKEN)).toBe(true);
+  });
+
+  it('rejects a payload signed with the wrong bot token', () => {
+    expect(verifyTelegramLoginWidget(buildWidgetPayload(), 'wrong-token')).toBe(false);
+  });
+
+  it('rejects a tampered field even if the hash is present', () => {
+    const payload = buildWidgetPayload({ username: 'evil' });
+    payload.username = 'zaa4eem'; // tamper after signing
+    expect(verifyTelegramLoginWidget(payload, BOT_TOKEN)).toBe(false);
+  });
+
+  it('rejects a stale auth_date even with a valid signature (replay protection)', () => {
+    const staleDate = (Math.floor(Date.now() / 1000) - 999_999).toString();
+    const payload = buildWidgetPayload({ auth_date: staleDate });
+    expect(verifyTelegramLoginWidget(payload, BOT_TOKEN)).toBe(false);
   });
 });
