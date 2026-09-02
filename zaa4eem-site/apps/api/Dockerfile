@@ -5,6 +5,11 @@
 FROM node:20-slim AS build
 WORKDIR /repo
 
+# node:20-slim (Debian) ships without libssl by default; Prisma's engine
+# needs it both to detect the right binary target at `prisma generate`
+# time (build stage) and to actually load the engine at runtime.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/api/package.json apps/api/package.json
@@ -19,6 +24,8 @@ RUN npm run build --workspace @zaa4eem/api
 FROM node:20-slim AS runtime
 WORKDIR /repo
 ENV NODE_ENV=production
+
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
