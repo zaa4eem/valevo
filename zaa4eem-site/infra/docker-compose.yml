@@ -42,6 +42,11 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      # NEXT_PUBLIC_* vars must reach `next build` at image-build time, not
+      # just the running container — see the ARG/ENV lines in the Dockerfile.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+        NEXT_PUBLIC_TELEGRAM_BOT_USERNAME: ${NEXT_PUBLIC_TELEGRAM_BOT_USERNAME}
     container_name: zaa4eem-web
     restart: unless-stopped
     env_file: .env

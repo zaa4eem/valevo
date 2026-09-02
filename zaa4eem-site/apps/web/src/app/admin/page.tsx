@@ -1,17 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import type { AdminStats } from '@zaa4eem/shared';
-import { api } from '@/lib/api-client';
+import { useApiData } from '@/lib/use-api-data';
 import { StatTile } from '@/components/StatTile';
 
 export default function AdminOverviewPage() {
-  const [stats, setStats] = useState<AdminStats | null>(null);
+  const { data: stats, error } = useApiData<AdminStats>('/admin/stats');
 
-  useEffect(() => {
-    api.get<AdminStats>('/admin/stats').then(setStats);
-  }, []);
-
+  if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить статистику.</p>;
   if (!stats) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   return (

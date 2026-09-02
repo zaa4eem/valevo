@@ -19,14 +19,20 @@ interface ModerationQueue {
 export default function AdminModerationPage() {
   const [queue, setQueue] = useState<ModerationQueue | null>(null);
   const [log, setLog] = useState<ModerationLogEntry[]>([]);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
-    const [q, l] = await Promise.all([
-      api.get<ModerationQueue>('/admin/moderation-queue'),
-      api.get<ModerationLogEntry[]>('/admin/moderation-log'),
-    ]);
-    setQueue(q);
-    setLog(l);
+    setError(false);
+    try {
+      const [q, l] = await Promise.all([
+        api.get<ModerationQueue>('/admin/moderation-queue'),
+        api.get<ModerationLogEntry[]>('/admin/moderation-log'),
+      ]);
+      setQueue(q);
+      setLog(l);
+    } catch {
+      setError(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -43,6 +49,7 @@ export default function AdminModerationPage() {
     load();
   }
 
+  if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить модерацию.</p>;
   if (!queue) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   return (

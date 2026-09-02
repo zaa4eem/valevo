@@ -12,12 +12,19 @@ export default function IdeasPage() {
   const [sort, setSort] = useState<'top' | 'new'>('top');
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await api.get<Idea[]>(`/ideas?sort=${sort}`);
-    setIdeas(data);
-    setLoading(false);
+    setError(false);
+    try {
+      const data = await api.get<Idea[]>(`/ideas?sort=${sort}`);
+      setIdeas(data);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, [sort]);
 
   useEffect(() => {
@@ -59,7 +66,9 @@ export default function IdeasPage() {
         </button>
       </div>
 
-      {loading ? (
+      {error ? (
+        <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить идеи. Попробуйте обновить страницу.</p>
+      ) : loading ? (
         <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>
       ) : ideas.length === 0 ? (
         <p style={{ color: 'var(--z-text-muted)' }}>

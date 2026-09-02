@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import type { Post } from '@zaa4eem/shared';
-import { api } from '@/lib/api-client';
+import { useApiData } from '@/lib/use-api-data';
 import { Card } from '@/components/Card';
 
 function formatDate(iso: string) {
@@ -10,11 +9,7 @@ function formatDate(iso: string) {
 }
 
 export default function HomeFeedPage() {
-  const [posts, setPosts] = useState<Post[] | null>(null);
-
-  useEffect(() => {
-    api.get<Post[]>('/posts').then(setPosts);
-  }, []);
+  const { data: posts, error } = useApiData<Post[]>('/posts');
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
@@ -28,7 +23,9 @@ export default function HomeFeedPage() {
         <p style={{ color: 'var(--z-text-muted)' }}>комьюнити · стримы · squad</p>
       </div>
 
-      {posts === null ? (
+      {error ? (
+        <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить ленту. Попробуйте обновить страницу.</p>
+      ) : posts === null ? (
         <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>
       ) : posts.length === 0 ? (
         <p style={{ color: 'var(--z-text-muted)' }}>Пока нет постов — скоро здесь появятся новости.</p>

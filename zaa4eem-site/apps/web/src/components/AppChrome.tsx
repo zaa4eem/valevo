@@ -5,12 +5,13 @@ import { useAuth } from '@/lib/auth-context';
 import { Navbar } from './Navbar';
 
 /**
- * Hides the normal website navbar when running inside the Telegram Mini
- * App — Telegram provides its own chrome (back button, theming) per
- * research.md §1 / Constitution Principle III.
+ * Telegram's WebView is just a regular viewport — it doesn't provide its
+ * own in-app navigation between sections, so the Navbar stays visible
+ * there too (previously hidden, which left the Mini App with no way to
+ * move between Feed/Ideas/Games/Leaderboard at all).
  */
 export function AppChrome({ children }: { children: ReactNode }) {
-  const { isTelegram, loading } = useAuth();
+  const { loading } = useAuth();
 
   if (loading) {
     return (
@@ -22,8 +23,8 @@ export function AppChrome({ children }: { children: ReactNode }) {
 
   return (
     <>
-      {!isTelegram && <Navbar />}
-      <main className={isTelegram ? '' : 'z-container'} style={{ paddingTop: isTelegram ? 12 : 24, paddingBottom: 48 }}>
+      <Navbar />
+      <main className="z-container" style={{ paddingTop: 24, paddingBottom: 48 }}>
         {children}
       </main>
     </>

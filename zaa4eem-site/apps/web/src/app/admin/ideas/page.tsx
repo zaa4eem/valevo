@@ -17,12 +17,19 @@ const STATUS_FLOW: { value: IdeaStatus; label: string }[] = [
 export default function AdminIdeasPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const data = await api.get<Idea[]>('/ideas?sort=new');
-    setIdeas(data);
-    setLoading(false);
+    setError(false);
+    try {
+      const data = await api.get<Idea[]>('/ideas?sort=new');
+      setIdeas(data);
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -44,6 +51,7 @@ export default function AdminIdeasPage() {
     load();
   }
 
+  if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить идеи.</p>;
   if (loading) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   return (

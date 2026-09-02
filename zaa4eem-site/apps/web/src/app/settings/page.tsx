@@ -13,20 +13,25 @@ export default function SettingsPage() {
   const [bio, setBio] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!user) return;
-    api.get<PublicProfile>('/users/me').then((p) => {
-      setProfile(p);
-      setDisplayName(p.displayName);
-      setBio(p.bio ?? '');
-      setAvatarUrl(p.avatarUrl ?? '');
-    });
+    api.get<PublicProfile>('/users/me').then(
+      (p) => {
+        setProfile(p);
+        setDisplayName(p.displayName);
+        setBio(p.bio ?? '');
+        setAvatarUrl(p.avatarUrl ?? '');
+      },
+      () => setLoadError(true),
+    );
   }, [user]);
 
   if (loading) return null;
   if (!user) return <p style={{ color: 'var(--z-text-muted)' }}>Нужно войти.</p>;
+  if (loadError) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить профиль.</p>;
   if (!profile) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   async function onSave(e: React.FormEvent) {

@@ -4,6 +4,16 @@
 FROM node:20-slim AS build
 WORKDIR /repo
 
+# NEXT_PUBLIC_* vars are inlined into the client JS bundle at build time —
+# they must be passed as build ARGs (see infra/docker-compose.yml's
+# `build.args`), not just set on the running container, or the browser
+# bundle ships with them undefined (and every client-side fetch silently
+# points at the fallback/nothing).
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_TELEGRAM_BOT_USERNAME
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_TELEGRAM_BOT_USERNAME=${NEXT_PUBLIC_TELEGRAM_BOT_USERNAME}
+
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
 COPY apps/web/package.json apps/web/package.json

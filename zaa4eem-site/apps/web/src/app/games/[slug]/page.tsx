@@ -13,16 +13,22 @@ export default function GameDetailPage() {
   const params = useParams<{ slug: string }>();
   const { user } = useAuth();
   const [game, setGame] = useState<Game | null>(null);
+  const [error, setError] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   const loadLeaderboard = useCallback(async () => {
-    const data = await api.get<LeaderboardEntry[]>(`/games/${params.slug}/leaderboard`);
-    setLeaderboard(data);
+    try {
+      const data = await api.get<LeaderboardEntry[]>(`/games/${params.slug}/leaderboard`);
+      setLeaderboard(data);
+    } catch {
+      // Non-fatal: the game itself can still be shown/played without a leaderboard.
+    }
   }, [params.slug]);
 
   useEffect(() => {
-    api.get<Game>(`/games/${params.slug}`).then(setGame);
+    setError(false);
+    api.get<Game>(`/games/${params.slug}`).then(setGame, () => setError(true));
     loadLeaderboard();
   }, [params.slug, loadLeaderboard]);
 
@@ -36,6 +42,7 @@ export default function GameDetailPage() {
     loadLeaderboard();
   }
 
+  if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить игру.</p>;
   if (!game) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   return (
