@@ -50,6 +50,10 @@ services:
       VIRTUAL_PORT: '3000'
       LETSENCRYPT_HOST: ${WEB_VIRTUAL_HOST}
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
+      # Override the shared .env's PORT=3001 (meant for `api`) — Next.js's
+      # standalone server also reads PORT and would otherwise bind to 3001,
+      # while nginx-proxy connects on VIRTUAL_PORT=3000 above → 502.
+      PORT: '3000'
     depends_on:
       - api
     expose:
