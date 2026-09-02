@@ -116,6 +116,18 @@ export default function LoginPage() {
         >
           {mode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
         </button>
+
+        <p style={{ marginTop: 16, fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', textAlign: 'center' }}>
+          Регистрируясь, вы соглашаетесь с{' '}
+          <a href="/legal/terms" style={{ color: 'var(--z-text-muted)' }}>
+            Пользовательским соглашением
+          </a>{' '}
+          и{' '}
+          <a href="/legal/privacy" style={{ color: 'var(--z-text-muted)' }}>
+            Политикой обработки персональных данных
+          </a>
+          .
+        </p>
       </Card>
     </div>
   );

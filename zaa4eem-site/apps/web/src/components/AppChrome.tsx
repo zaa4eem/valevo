@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Navbar } from './Navbar';
+import { Footer } from './Footer';
 
 /**
  * Telegram's WebView is just a regular viewport — it doesn't provide its
@@ -22,11 +23,12 @@ export function AppChrome({ children }: { children: ReactNode }) {
   }
 
   return (
-    <>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
-      <main className="z-container" style={{ paddingTop: 24, paddingBottom: 48 }}>
+      <main className="z-container" style={{ paddingTop: 24, paddingBottom: 48, flex: 1 }}>
         {children}
       </main>
-    </>
+      <Footer />
+    </div>
   );
 }
