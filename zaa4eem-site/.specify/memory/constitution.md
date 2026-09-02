@@ -59,8 +59,9 @@ basic filter. Complexity is added only once real usage demonstrates the need.
 - Telegram authentication MUST be verified server-side using Telegram's
   official `initData` / login-widget HMAC verification — never trust
   client-supplied Telegram identity claims unverified.
-- Passwords (for the email/password fallback) MUST be hashed with a modern
-  algorithm (bcrypt/argon2); plaintext or reversible storage is forbidden.
+- Passwords (for the email/password fallback) MUST be hashed with a modern,
+  salted algorithm (scrypt/bcrypt/argon2); plaintext or reversible storage
+  is forbidden.
 - Idea submissions, comments, and profile fields are rate-limited to prevent
   spam and abuse.
 - Every moderation action (content removed, idea rejected/approved, user

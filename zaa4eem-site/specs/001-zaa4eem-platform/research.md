@@ -36,7 +36,10 @@ instead of a structural guarantee.
   `auth_date` freshness window, then creates/looks up the User by
   `telegramId`.
 - **Email/password**: standard NestJS + Passport local strategy; password
-  hashed with **argon2**.
+  hashed with Node's built-in **`crypto.scrypt`** (salted, RFC-7914 KDF) —
+  chosen over argon2/bcrypt specifically to avoid a native-compiled
+  dependency in the Docker build/deploy pipeline, with no loss of security
+  posture at this scale.
 - Both paths issue the same short-lived **JWT access token** (in an
   `httpOnly`, `Secure`, `SameSite=Lax` cookie for the web, and in-memory for
   the Telegram WebView context where cookies can be unreliable — falls back

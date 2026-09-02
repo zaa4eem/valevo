@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  OWNER
+  SUBSCRIBER
+}
+
+enum UserStatus {
+  ACTIVE
+  MUTED
+  BANNED
+}
+
+enum IdeaStatus {
+  NEW
+  UNDER_REVIEW
+  ACCEPTED
+  IN_PROGRESS
+  SHIPPED
+  DECLINED
+}
+
+enum ModerationState {
+  CLEAN
+  PENDING_REVIEW
+  APPROVED
+  REMOVED
+}
+
+enum ScoreReviewState {
+  NORMAL
+  HELD_FOR_REVIEW
+}
+
+enum ModerationTargetType {
+  IDEA
+  POST
+  USER
+  SCORE
+}
+
+model User {
+  id                String     @id @default(uuid())
+  role              UserRole   @default(SUBSCRIBER)
+  status            UserStatus @default(ACTIVE)
+  displayName       String
+  avatarUrl         String?
+  bio               String?
+  telegramId        BigInt?    @unique
+  telegramUsername  String?
+  email             String?    @unique
+  passwordHash      String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  posts             Post[]
+  ideas             Idea[]
+  votes             Vote[]
+  scores            Score[]
+  refreshTokens     RefreshToken[]
+  moderationActions ModerationLogEntry[] @relation("ModerationActor")
+
+  @@index([role])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Post {
+  id          String    @id @default(uuid())
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  body        String
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([publishedAt])
+}
+
+model Idea {
+  id               String          @id @default(uuid())
+  submitterId      String
+  submitter        User            @relation(fields: [submitterId], references: [id])
+  title            String
+  description      String
+  status           IdeaStatus      @default(NEW)
+  moderationState  ModerationState @default(CLEAN)
+  voteCount        Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  votes            Vote[]
+
+  @@index([status])
+  @@index([moderationState])
+  @@index([voteCount])
+}
+
+model Vote {
+  id        String   @id @default(uuid())
+  ideaId    String
+  idea      Idea     @relation(fields: [ideaId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([ideaId, userId])
+}
+
+model Game {
+  id                String   @id @default(uuid())
+  slug              String   @unique
+  title             String
+  description       String
+  thumbnailUrl      String?
+  maxPlausibleScore Int
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  scores            Score[]
+}
+
+model Score {
+  id           String            @id @default(uuid())
+  gameId       String
+  game         Game              @relation(fields: [gameId], references: [id])
+  userId       String
+  user         User              @relation(fields: [userId], references: [id])
+  value        Int
+  reviewState  ScoreReviewState  @default(NORMAL)
+  createdAt    DateTime          @default(now())
+
+  @@index([gameId, userId])
+  @@index([gameId, value])
+}
+
+model ModerationLogEntry {
+  id         String               @id @default(uuid())
+  actorId    String
+  actor      User                 @relation("ModerationActor", fields: [actorId], references: [id])
+  targetType ModerationTargetType
+  targetId   String
+  action     String
+  reason     String?
+  createdAt  DateTime             @default(now())
+
+  @@index([targetType, targetId])
+}

@@ -22,8 +22,8 @@ under RF data-residency and content-moderation constraints.
 
 **Primary Dependencies**: Next.js 14 (App Router) for `apps/web`; NestJS 10
 + Prisma ORM for `apps/api`; grammy for `apps/bot`; Zod for shared
-validation schemas (`packages/shared`); argon2 + `@nestjs/jwt` for auth;
-`@nestjs/throttler` for rate limiting.
+validation schemas (`packages/shared`); `crypto.scrypt` (Node built-in) +
+`@nestjs/jwt` for auth; `@nestjs/throttler` for rate limiting.
 
 **Storage**: PostgreSQL 16 (single database, one schema — see data-model.md).
 

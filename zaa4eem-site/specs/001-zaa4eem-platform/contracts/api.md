@@ -8,7 +8,8 @@ or the `zaa4eem_session` cookie (web). Endpoints marked **Owner** require
 
 | Method | Path | Auth | Body → Response |
 |---|---|---|---|
-| POST | `/auth/telegram` | public | `{ initData: string }` → `{ user, accessToken }` — verifies per research.md §2 |
+| POST | `/auth/telegram` | public | `{ initData: string }` → `{ user, accessToken }` — Mini App auth, verifies per research.md §2 |
+| POST | `/auth/telegram/widget` | public | classic Telegram Login Widget payload (`id`, `hash`, ...) → `{ user, accessToken }` — plain-browser login page path |
 | POST | `/auth/register` | public | `{ email, password, displayName }` → `{ user, accessToken }` |
 | POST | `/auth/login` | public | `{ email, password }` → `{ user, accessToken }` |
 | POST | `/auth/refresh` | cookie | rotates refresh token → `{ accessToken }` |

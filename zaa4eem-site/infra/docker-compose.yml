@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: zaa4eem-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - zaa4eem-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    container_name: zaa4eem-api
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - '3001'
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    container_name: zaa4eem-web
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - api
+    expose:
+      - '3000'
+
+  bot:
+    build:
+      context: ..
+      dockerfile: apps/bot/Dockerfile
+    container_name: zaa4eem-bot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: zaa4eem-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/zaa4eem.conf:/etc/nginx/conf.d/zaa4eem.conf:ro
+      - zaa4eem-certbot-www:/var/www/certbot
+      - zaa4eem-certbot-certs:/etc/letsencrypt
+    depends_on:
+      - api
+      - web
+
+  certbot:
+    image: certbot/certbot
+    container_name: zaa4eem-certbot
+    volumes:
+      - zaa4eem-certbot-www:/var/www/certbot
+      - zaa4eem-certbot-certs:/etc/letsencrypt
+    entrypoint: >
+      sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;"
+
+volumes:
+  zaa4eem-postgres-data:
+  zaa4eem-certbot-www:
+  zaa4eem-certbot-certs:

@@ -1,0 +1,198 @@
+/*
+ * ZAA4EEM design tokens — Constitution Principle V.
+ * Near-black surfaces + neon/mint-green accent, derived from the
+ * ZAA4EEM logo/banner reference, fused with a Bankdash-style card/sidebar
+ * dashboard structure for admin + profile/stat surfaces.
+ */
+
+:root {
+  /* Surfaces */
+  --z-bg: #0b0e0d;
+  --z-bg-elevated: #101412;
+  --z-surface: #141918;
+  --z-surface-hover: #1a201e;
+  --z-border: #232b28;
+
+  /* Text */
+  --z-text: #f4f7f5;
+  --z-text-muted: #8fa39a;
+  --z-text-faint: #5b6b65;
+
+  /* Accent — the ZAA4EEM green */
+  --z-accent: #4ade80;
+  --z-accent-strong: #22c55e;
+  --z-accent-soft: rgba(74, 222, 128, 0.14);
+  --z-accent-text-on: #04150a;
+
+  /* Status */
+  --z-danger: #f87171;
+  --z-warning: #fbbf24;
+  --z-info: #60a5fa;
+
+  /* Type scale */
+  --z-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --z-font-display: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --z-fs-xs: 0.75rem;
+  --z-fs-sm: 0.875rem;
+  --z-fs-base: 1rem;
+  --z-fs-lg: 1.125rem;
+  --z-fs-xl: 1.5rem;
+  --z-fs-2xl: 2rem;
+  --z-fs-3xl: 2.75rem;
+
+  /* Shape */
+  --z-radius-sm: 8px;
+  --z-radius-md: 14px;
+  --z-radius-lg: 20px;
+  --z-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--z-bg);
+  color: var(--z-text);
+  font-family: var(--z-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+}
+
+::selection {
+  background: var(--z-accent-soft);
+  color: var(--z-text);
+}
+
+.z-container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+.z-accent-text {
+  color: var(--z-accent);
+}
+
+.z-square-bullet::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--z-accent);
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.z-btn-accent,
+.z-btn-ghost,
+.z-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: var(--z-fs-sm);
+  font-weight: 600;
+  border-radius: var(--z-radius-sm);
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.z-btn-accent {
+  background: var(--z-accent);
+  color: var(--z-accent-text-on);
+}
+.z-btn-accent:hover {
+  opacity: 0.9;
+}
+
+.z-btn-ghost {
+  background: transparent;
+  color: var(--z-text-muted);
+  border-color: var(--z-border);
+}
+.z-btn-ghost:hover {
+  color: var(--z-text);
+  border-color: var(--z-text-muted);
+}
+
+.z-btn-danger {
+  background: transparent;
+  color: var(--z-danger);
+  border-color: var(--z-danger);
+}
+
+.z-input,
+.z-textarea {
+  width: 100%;
+  background: var(--z-bg-elevated);
+  border: 1px solid var(--z-border);
+  border-radius: var(--z-radius-sm);
+  color: var(--z-text);
+  font-family: inherit;
+  font-size: var(--z-fs-base);
+  padding: 10px 12px;
+}
+
+.z-input:focus,
+.z-textarea:focus {
+  outline: none;
+  border-color: var(--z-accent);
+}
+
+.z-badge {
+  display: inline-block;
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+}
+
+/* Responsive: mobile is the primary surface given the Telegram audience. */
+.z-navbar-links {
+  display: flex;
+  gap: 20px;
+}
+
+.z-game-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 720px) {
+  .z-container {
+    padding: 0 14px;
+  }
+
+  .z-navbar-links {
+    gap: 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .z-game-layout {
+    grid-template-columns: 1fr;
+  }
+}

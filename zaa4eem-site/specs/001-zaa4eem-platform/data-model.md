@@ -19,7 +19,7 @@ Represents a registered person — the platform owner or a subscriber.
 | telegramId | bigint? | unique, nullable — set when Telegram identity linked |
 | telegramUsername | string? | cached display value only |
 | email | string? | unique, nullable — set when email/password identity linked |
-| passwordHash | string? | argon2 hash, nullable (Telegram-only users have none) |
+| passwordHash | string? | salted scrypt hash, nullable (Telegram-only users have none) |
 | createdAt | datetime | |
 | updatedAt | datetime | |
 
