@@ -32,6 +32,13 @@ COPY --from=build /repo/apps/api/prisma apps/api/prisma
 # `prisma generate` writes next to it) to the repo-root node_modules, not
 # apps/api/node_modules — copy from there.
 COPY --from=build /repo/node_modules/.prisma node_modules/.prisma
+# `prisma migrate deploy` and the ts-node-run seed script (prisma:seed) are
+# invoked directly against this production image via `docker compose exec`
+# — they need the TS source + a real tsconfig.json (ts-node's defaults
+# without one are unreliable), not just the compiled `dist/` the server
+# itself runs from.
+COPY --from=build /repo/apps/api/src apps/api/src
+COPY apps/api/tsconfig.json apps/api/tsconfig.json
 
 WORKDIR /repo/apps/api
 EXPOSE 3001
