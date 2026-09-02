@@ -21,6 +21,13 @@ RUN --mount=type=cache,target=/repo/apps/web/.next/cache \
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# Docker auto-sets HOSTNAME to the container's own short ID, and Next.js's
+# standalone server.js binds to whatever HOSTNAME resolves to instead of
+# all interfaces. With multiple Docker networks attached, that resolves via
+# /etc/hosts to only ONE of them — so anything connecting from the other
+# network (e.g. nginx-proxy) gets "connection refused" even though the
+# server logs "Ready". Force binding to all interfaces explicitly.
+ENV HOSTNAME=0.0.0.0
 
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
