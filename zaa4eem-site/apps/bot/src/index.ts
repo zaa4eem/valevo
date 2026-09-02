@@ -23,7 +23,7 @@ bot.api
 bot.command('start', async (ctx) => {
   const keyboard = new InlineKeyboard().webApp('Открыть ZAA4EEM 🟢', webOrigin);
   await ctx.reply(
-    'ZAA4EEM — комьюнити, идеи и мини-игры.\n\nПредлагай идеи, играй в мини-игры, следи за лентой — всё в одном месте.',
+    'ZAA4EEM — идеи и мини-игры.\n\nПредлагай идеи, играй в мини-игры, следи за лентой — всё в одном месте.',
     { reply_markup: keyboard },
   );
 });

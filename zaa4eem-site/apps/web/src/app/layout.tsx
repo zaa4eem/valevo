@@ -6,7 +6,7 @@ import { AppChrome } from '@/components/AppChrome';
 
 export const metadata: Metadata = {
   title: 'ZAA4EEM',
-  description: 'ZAA4EEM — комьюнити, идеи и мини-игры. No signal · still here.',
+  description: 'ZAA4EEM — идеи и мини-игры.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

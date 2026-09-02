@@ -14,13 +14,9 @@ export default function HomeFeedPage() {
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <div style={{ marginBottom: 24 }}>
-        <div className="z-square-bullet" style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-xs)', fontWeight: 700, letterSpacing: 1 }}>
-          NO SIGNAL · STILL HERE
-        </div>
-        <h1 style={{ fontSize: 'var(--z-fs-3xl)', margin: '8px 0 4px', fontWeight: 900 }}>
+        <h1 style={{ fontSize: 'var(--z-fs-3xl)', margin: 0, fontWeight: 900 }}>
           ZAA<span className="z-accent-text">4</span>EEM
         </h1>
-        <p style={{ color: 'var(--z-text-muted)' }}>комьюнити · стримы · squad</p>
       </div>
 
       {error ? (

@@ -8,7 +8,6 @@ test.describe('Feed & profiles (US3)', () => {
   test('a logged-out visitor can read the home feed', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'ZAA4EEM' })).toBeVisible();
-    await expect(page.getByText('комьюнити · стримы · squad')).toBeVisible();
   });
 
   test('a visitor can open any user’s public profile', async ({ page, request }) => {
