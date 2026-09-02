@@ -7,7 +7,7 @@
 
 import { registerScreen, push } from "../../router.js";
 import { api } from "../../api.js";
-import { el, clear, emptyState, errorState, mountAsync, toastSuccess, toastError, toastWarning } from "../../ui.js";
+import { el, clear, emptyState, errorState, mountAsync, spinnerBlock, toastSuccess, toastError, toastWarning } from "../../ui.js";
 import { haptic } from "../../telegram.js";
 import { formatRub, initials } from "../../format.js";
 
@@ -199,6 +199,46 @@ function drawDetail(container, p) {
     numberCard.appendChild(el("div", { class: "field" }, [numberInput]));
     numberCard.appendChild(numberBtn);
     container.appendChild(numberCard);
+
+    // Роулетка: своя карточка, грузится отдельно и не блокирует остальной
+    // экран (specs/001-roulette-spin-audit) — реального объёма истории мало,
+    // но список нужен именно "по требованию", а не в основном payload'е пилота.
+    const spinsCard = el("div", { class: "card" });
+    spinsCard.appendChild(el("div", { class: "card-title" }, "🎰 История спинов"));
+    const spinsBody = el("div", {}, [spinnerBlock()]);
+    spinsCard.appendChild(spinsBody);
+    container.appendChild(spinsCard);
+    loadSpinHistory(spinsBody, p.telegram_id);
+}
+
+const SPIN_STATUS_LABEL = { ok: "выдан", queued: "в очереди", failed: "ошибка" };
+
+function spinStatusBadge(status) {
+    const cls = status === "ok" ? "badge-cyan" : status === "queued" ? "badge-amber" : "badge-danger";
+    return el("span", { class: `badge ${cls}` }, SPIN_STATUS_LABEL[status] || status);
+}
+
+async function loadSpinHistory(container, telegramId) {
+    const res = await api.get(`/api/admin/pilots/${telegramId}/spins`);
+    clear(container);
+    if (!res.ok) { container.appendChild(errorState(res.error, () => loadSpinHistory(container, telegramId))); return; }
+
+    const spins = (res.data && res.data.spins) || [];
+    if (spins.length === 0) {
+        container.appendChild(el("div", { class: "state-text", style: "text-align:center;padding:6px 0;" }, "Пока не крутил рулетку."));
+        return;
+    }
+
+    spins.forEach((s) => {
+        const valueText = s.kind === "bonus" ? `+${s.value} ₽` : `+${s.value} рейтинга`;
+        container.appendChild(el("div", { class: "kv-row" }, [
+            el("span", { class: "k" }, `${s.emoji} ${s.title}`),
+            el("div", { style: "display:flex;align-items:center;gap:8px;" }, [
+                el("span", { class: "v" }, valueText),
+                spinStatusBadge(s.status),
+            ]),
+        ]));
+    });
 }
 
 function renderPilotDetail(container, params) {

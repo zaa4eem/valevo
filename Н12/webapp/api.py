@@ -46,6 +46,7 @@ from database.db import (
     get_pilot_by_number,
     get_pilot_by_telegram_id,
     get_pilot_class,
+    get_pilot_spin_history,
     get_pending_time_request,
     get_pending_time_requests_for_admin,
     get_time_request,
@@ -65,6 +66,10 @@ from services.nickname import sanitize_pilot_name
 from services.phone_normalizer import normalize_phone_for_bot, normalize_phone_for_yclients
 from services.profile_service import get_profile_data
 from services.roulette import SPIN_COST_RUB, SpinError, prize_catalog, spin as roulette_spin
+
+# Кэшируется один раз при импорте — каталог статичен (см. assert len(PRIZES)==20
+# в services/roulette.py), пересчитывать на каждый запрос смысла нет.
+PRIZE_CATALOG_BY_CODE = {p["code"]: p for p in prize_catalog()}
 from services.tournament import month_bounds
 from services.weekcup_service import close_weekcup
 from services.yclients_auto import auto_sync_pilot_with_yclients, issue_or_queue_valevo_bonus
@@ -604,6 +609,29 @@ async def api_admin_pilot_detail(
         "tournament_class": await get_pilot_class(telegram_id),
         "bonus_balance": round(float(bonus_balance or 0), 2),
     }
+
+
+@app.get("/api/admin/pilots/{telegram_id}/spins")
+async def api_admin_pilot_spins(
+    telegram_id: int,
+    _user: TelegramWebAppUser = Depends(require_admin),
+) -> dict[str, Any]:
+    """История спинов рулетки (specs/001-roulette-spin-audit) — админ отвечает
+    пилоту на "почему списались деньги"/"где мой приз" без прямого доступа к БД."""
+    rows = await get_pilot_spin_history(telegram_id)
+    spins = []
+    for row in rows:
+        prize = PRIZE_CATALOG_BY_CODE.get(row["prize_code"])
+        spins.append({
+            "prize_code": row["prize_code"],
+            "emoji": prize["emoji"] if prize else "🎰",
+            "title": prize["title"] if prize else row["prize_code"],
+            "kind": row["prize_kind"],
+            "value": row["prize_value"],
+            "status": row["prize_status"],
+            "created_at": row["created_at"],
+        })
+    return {"spins": spins}
 
 
 class RatingBody(BaseModel):
