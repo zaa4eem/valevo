@@ -15,3 +15,8 @@ dist/
 *.exe
 .venv/
 venv/
+
+# Spec Kit (github.com/github/spec-kit) — рабочий инструмент Claude Code для
+# этой сессии, сознательно не часть репозитория проекта.
+.claude/
+.specify/
