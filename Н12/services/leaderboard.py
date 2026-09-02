@@ -1,8 +1,8 @@
 import html
 
 from data.tournament import CLASS_LADDER, min_starts_for_class
-from database.db import get_all_pilot_display_names
-from services.tournament import load_month_snapshot, month_bounds, rank_month_overall
+from database.db import get_all_class_benchmarks, get_all_pilot_display_names
+from services.tournament import load_month_snapshot, month_bounds, month_participant_ids, rank_month_overall
 from utils.message_style import DIVIDER
 from utils.time_parser import format_ms_to_time
 
@@ -227,7 +227,9 @@ async def _build_overall_standings_block(month_key: str, start_iso: str, end_iso
     return "\n".join(lines)
 
 
-async def _class_standings_data(class_name: str, month_key: str, start_iso: str, end_iso: str) -> dict | None:
+async def _class_standings_data(
+    class_name: str, month_key: str, start_iso: str, end_iso: str, names: dict[int, str],
+) -> dict | None:
     """JSON-friendly twin of _build_class_block — same qualifying/pending
     computation, structured for the Mini App instead of formatted as HTML."""
     from services.tournament import live_class_score
@@ -240,7 +242,7 @@ async def _class_standings_data(class_name: str, month_key: str, start_iso: str,
         result = await live_class_score(telegram_id, class_name, month_key, start_iso, end_iso)
         if result["starts"] <= 0:
             continue
-        display = await _pilot_display(telegram_id)
+        display = _name_from(names, telegram_id)
         if result["qualifies"] and result["score"] is not None:
             qualifying.append({"telegram_id": telegram_id, "display_name": display, "score": result["score"]})
         else:
@@ -270,12 +272,13 @@ async def get_tournament_leaderboard_data() -> dict:
     /api/leaderboard мини-приложения вместо HTML-текста для бота."""
     month_key, start_iso, end_iso = month_bounds()
     benchmarks = await get_all_class_benchmarks(month_key)
+    names = await get_all_pilot_display_names()
 
     classes = []
     for class_name in CLASS_LADDER:
         if class_name not in benchmarks:
             continue
-        block = await _class_standings_data(class_name, month_key, start_iso, end_iso)
+        block = await _class_standings_data(class_name, month_key, start_iso, end_iso, names)
         if block:
             classes.append(block)
 
@@ -286,7 +289,7 @@ async def get_tournament_leaderboard_data() -> dict:
             "place": i + 1,
             "medal": MEDALS[i] if i < len(MEDALS) else f"{i + 1}.",
             "telegram_id": r["telegram_id"],
-            "display_name": await _pilot_display(r["telegram_id"]),
+            "display_name": _name_from(names, r["telegram_id"]),
             "total": r["total"],
             "total_text": _format_score(r["total"]),
             "breakdown": r["breakdown"],
