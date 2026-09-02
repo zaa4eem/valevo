@@ -8,8 +8,11 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false });
 
-  const webOrigin = process.env.WEB_ORIGIN ?? 'http://localhost:3000';
-  app.enableCors({ origin: webOrigin, credentials: true });
+  const webOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.enableCors({ origin: webOrigins, credentials: true });
 
   app.use(cookieParser());
   app.setGlobalPrefix('api');

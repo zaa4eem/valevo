@@ -110,8 +110,8 @@ zaa4eem-site/
 ├── packages/
 │   └── shared/                   # Zod schemas + TS types imported by web, api, and bot
 ├── infra/
-│   ├── docker-compose.yml         # postgres + api + web + bot, joined to shared reverse-proxy network
-│   ├── nginx/zaa4eem.conf         # site block for zaa4eem.ru (TLS via existing/new Certbot setup)
+│   ├── docker-compose.yml         # postgres + api + web + bot; web/api join the VPS's existing
+│   │                              # nginx-proxy + acme-companion network (see research.md §7)
 │   └── .env.example
 └── specs/001-zaa4eem-platform/    # this spec-kit feature
 ```

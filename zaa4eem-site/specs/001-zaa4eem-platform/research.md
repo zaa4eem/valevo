@@ -114,9 +114,19 @@ behind shared infra can share IPs.
 — `apps/web` (Next.js), `apps/api` (NestJS), `apps/bot` (small grammy-based
 Telegram bot process) — plus `packages/shared` for Zod schemas/types used by
 all three. Each app gets its own Dockerfile; `infra/docker-compose.yml`
-composes `web`, `api`, `bot`, `postgres`, joined to the same reverse-proxy
-network `Н12`'s bot already runs behind (or a new Nginx site block if none
-exists), fronted by Nginx + Certbot for `zaa4eem.ru` TLS.
+composes `web`, `api`, `bot`, `postgres`.
+
+**Update (deployment time)**: the target VPS turned out to already run
+[`nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) +
+[`nginx-proxy-acme`](https://github.com/nginx-proxy/acme-companion) (on
+Docker network `proxy`) as its shared reverse proxy — confirmed via
+`docker ps`/`docker inspect` on the VPS, not guessed. So `web` and `api`
+join that existing `proxy` network and set `VIRTUAL_HOST`/`LETSENCRYPT_HOST`
+env vars instead of running a bundled Nginx/Certbot pair; `nginx-proxy`
+auto-discovers them and `acme-companion` auto-issues the certificate. Since
+that proxy routes by hostname (not path), the API lives on its own
+subdomain, `api.zaa4eem.ru`, rather than a `/api` path on the main domain.
+See `DEPLOY.md` for the exact flow.
 
 **Rationale**: keeps deployment additive to the existing VPS (Constitution:
 "nothing may depend on or modify Н12; they may share hosting only") without

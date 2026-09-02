@@ -1,10 +1,12 @@
 import { Bot, InlineKeyboard } from 'grammy';
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
-const webOrigin = process.env.WEB_ORIGIN;
+// A single canonical URL (not the comma-separated WEB_ORIGIN CORS list —
+// Telegram needs exactly one URL for the Mini App button).
+const webOrigin = process.env.MINI_APP_URL;
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required');
-if (!webOrigin) throw new Error('WEB_ORIGIN is required (the Mini App URL, e.g. https://zaa4eem.ru)');
+if (!webOrigin) throw new Error('MINI_APP_URL is required (the Mini App URL, e.g. https://zaa4eem.ru)');
 
 const bot = new Bot(token);
 

@@ -1,28 +1,30 @@
 # Deploying ZAA4EEM
 
-Target: the existing VPS that already runs the `Н12` Telegram bot (see
-`../Н12/docker-compose.yml`), deployed as a separate, additive Docker
-Compose stack — nothing here touches `Н12`'s code, container, or database.
+Target: `zaa4eem-vmpico` (`222.167.211.74`) — the same VPS that already runs
+the `Н12` Telegram bot stack, deployed as a separate, additive Docker
+Compose project. Nothing here touches `Н12`'s code, containers, or database.
 
-## What I need from you before this can go live
+The VPS already runs a shared reverse proxy —
+[`nginx-proxy`](https://github.com/nginx-proxy/nginx-proxy) +
+[`nginx-proxy-acme`](https://github.com/nginx-proxy/acme-companion) on the
+Docker network `proxy`, plus Portainer. **We don't run our own nginx or
+certbot** — `web` and `api` just join the `proxy` network and set
+`VIRTUAL_HOST`/`LETSENCRYPT_HOST` env vars; `nginx-proxy` auto-discovers
+them and `acme-companion` auto-issues the TLS certificate. This is why the
+API gets its own subdomain (`api.zaa4eem.ru`) instead of a `/api` path —
+`nginx-proxy` routes by hostname, not by path.
 
-I (Claude) don't have SSH access to your VPS, access to your reg.ru DNS
-panel, or your Telegram bot token — you'll need to either run the commands
-below yourself, or share the specific access needed (VPS SSH, or just have
-me guide you) so this can be completed. Specifically:
+## What's needed from you (checklist)
 
-1. **VPS access** — SSH to the server that runs `Н12`, or you run the
-   commands below yourself.
-2. **DNS at reg.ru** — an `A` record for `zaa4eem.ru` (and `www.zaa4eem.ru`)
-   pointed at the VPS's public IP.
-3. **Telegram bot token** — from [@BotFather](https://t.me/BotFather), for
-   `TELEGRAM_BOT_TOKEN` in `infra/.env`. You said you'll fill this in
-   yourself.
-4. **Decide the owner login**: a Telegram numeric user ID (send `/start` to
-   [@userinfobot](https://t.me/userinfobot) to get yours) and/or an email +
-   password, for `OWNER_TELEGRAM_ID` / `OWNER_EMAIL` / `OWNER_PASSWORD` in
-   `infra/.env` — this is what the seed script (`apps/api/prisma/seed.ts`)
-   uses to create your `OWNER` account.
+1. **DNS at reg.ru** — three `A` records pointed at `222.167.211.74`
+   (step 1 below).
+2. **Telegram bot token** — already have it (from @BotFather). Goes into
+   `infra/.env` on the server only, never into git.
+3. **Owner login** — Telegram numeric ID and/or email+password, for the
+   seed script. Also goes into `infra/.env` only.
+4. **A real email address** for Let's Encrypt renewal notices
+   (`LETSENCRYPT_EMAIL` — any inbox works, doesn't need to be @zaa4eem.ru).
+5. You run every command below yourself on the VPS.
 
 ## 1. Point the domain at the server
 
@@ -30,16 +32,22 @@ In the reg.ru DNS panel for `zaa4eem.ru`, add:
 
 | Type | Host | Value |
 |---|---|---|
-| A | @ | `<VPS public IP>` |
-| A | www | `<VPS public IP>` |
+| A | @ | `222.167.211.74` |
+| A | www | `222.167.211.74` |
+| A | api | `222.167.211.74` |
 
-DNS propagation can take up to a few hours; confirm with `dig zaa4eem.ru`
-before requesting a TLS certificate (step 4) or it will fail.
+DNS propagation can take up to a few hours. Confirm all three resolve
+before step 5 (cert issuance depends on it):
+
+```bash
+dig +short zaa4eem.ru
+dig +short www.zaa4eem.ru
+dig +short api.zaa4eem.ru
+```
 
 ## 2. Get the code onto the server
 
 ```bash
-# on the VPS
 git clone https://github.com/zaa4eem/valevo.git
 cd valevo
 git checkout zaa4eem-site
@@ -50,77 +58,83 @@ cd zaa4eem-site
 
 ```bash
 cp infra/.env.example infra/.env
-# edit infra/.env — fill in real secrets:
-#   - POSTGRES_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
-#     (generate each with: openssl rand -hex 32)
-#   - TELEGRAM_BOT_TOKEN, NEXT_PUBLIC_TELEGRAM_BOT_USERNAME
-#   - OWNER_TELEGRAM_ID and/or OWNER_EMAIL + OWNER_PASSWORD
 nano infra/.env
 ```
 
-## 4. First-time TLS certificate (chicken-and-egg with Nginx)
+Fill in:
 
-Nginx's HTTPS server block references a certificate that doesn't exist yet.
-Bootstrap it once:
+- `POSTGRES_PASSWORD`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` — generate
+  each with `openssl rand -hex 32`.
+- `TELEGRAM_BOT_TOKEN`, `NEXT_PUBLIC_TELEGRAM_BOT_USERNAME` (the `@...bot`
+  username, without `@`).
+- `LETSENCRYPT_EMAIL` — your real email.
+- `NGINX_PROXY_NETWORK=proxy` (already the default in `.env.example` —
+  confirmed via `docker inspect nginx-proxy` on this VPS).
+- `WEB_VIRTUAL_HOST=zaa4eem.ru,www.zaa4eem.ru`,
+  `API_VIRTUAL_HOST=api.zaa4eem.ru`, `MINI_APP_URL=https://zaa4eem.ru`,
+  `WEB_ORIGIN=https://zaa4eem.ru,https://www.zaa4eem.ru`,
+  `NEXT_PUBLIC_API_URL=https://api.zaa4eem.ru/api` — already correct in
+  `.env.example`, just confirm you didn't change the domain.
+- `OWNER_TELEGRAM_ID` and/or `OWNER_EMAIL` + `OWNER_PASSWORD` — whichever
+  you want to log in with as the platform owner.
 
-```bash
-# a) temporarily comment out the `server { listen 443 ... }` block
-#    in infra/nginx/zaa4eem.conf, keeping only the HTTP block
-# b) bring up nginx (HTTP only) so certbot's ACME challenge is servable
-docker compose -f infra/docker-compose.yml up -d nginx
-
-# c) request the certificate
-docker compose -f infra/docker-compose.yml run --rm certbot \
-  certonly --webroot -w /var/www/certbot \
-  -d zaa4eem.ru -d www.zaa4eem.ru \
-  --email <your-email> --agree-tos --no-eff-email
-
-# d) uncomment the HTTPS server block again, then reload
-docker compose -f infra/docker-compose.yml restart nginx
-```
-
-The `certbot` service in `docker-compose.yml` keeps renewing automatically
-after this (checks twice a day, renews when due).
-
-## 5. Build and start everything
+## 4. Build and start everything
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
 ```
 
-## 6. Run migrations and seed the owner account
+First build takes a few minutes (Next.js + NestJS compile from source in
+the Docker build stage). Watch it come up:
+
+```bash
+docker compose -f infra/docker-compose.yml ps
+docker compose -f infra/docker-compose.yml logs -f
+```
+
+`nginx-proxy-acme` picks up the new `LETSENCRYPT_HOST` values within about
+a minute and requests the certificates automatically — check its logs if
+`https://zaa4eem.ru` doesn't have a valid cert after a few minutes:
+
+```bash
+docker logs nginx-proxy-acme --tail 50
+```
+
+## 5. Run migrations and seed the owner account
 
 ```bash
 docker compose -f infra/docker-compose.yml exec api npm run prisma:migrate:deploy --workspace @zaa4eem/api
 docker compose -f infra/docker-compose.yml exec api npm run prisma:seed --workspace @zaa4eem/api
 ```
 
-## 7. Point the Telegram bot's menu button at the live domain
+## 6. Verify
 
-Already handled automatically — `apps/bot` sets the menu button to
-`WEB_ORIGIN` from `infra/.env` on startup. Confirm it worked: open the bot
-in Telegram, tap the menu button, and it should open `https://zaa4eem.ru`
-inside the Mini App.
-
-## 8. Verify
-
-Run through `specs/001-zaa4eem-platform/quickstart.md`'s four validation
-scenarios (P1–P4) against the live domain, plus
-`apps/web/e2e/telegram-miniapp.md`'s manual Telegram checklist.
+- `https://zaa4eem.ru` loads the site with a valid padlock.
+- `https://api.zaa4eem.ru/api/games` returns the seeded Neon Snake JSON.
+- Open the bot in Telegram, tap the menu button — the Mini App should load
+  and auto-sign you in as the owner.
+- Run through `specs/001-zaa4eem-platform/quickstart.md`'s four validation
+  scenarios (P1–P4), plus `apps/web/e2e/telegram-miniapp.md`'s manual
+  Telegram checklist.
 
 ## Updating a running deployment
 
 ```bash
 git pull
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
 docker compose -f infra/docker-compose.yml exec api npm run prisma:migrate:deploy --workspace @zaa4eem/api
 ```
 
 ## Notes
 
 - Nothing here reuses `Н12`'s database, containers, or ports — it's a fully
-  separate stack on the same host (Constitution: "hosting-only" sharing).
-- If port 80/443 is already bound by something else on this VPS, adjust the
-  `nginx` service's `ports:` in `infra/docker-compose.yml` accordingly, or
-  point your existing reverse proxy at `web:3000` / `api:3001` instead of
-  running the bundled `nginx`/`certbot` services at all.
+  separate Compose project on the same host and the same shared
+  `nginx-proxy`/`proxy` network (Constitution: "hosting-only" sharing).
+- `postgres`, `api`, `web`, `bot` all sit on this project's own default
+  network too, for service-to-service traffic (e.g. `api` → `postgres`);
+  only `api` and `web` additionally join `proxy` so `nginx-proxy` can reach
+  them.
+- If you ever need to point a different reverse-proxy setup at this stack
+  instead, `api` listens on `3001` and `web` on `3000` inside their
+  containers — swap the `VIRTUAL_HOST`-based routing for whatever your new
+  proxy needs.

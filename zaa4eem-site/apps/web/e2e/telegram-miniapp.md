@@ -7,7 +7,7 @@ telegram.ts`, `auth-context.tsx`, `AppChrome.tsx`, or `apps/bot`.
 
 ## Prerequisites
 
-- `apps/bot` running with `WEB_ORIGIN` pointed at an HTTPS URL (a tunnel in
+- `apps/bot` running with `MINI_APP_URL` pointed at an HTTPS URL (a tunnel in
   dev, the real domain in staging/prod) — see `apps/bot/README.md`.
 - `apps/api` and `apps/web` running and reachable at that same origin.
 

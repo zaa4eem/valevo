@@ -14,6 +14,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - default
 
   api:
     build:
@@ -22,11 +24,19 @@ services:
     container_name: zaa4eem-api
     restart: unless-stopped
     env_file: .env
+    environment:
+      VIRTUAL_HOST: ${API_VIRTUAL_HOST}
+      VIRTUAL_PORT: '3001'
+      LETSENCRYPT_HOST: ${API_VIRTUAL_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
     depends_on:
       postgres:
         condition: service_healthy
     expose:
       - '3001'
+    networks:
+      - default
+      - proxy
 
   web:
     build:
@@ -35,10 +45,18 @@ services:
     container_name: zaa4eem-web
     restart: unless-stopped
     env_file: .env
+    environment:
+      VIRTUAL_HOST: ${WEB_VIRTUAL_HOST}
+      VIRTUAL_PORT: '3000'
+      LETSENCRYPT_HOST: ${WEB_VIRTUAL_HOST}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL}
     depends_on:
       - api
     expose:
       - '3000'
+    networks:
+      - default
+      - proxy
 
   bot:
     build:
@@ -49,32 +67,14 @@ services:
     env_file: .env
     depends_on:
       - api
+    networks:
+      - default
 
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: zaa4eem-nginx
-    restart: unless-stopped
-    ports:
-      - '80:80'
-      - '443:443'
-    volumes:
-      - ./nginx/zaa4eem.conf:/etc/nginx/conf.d/zaa4eem.conf:ro
-      - zaa4eem-certbot-www:/var/www/certbot
-      - zaa4eem-certbot-certs:/etc/letsencrypt
-    depends_on:
-      - api
-      - web
-
-  certbot:
-    image: certbot/certbot
-    container_name: zaa4eem-certbot
-    volumes:
-      - zaa4eem-certbot-www:/var/www/certbot
-      - zaa4eem-certbot-certs:/etc/letsencrypt
-    entrypoint: >
-      sh -c "trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;"
+networks:
+  default:
+  proxy:
+    external: true
+    name: ${NGINX_PROXY_NETWORK}
 
 volumes:
   zaa4eem-postgres-data:
-  zaa4eem-certbot-www:
-  zaa4eem-certbot-certs:

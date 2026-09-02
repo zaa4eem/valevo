@@ -8,10 +8,11 @@ bot-side UI).
 ## Environment
 
 - `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather).
-- `WEB_ORIGIN` — the public HTTPS URL of `apps/web` (e.g. `https://zaa4eem.ru`
+- `MINI_APP_URL` — the public HTTPS URL of `apps/web` (e.g. `https://zaa4eem.ru`
   in production). **Telegram requires this to be a real HTTPS URL** — plain
   `http://localhost:3000` will not work for the menu button or `webApp()`
-  buttons.
+  buttons. (Not the same as the API's `WEB_ORIGIN` — that one is a
+  comma-separated CORS allowlist and can hold more than one origin.)
 
 ## Local development against a real Telegram client
 
@@ -27,7 +28,7 @@ npx ngrok http 3000
 Then run the bot with that tunnel URL:
 
 ```bash
-WEB_ORIGIN=https://your-tunnel.ngrok-free.app TELEGRAM_BOT_TOKEN=... npm run dev --workspace apps/bot
+MINI_APP_URL=https://your-tunnel.ngrok-free.app TELEGRAM_BOT_TOKEN=... npm run dev --workspace apps/bot
 ```
 
 Open the bot in Telegram and tap the menu button (or send `/start` and tap
@@ -35,5 +36,5 @@ the inline button) to launch the Mini App pointed at your local dev server.
 
 ## Production
 
-In production, `WEB_ORIGIN` is the real `https://zaa4eem.ru` domain — see
+In production, `MINI_APP_URL` is the real `https://zaa4eem.ru` domain — see
 `zaa4eem-site/DEPLOY.md` for the full deployment flow.
