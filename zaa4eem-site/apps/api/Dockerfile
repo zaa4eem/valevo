@@ -28,7 +28,10 @@ RUN npm ci --omit=dev
 COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/apps/api/dist apps/api/dist
 COPY --from=build /repo/apps/api/prisma apps/api/prisma
-COPY --from=build /repo/apps/api/node_modules/.prisma apps/api/node_modules/.prisma
+# npm workspaces hoist @prisma/client (and the schema-specific client that
+# `prisma generate` writes next to it) to the repo-root node_modules, not
+# apps/api/node_modules — copy from there.
+COPY --from=build /repo/node_modules/.prisma node_modules/.prisma
 
 WORKDIR /repo/apps/api
 EXPOSE 3001
