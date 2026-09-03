@@ -17,6 +17,9 @@ export const publicProfileSchema = z.object({
   bio: z.string().nullable(),
   statusText: z.string().nullable(),
   createdAt: z.string(),
+  followerCount: z.number().int().nonnegative(),
+  followingCount: z.number().int().nonnegative(),
+  viewerIsFollowing: z.boolean().optional(),
   stats: z.object({
     ideasSubmittedCount: z.number().int().nonnegative(),
     ideasAcceptedCount: z.number().int().nonnegative(),

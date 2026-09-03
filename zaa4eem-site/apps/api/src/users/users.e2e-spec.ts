@@ -50,4 +50,53 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .send({ bio: 'ты полный мудак' })
       .expect(400);
   });
+
+  async function registerUser(email: string, displayName: string) {
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName });
+    return res.body as { accessToken: string; user: { id: string } };
+  }
+
+  it('lets a user follow and unfollow another user, updating counts', async () => {
+    const author = await registerUser(`followed-${Date.now()}@test.dev`, 'Followed');
+    const follower = await registerUser(`follower-${Date.now()}@test.dev`, 'Follower');
+
+    await request(app.getHttpServer())
+      .post(`/api/users/${author.user.id}/follow`)
+      .set('Authorization', `Bearer ${follower.accessToken}`)
+      .expect(201);
+
+    const profileAsFollower = await request(app.getHttpServer())
+      .get(`/api/users/${author.user.id}`)
+      .set('Authorization', `Bearer ${follower.accessToken}`)
+      .expect(200);
+    expect(profileAsFollower.body.followerCount).toBe(1);
+    expect(profileAsFollower.body.viewerIsFollowing).toBe(true);
+
+    await request(app.getHttpServer())
+      .post(`/api/users/${author.user.id}/follow`)
+      .set('Authorization', `Bearer ${follower.accessToken}`)
+      .expect(409);
+
+    await request(app.getHttpServer())
+      .delete(`/api/users/${author.user.id}/follow`)
+      .set('Authorization', `Bearer ${follower.accessToken}`)
+      .expect(200);
+
+    const profileAfterUnfollow = await request(app.getHttpServer())
+      .get(`/api/users/${author.user.id}`)
+      .expect(200);
+    expect(profileAfterUnfollow.body.followerCount).toBe(0);
+    expect(profileAfterUnfollow.body.viewerIsFollowing).toBeUndefined();
+  });
+
+  it('rejects following yourself', async () => {
+    const user = await registerUser(`self-${Date.now()}@test.dev`, 'Self');
+
+    await request(app.getHttpServer())
+      .post(`/api/users/${user.user.id}/follow`)
+      .set('Authorization', `Bearer ${user.accessToken}`)
+      .expect(403);
+  });
 });

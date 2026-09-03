@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IdeaStatus } from '@zaa4eem/shared';
 
@@ -58,25 +59,54 @@ export class UsersService {
     return this.prisma.user.update({ where: { id: userId }, data });
   }
 
+  async follow(followerId: string, followingId: string) {
+    if (followerId === followingId) {
+      throw new ForbiddenException('You cannot follow yourself');
+    }
+    const target = await this.prisma.user.findUnique({ where: { id: followingId } });
+    if (!target) throw new NotFoundException('User not found');
+
+    try {
+      await this.prisma.follow.create({ data: { followerId, followingId } });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('You already follow this user');
+      }
+      throw err;
+    }
+  }
+
+  async unfollow(followerId: string, followingId: string) {
+    await this.prisma.follow.deleteMany({ where: { followerId, followingId } });
+  }
+
   /** Public profile + derived stats (FR-004). */
-  async getPublicProfile(userId: string) {
+  async getPublicProfile(userId: string, viewerId?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) return null;
 
-    const [ideasSubmittedCount, ideasAcceptedCount, scores] = await Promise.all([
-      this.prisma.idea.count({ where: { submitterId: userId } }),
-      this.prisma.idea.count({
-        where: {
-          submitterId: userId,
-          status: { in: [IdeaStatus.ACCEPTED, IdeaStatus.IN_PROGRESS, IdeaStatus.SHIPPED] },
-        },
-      }),
-      this.prisma.score.findMany({
-        where: { userId, reviewState: 'NORMAL' },
-        include: { game: true },
-        orderBy: { value: 'desc' },
-      }),
-    ]);
+    const [ideasSubmittedCount, ideasAcceptedCount, scores, followerCount, followingCount, viewerFollow] =
+      await Promise.all([
+        this.prisma.idea.count({ where: { submitterId: userId } }),
+        this.prisma.idea.count({
+          where: {
+            submitterId: userId,
+            status: { in: [IdeaStatus.ACCEPTED, IdeaStatus.IN_PROGRESS, IdeaStatus.SHIPPED] },
+          },
+        }),
+        this.prisma.score.findMany({
+          where: { userId, reviewState: 'NORMAL' },
+          include: { game: true },
+          orderBy: { value: 'desc' },
+        }),
+        this.prisma.follow.count({ where: { followingId: userId } }),
+        this.prisma.follow.count({ where: { followerId: userId } }),
+        viewerId
+          ? this.prisma.follow.findUnique({
+              where: { followerId_followingId: { followerId: viewerId, followingId: userId } },
+            })
+          : null,
+      ]);
 
     const bestByGame = new Map<string, { gameSlug: string; gameTitle: string; value: number }>();
     for (const score of scores) {
@@ -99,6 +129,9 @@ export class UsersService {
       bio: user.bio,
       statusText: user.statusText,
       createdAt: user.createdAt.toISOString(),
+      followerCount,
+      followingCount,
+      viewerIsFollowing: viewerId ? Boolean(viewerFollow) : undefined,
       stats: {
         ideasSubmittedCount,
         ideasAcceptedCount,

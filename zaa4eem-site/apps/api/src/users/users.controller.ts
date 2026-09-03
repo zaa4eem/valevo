@@ -2,19 +2,23 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
   Patch,
   Post,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { updateProfileSchema } from '@zaa4eem/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
 import { ModerationService } from '../moderation/moderation.service';
@@ -64,10 +68,23 @@ export class UsersController {
     return this.users.getPublicProfile(user.id);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  async byId(@Param('id') id: string) {
-    const profile = await this.users.getPublicProfile(id);
+  async byId(@Param('id') id: string, @Req() req: Request & { user?: RequestUser }) {
+    const profile = await this.users.getPublicProfile(id, req.user?.id);
     if (!profile) throw new NotFoundException('User not found');
     return profile;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/follow')
+  follow(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.users.follow(user.id, id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/follow')
+  unfollow(@Param('id') id: string, @CurrentUser() user: RequestUser) {
+    return this.users.unfollow(user.id, id);
   }
 }

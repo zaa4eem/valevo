@@ -16,12 +16,32 @@ export default function PublicProfilePage() {
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [modActionMessage, setModActionMessage] = useState<string | null>(null);
+  const [followBusy, setFollowBusy] = useState(false);
 
   async function moderateUser(action: 'mute' | 'ban') {
     const reason = window.prompt(`Причина (${action === 'mute' ? 'мут' : 'бан'}):`);
     if (!reason) return;
     await api.post(`/admin/users/${params.id}/${action}`, { reason });
     setModActionMessage(action === 'mute' ? 'Пользователь замьючен.' : 'Пользователь забанен.');
+  }
+
+  async function toggleFollow() {
+    if (!profile || followBusy) return;
+    setFollowBusy(true);
+    const wasFollowing = profile.viewerIsFollowing;
+    setProfile({
+      ...profile,
+      viewerIsFollowing: !wasFollowing,
+      followerCount: profile.followerCount + (wasFollowing ? -1 : 1),
+    });
+    try {
+      if (wasFollowing) await api.delete(`/users/${profile.id}/follow`);
+      else await api.post(`/users/${profile.id}/follow`);
+    } catch {
+      setProfile(profile);
+    } finally {
+      setFollowBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -84,10 +104,21 @@ export default function PublicProfilePage() {
                 </span>
               </div>
             </div>
-            {viewer?.id === profile.id && (
+            {viewer?.id === profile.id ? (
               <Link href="/settings" className="z-btn-ghost z-pop-on-active" style={{ marginBottom: 4 }}>
                 ⚙️ Редактировать профиль
               </Link>
+            ) : (
+              viewer && (
+                <button
+                  onClick={toggleFollow}
+                  disabled={followBusy}
+                  className={profile.viewerIsFollowing ? 'z-btn-ghost z-pop-on-active' : 'z-btn-accent z-pop-on-active'}
+                  style={{ marginBottom: 4 }}
+                >
+                  {profile.viewerIsFollowing ? 'Отписаться' : '+ Подписаться'}
+                </button>
+              )
             )}
           </div>
 
@@ -102,6 +133,16 @@ export default function PublicProfilePage() {
               </p>
             )}
             {profile.bio && <p style={{ color: 'var(--z-text-muted)', margin: '6px 0 0' }}>{profile.bio}</p>}
+            <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 'var(--z-fs-sm)' }}>
+              <span>
+                <strong>{profile.followerCount}</strong>{' '}
+                <span style={{ color: 'var(--z-text-muted)' }}>подписчиков</span>
+              </span>
+              <span>
+                <strong>{profile.followingCount}</strong>{' '}
+                <span style={{ color: 'var(--z-text-muted)' }}>подписок</span>
+              </span>
+            </div>
             <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-xs)', margin: '8px 0 0' }}>
               На платформе с {new Date(profile.createdAt).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
             </p>
