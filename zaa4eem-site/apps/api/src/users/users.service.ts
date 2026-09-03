@@ -2,10 +2,24 @@ import { ConflictException, ForbiddenException, Injectable, NotFoundException } 
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IdeaStatus } from '@zaa4eem/shared';
+import { TelegramNotifyService } from '../common/telegram-notify.service';
+
+function serializeUserSummary(user: any) {
+  return {
+    id: user.id,
+    memberNumber: user.memberNumber,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    role: user.role,
+  };
+}
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notify: TelegramNotifyService,
+  ) {}
 
   findById(id: string) {
     return this.prisma.user.findUnique({ where: { id } });
@@ -78,10 +92,56 @@ export class UsersService {
       }
       throw err;
     }
+
+    if (target.telegramId) {
+      const follower = await this.prisma.user.findUnique({
+        where: { id: followerId },
+        select: { displayName: true },
+      });
+      if (follower) {
+        this.notify
+          .notify(target.telegramId, `➕ ${follower.displayName} подписался(лась) на вас`)
+          .catch(() => undefined);
+      }
+    }
   }
 
   async unfollow(followerId: string, followingId: string) {
     await this.prisma.follow.deleteMany({ where: { followerId, followingId } });
+  }
+
+  async getFollowers(userId: string, opts: { cursor?: string; limit?: number }) {
+    const limit = opts.limit ?? 20;
+    const follows = await this.prisma.follow.findMany({
+      where: { followingId: userId },
+      include: { follower: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+    });
+    const hasMore = follows.length > limit;
+    const items = hasMore ? follows.slice(0, limit) : follows;
+    return {
+      items: items.map((f) => serializeUserSummary(f.follower)),
+      nextCursor: hasMore ? items[items.length - 1].id : null,
+    };
+  }
+
+  async getFollowing(userId: string, opts: { cursor?: string; limit?: number }) {
+    const limit = opts.limit ?? 20;
+    const follows = await this.prisma.follow.findMany({
+      where: { followerId: userId },
+      include: { following: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+    });
+    const hasMore = follows.length > limit;
+    const items = hasMore ? follows.slice(0, limit) : follows;
+    return {
+      items: items.map((f) => serializeUserSummary(f.following)),
+      nextCursor: hasMore ? items[items.length - 1].id : null,
+    };
   }
 
   /** Public profile + derived stats (FR-004). */

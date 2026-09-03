@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UploadedFile,
   UseGuards,
@@ -16,7 +17,7 @@ import {
 import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import { updateProfileSchema } from '@zaa4eem/shared';
+import { updateProfileSchema, userListQuerySchema } from '@zaa4eem/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
@@ -86,5 +87,17 @@ export class UsersController {
   @Delete(':id/follow')
   unfollow(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     return this.users.unfollow(user.id, id);
+  }
+
+  @Get(':id/followers')
+  followers(@Param('id') id: string, @Query() query: unknown) {
+    const { cursor, limit } = userListQuerySchema.parse(query);
+    return this.users.getFollowers(id, { cursor, limit });
+  }
+
+  @Get(':id/following')
+  following(@Param('id') id: string, @Query() query: unknown) {
+    const { cursor, limit } = userListQuerySchema.parse(query);
+    return this.users.getFollowing(id, { cursor, limit });
   }
 }

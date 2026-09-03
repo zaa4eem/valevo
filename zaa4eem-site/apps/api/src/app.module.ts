@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { HealthController } from './common/health.controller';
+import { CommonModule } from './common/common.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { UsersModule } from './users/users.module';
@@ -28,6 +29,7 @@ import { SearchModule } from './search/search.module';
       },
     ]),
     PrismaModule,
+    CommonModule,
     ModerationModule,
     UsersModule,
     AuthModule,

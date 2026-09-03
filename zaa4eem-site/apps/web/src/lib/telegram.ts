@@ -16,6 +16,11 @@ export interface TelegramWebApp {
     onClick: (cb: () => void) => void;
     offClick: (cb: () => void) => void;
   };
+  HapticFeedback?: {
+    impactOccurred: (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft') => void;
+    notificationOccurred: (type: 'error' | 'success' | 'warning') => void;
+    selectionChanged: () => void;
+  };
 }
 
 declare global {
@@ -27,4 +32,13 @@ declare global {
 export function getTelegramWebApp(): TelegramWebApp | null {
   if (typeof window === 'undefined') return null;
   return window.Telegram?.WebApp ?? null;
+}
+
+/** No-op outside Telegram (getTelegramWebApp() returns null there) — safe to call unconditionally on any tap/like/vote/follow action. */
+export function haptic(style: 'light' | 'medium' | 'heavy' = 'light') {
+  getTelegramWebApp()?.HapticFeedback?.impactOccurred(style);
+}
+
+export function hapticNotify(type: 'success' | 'error' | 'warning') {
+  getTelegramWebApp()?.HapticFeedback?.notificationOccurred(type);
 }

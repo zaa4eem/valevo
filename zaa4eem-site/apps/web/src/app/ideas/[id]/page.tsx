@@ -23,7 +23,7 @@ export default function IdeaDetailPage() {
 
   return (
     <div>
-      <IdeaCard idea={idea} onVoteChange={() => api.get<Idea>(`/ideas/${params.id}`).then(setIdea)} />
+      <IdeaCard idea={idea} />
     </div>
   );
 }

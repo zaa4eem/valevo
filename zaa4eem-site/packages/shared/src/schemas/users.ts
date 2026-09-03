@@ -31,6 +31,27 @@ export const publicProfileSchema = z.object({
 });
 export type PublicProfile = z.infer<typeof publicProfileSchema>;
 
+export const userSummarySchema = z.object({
+  id: z.string().uuid(),
+  memberNumber: z.number().int().positive(),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+  role: z.enum(['OWNER', 'SUBSCRIBER']),
+});
+export type UserSummary = z.infer<typeof userSummarySchema>;
+
+export const paginatedUserSummariesSchema = z.object({
+  items: z.array(userSummarySchema),
+  nextCursor: z.string().uuid().nullable(),
+});
+export type PaginatedUserSummaries = z.infer<typeof paginatedUserSummariesSchema>;
+
+export const userListQuerySchema = z.object({
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type UserListQuery = z.infer<typeof userListQuerySchema>;
+
 /** "#0001" style member tag. Range is a display convention (4 digits), not a hard cap — the sequence keeps counting past 9999. */
 export function formatMemberNumber(memberNumber: number): string {
   return `#${String(memberNumber).padStart(4, '0')}`;

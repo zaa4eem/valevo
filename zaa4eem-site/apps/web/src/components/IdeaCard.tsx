@@ -5,6 +5,7 @@ import { useState } from 'react';
 import type { Idea } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { haptic } from '@/lib/telegram';
 import { Card } from './Card';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -25,6 +26,7 @@ export function IdeaCard({ idea, onVoteChange }: { idea: Idea; onVoteChange?: ()
   async function toggleVote() {
     if (!user || pending) return;
     setPending(true);
+    haptic('light');
     try {
       if (hasVoted) {
         await api.delete(`/ideas/${idea.id}/vote`);

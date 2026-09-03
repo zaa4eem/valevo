@@ -3,6 +3,16 @@ import { Prisma } from '@prisma/client';
 import { IdeaStatus, ModerationState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
+import { TelegramNotifyService } from '../common/telegram-notify.service';
+
+const IDEA_STATUS_LABELS: Record<string, string> = {
+  NEW: 'Новая',
+  UNDER_REVIEW: 'На рассмотрении',
+  ACCEPTED: 'Принята',
+  IN_PROGRESS: 'В разработке',
+  SHIPPED: 'Готово',
+  DECLINED: 'Отклонена',
+};
 
 function serializeIdea(idea: any, viewerId?: string) {
   return {
@@ -27,6 +37,7 @@ export class IdeasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly moderation: ModerationService,
+    private readonly notify: TelegramNotifyService,
   ) {}
 
   async create(submitterId: string, title: string, description: string) {
@@ -122,6 +133,12 @@ export class IdeasService {
         reason,
       },
     });
+    if (idea.submitter.telegramId) {
+      const label = IDEA_STATUS_LABELS[status] ?? status;
+      this.notify
+        .notify(idea.submitter.telegramId, `💡 Статус вашей идеи «${idea.title}» изменён: ${label}`)
+        .catch(() => undefined);
+    }
     return serializeIdea(idea);
   }
 

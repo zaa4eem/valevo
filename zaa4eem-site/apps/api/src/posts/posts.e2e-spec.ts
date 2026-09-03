@@ -83,6 +83,12 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .post('/api/auth/register')
       .send({ email: authorEmail, password: 'password123', displayName: 'Post Author' });
 
+    // Fake telegramId so like/comment actually attempt a Telegram DM against
+    // the sandbox's placeholder bot token — the request must still succeed
+    // even though that call is guaranteed to fail (notifications are
+    // fire-and-forget and must never break the action that triggered them).
+    await prisma.user.update({ where: { email: authorEmail }, data: { telegramId: BigInt(Date.now()) } });
+
     const post = await request(app.getHttpServer())
       .post('/api/posts')
       .set('Authorization', `Bearer ${author.body.accessToken}`)

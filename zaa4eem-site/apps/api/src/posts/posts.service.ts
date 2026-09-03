@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { ModerationState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
+import { TelegramNotifyService } from '../common/telegram-notify.service';
 
 const POST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
@@ -47,6 +48,7 @@ export class PostsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly moderation: ModerationService,
+    private readonly notify: TelegramNotifyService,
   ) {}
 
   async listPublished(opts: {
@@ -160,7 +162,7 @@ export class PostsService {
   }
 
   async like(postId: string, userId: string) {
-    await this.assertVisible(postId);
+    const post = await this.assertVisible(postId);
     try {
       await this.prisma.like.create({ data: { postId, userId } });
     } catch (err) {
@@ -168,6 +170,19 @@ export class PostsService {
         throw new ConflictException('Вы уже лайкнули этот пост');
       }
       throw err;
+    }
+    if (post.authorId !== userId) {
+      this.notifyLike(post.authorId, userId).catch(() => undefined);
+    }
+  }
+
+  private async notifyLike(authorId: string, likerId: string) {
+    const [author, liker] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: authorId }, select: { telegramId: true } }),
+      this.prisma.user.findUnique({ where: { id: likerId }, select: { displayName: true } }),
+    ]);
+    if (author?.telegramId && liker) {
+      await this.notify.notify(author.telegramId, `🤍 ${liker.displayName} лайкнул(а) ваш пост`);
     }
   }
 
@@ -190,13 +205,27 @@ export class PostsService {
   }
 
   async createComment(postId: string, authorId: string, body: string) {
-    await this.assertVisible(postId);
+    const post = await this.assertVisible(postId);
     const moderationState = this.moderation.classify(body);
     const comment = await this.prisma.comment.create({
       data: { postId, authorId, body, moderationState },
       include: { author: true },
     });
+    if (post.authorId !== authorId) {
+      this.notifyComment(post.authorId, comment.author.displayName, body).catch(() => undefined);
+    }
     return serializeComment(comment);
+  }
+
+  private async notifyComment(postAuthorId: string, commenterName: string, body: string) {
+    const author = await this.prisma.user.findUnique({
+      where: { id: postAuthorId },
+      select: { telegramId: true },
+    });
+    if (author?.telegramId) {
+      const preview = body.length > 200 ? `${body.slice(0, 200)}…` : body;
+      await this.notify.notify(author.telegramId, `💬 ${commenterName} прокомментировал(а) ваш пост:\n«${preview}»`);
+    }
   }
 
   async deleteComment(postId: string, commentId: string, actor: { id: string; isOwner: boolean }) {
@@ -214,5 +243,6 @@ export class PostsService {
     if (post.moderationState === ModerationState.REMOVED) {
       throw new ForbiddenException('Этот пост недоступен');
     }
+    return post;
   }
 }

@@ -7,6 +7,7 @@ import type { PublicProfile } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { haptic } from '@/lib/telegram';
 import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 
@@ -28,6 +29,7 @@ export default function PublicProfilePage() {
   async function toggleFollow() {
     if (!profile || followBusy) return;
     setFollowBusy(true);
+    haptic('light');
     const wasFollowing = profile.viewerIsFollowing;
     setProfile({
       ...profile,
@@ -134,14 +136,14 @@ export default function PublicProfilePage() {
             )}
             {profile.bio && <p style={{ color: 'var(--z-text-muted)', margin: '6px 0 0' }}>{profile.bio}</p>}
             <div style={{ display: 'flex', gap: 14, marginTop: 8, fontSize: 'var(--z-fs-sm)' }}>
-              <span>
+              <Link href={`/u/${profile.id}/followers`}>
                 <strong>{profile.followerCount}</strong>{' '}
                 <span style={{ color: 'var(--z-text-muted)' }}>подписчиков</span>
-              </span>
-              <span>
+              </Link>
+              <Link href={`/u/${profile.id}/following`}>
                 <strong>{profile.followingCount}</strong>{' '}
                 <span style={{ color: 'var(--z-text-muted)' }}>подписок</span>
-              </span>
+              </Link>
             </div>
             <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-xs)', margin: '8px 0 0' }}>
               На платформе с {new Date(profile.createdAt).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}

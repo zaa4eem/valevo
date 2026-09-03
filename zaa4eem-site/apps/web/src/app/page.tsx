@@ -6,6 +6,7 @@ import { formatMemberNumber } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { haptic, hapticNotify } from '@/lib/telegram';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
 
@@ -29,8 +30,10 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
       const post = await api.post<Post>('/posts', { body: body.trim(), publish: true });
       setBody('');
       onPosted(post);
+      hapticNotify('success');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось опубликовать пост');
+      hapticNotify('error');
     } finally {
       setBusy(false);
     }
@@ -93,6 +96,7 @@ function CommentThread({ postId }: { postId: string }) {
       const comment = await api.post<Comment>(`/posts/${postId}/comments`, { body: body.trim() });
       setItems([...(list ?? []), comment]);
       setBody('');
+      haptic('light');
     } catch (err) {
       setFormError(err instanceof ApiError ? err.message : 'Не удалось отправить комментарий');
     } finally {
@@ -219,6 +223,7 @@ function PostCard({
   async function toggleLike() {
     if (!user || busy) return;
     setBusy(true);
+    haptic('light');
     const wasLiked = post.viewerHasLiked;
     onChange({
       ...post,
@@ -442,6 +447,7 @@ export default function HomeFeedPage() {
   async function toggleFollowAuthor(authorId: string, currentlyFollowing: boolean) {
     // Every post by this author flips together — the feed can show several
     // posts from the same person, and only one follow state exists for them.
+    haptic('light');
     setFollowingForAuthor(authorId, !currentlyFollowing);
     try {
       if (currentlyFollowing) await api.delete(`/users/${authorId}/follow`);

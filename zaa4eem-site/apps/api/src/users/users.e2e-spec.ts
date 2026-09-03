@@ -101,4 +101,29 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .set('Authorization', `Bearer ${user.accessToken}`)
       .expect(403);
   });
+
+  it('lists followers and following', async () => {
+    const target = await registerUser(`target-${Date.now()}@test.dev`, 'Target');
+    const followerA = await registerUser(`fa-${Date.now()}@test.dev`, 'Follower A');
+    const followerB = await registerUser(`fb-${Date.now()}@test.dev`, 'Follower B');
+
+    for (const follower of [followerA, followerB]) {
+      await request(app.getHttpServer())
+        .post(`/api/users/${target.user.id}/follow`)
+        .set('Authorization', `Bearer ${follower.accessToken}`)
+        .expect(201);
+    }
+
+    const followers = await request(app.getHttpServer())
+      .get(`/api/users/${target.user.id}/followers`)
+      .expect(200);
+    const followerIds = followers.body.items.map((u: any) => u.id);
+    expect(followerIds).toContain(followerA.user.id);
+    expect(followerIds).toContain(followerB.user.id);
+
+    const following = await request(app.getHttpServer())
+      .get(`/api/users/${followerA.user.id}/following`)
+      .expect(200);
+    expect(following.body.items.map((u: any) => u.id)).toContain(target.user.id);
+  });
 });
