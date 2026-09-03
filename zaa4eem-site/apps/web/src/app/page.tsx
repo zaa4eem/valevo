@@ -7,47 +7,10 @@ import { useApiData } from '@/lib/use-api-data';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
+import { Avatar } from '@/components/Avatar';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function Avatar({
-  name,
-  avatarUrl,
-  size = 40,
-  ring = false,
-}: {
-  name: string;
-  avatarUrl?: string | null;
-  size?: number;
-  ring?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        background: 'var(--z-accent-soft)',
-        display: 'grid',
-        placeItems: 'center',
-        fontWeight: 800,
-        color: 'var(--z-accent)',
-        flexShrink: 0,
-        overflow: 'hidden',
-        boxShadow: ring ? '0 0 0 2px var(--z-bg), 0 0 0 4px var(--z-accent-soft)' : undefined,
-        fontSize: size * 0.4,
-      }}
-    >
-      {avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={avatarUrl} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-      ) : (
-        name.charAt(0).toUpperCase()
-      )}
-    </div>
-  );
 }
 
 function Composer({ onPosted }: { onPosted: (post: Post) => void }) {

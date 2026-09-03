@@ -351,15 +351,52 @@ img {
   align-items: start;
 }
 
+/* Two mutually-exclusive navbar layouts, swapped by the media query below:
+   desktop gets the full inline links + name/settings/admin/logout row;
+   mobile collapses to BottomNav (tabs) + a single avatar menu — the crowded
+   single-row layout was unreadable/truncated on phone-width screens. */
+.z-navbar-mobile-only {
+  display: none;
+}
+
+.z-bottom-nav {
+  display: none;
+}
+
+.z-navbar-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 190px;
+  background: var(--z-surface);
+  border: 1px solid var(--z-border);
+  border-radius: var(--z-radius-md);
+  box-shadow: var(--z-shadow-card);
+  overflow: hidden;
+  z-index: 20;
+}
+
+.z-navbar-menu-item {
+  display: block;
+  padding: 12px 14px;
+  font-size: var(--z-fs-sm);
+  color: var(--z-text);
+}
+.z-navbar-menu-item:hover {
+  background: var(--z-surface-hover);
+}
+
 @media (max-width: 720px) {
   .z-container {
     padding: 0 14px;
   }
 
-  .z-navbar-links {
-    gap: 12px;
-    overflow-x: auto;
-    white-space: nowrap;
+  .z-navbar-desktop-only {
+    display: none !important;
+  }
+
+  .z-navbar-mobile-only {
+    display: block;
   }
 
   .z-game-layout {
@@ -382,6 +419,42 @@ img {
 
   h1 {
     font-size: var(--z-fs-2xl);
+  }
+
+  /* Bottom tab bar — the primary way to move between sections on mobile. */
+  .z-bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 50;
+    background: var(--z-navbar-bg);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--z-border);
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .z-bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px;
+    min-height: 44px;
+  }
+
+  /* Room for the fixed bottom nav so it never covers the last bit of content
+     — including the footer's legal links, which must stay reachable. */
+  .z-main-content,
+  .z-footer {
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+  }
+
+  /* The theme toggle would otherwise sit under the bottom tab bar. */
+  .z-theme-toggle {
+    bottom: calc(76px + env(safe-area-inset-bottom));
   }
 }
 

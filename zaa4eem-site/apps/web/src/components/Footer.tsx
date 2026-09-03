@@ -4,7 +4,7 @@ const YEAR = new Date().getFullYear();
 
 export function Footer() {
   return (
-    <footer style={{ borderTop: '1px solid var(--z-border)', marginTop: 40 }}>
+    <footer className="z-footer" style={{ borderTop: '1px solid var(--z-border)', marginTop: 40 }}>
       <div
         className="z-container"
         style={{
