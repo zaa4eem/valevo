@@ -30,6 +30,17 @@ export const loginSchema = z.object({
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+});
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1, 'Отсутствует токен сброса пароля'),
+  password: z.string().min(8, 'Пароль должен быть не короче 8 символов'),
+});
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
 export const authResponseSchema = z.object({
   accessToken: z.string(),
   user: z.object({

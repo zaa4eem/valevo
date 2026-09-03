@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  HttpCode,
+  HttpStatus,
   Post,
   Req,
   Res,
@@ -10,8 +12,10 @@ import {
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import {
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
   telegramAuthSchema,
   telegramWidgetAuthSchema,
 } from '@zaa4eem/shared';
@@ -90,5 +94,25 @@ export class AuthController {
   async linkTelegram(@CurrentUser() user: RequestUser, @Body() body: unknown) {
     const input = telegramAuthSchema.parse(body);
     return this.auth.linkTelegram(user.id, input);
+  }
+
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  async forgotPassword(@Body() body: unknown) {
+    const { email } = forgotPasswordSchema.parse(body);
+    await this.auth.forgotPassword(email);
+    return {
+      message: 'Если аккаунт с такой почтой существует, мы отправили на неё ссылку для сброса пароля.',
+    };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  async resetPassword(@Body() body: unknown) {
+    const { token, password } = resetPasswordSchema.parse(body);
+    await this.auth.resetPassword(token, password);
+    return { message: 'Пароль обновлён — теперь можно войти с новым паролем.' };
   }
 }

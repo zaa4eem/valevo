@@ -11,6 +11,7 @@ export interface AccessTokenPayload {
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
 const ACCESS_TOKEN_TTL = '15m';
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class TokenService {
@@ -74,6 +75,34 @@ export class TokenService {
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  /** Issues a password reset token, stores only its hash, returns the raw value. */
+  async issuePasswordResetToken(userId: string): Promise<string> {
+    const raw = randomBytes(32).toString('hex');
+    const tokenHash = this.hashRefreshToken(raw);
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+
+    await this.prisma.passwordResetToken.create({
+      data: { userId, tokenHash, expiresAt },
+    });
+
+    return raw;
+  }
+
+  /** Marks a reset token used and returns its owner's id, or null if it's unknown, expired, or already used. */
+  async consumePasswordResetToken(raw: string): Promise<string | null> {
+    const tokenHash = this.hashRefreshToken(raw);
+    const record = await this.prisma.passwordResetToken.findFirst({
+      where: { tokenHash, usedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (!record) return null;
+
+    await this.prisma.passwordResetToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
+    return record.userId;
   }
 
   private hashRefreshToken(raw: string): string {

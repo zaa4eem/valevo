@@ -8,6 +8,7 @@ import {
   verifyTelegramInitData,
   verifyTelegramLoginWidget,
 } from './telegram-verify';
+import { EmailService } from '../common/email.service';
 import type { RegisterInput, LoginInput, TelegramAuthInput } from '@zaa4eem/shared';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class AuthService {
     private readonly users: UsersService,
     private readonly tokens: TokenService,
     private readonly config: ConfigService,
+    private readonly email: EmailService,
   ) {}
 
   private botToken(): string {
@@ -127,6 +129,33 @@ export class AuthService {
 
   async logout(rawRefreshToken: string) {
     await this.tokens.revokeRefreshToken(rawRefreshToken);
+  }
+
+  /**
+   * Always resolves the same way whether or not the email is registered —
+   * the controller returns one generic message either way so this endpoint
+   * can't be used to check which emails have accounts.
+   */
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user || !user.passwordHash) return;
+
+    const raw = await this.tokens.issuePasswordResetToken(user.id);
+    const siteUrl = this.config.get<string>('MINI_APP_URL', 'http://localhost:3000');
+    const resetUrl = `${siteUrl.replace(/\/$/, '')}/reset-password?token=${raw}`;
+    await this.email.sendPasswordReset(email, resetUrl);
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const userId = await this.tokens.consumePasswordResetToken(token);
+    if (!userId) {
+      throw new UnauthorizedException('Ссылка для сброса пароля недействительна или устарела');
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await this.users.setPassword(userId, passwordHash);
+    // Reset means "I might have lost control of this account" — sign every
+    // session out rather than leaving old refresh tokens valid.
+    await this.tokens.revokeAllForUser(userId);
   }
 
   private async issueSession(userId: string, role: string) {

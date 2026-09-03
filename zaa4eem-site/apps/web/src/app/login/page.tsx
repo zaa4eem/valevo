@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ApiError, api, setAccessToken } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -107,6 +108,14 @@ export default function LoginPage() {
           <button type="submit" className="z-btn-accent" disabled={submitting}>
             {mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
           </button>
+          {mode === 'login' && (
+            <Link
+              href="/forgot-password"
+              style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', textAlign: 'center' }}
+            >
+              Забыли пароль?
+            </Link>
+          )}
         </form>
 
         <button
