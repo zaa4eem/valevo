@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../app.module';
+import { HttpExceptionFilter } from '../common/http-exception.filter';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from './token.service';
 
@@ -18,6 +19,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api');
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
     prisma = app.get(PrismaService);
     tokens = app.get(TokenService);

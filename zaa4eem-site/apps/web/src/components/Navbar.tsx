@@ -10,6 +10,7 @@ const links = [
   { href: '/ideas', label: 'Идеи' },
   { href: '/games', label: 'Игры' },
   { href: '/leaderboard', label: 'Лидеры' },
+  { href: '/search', label: '🔍 Поиск' },
 ];
 
 function UserMenu() {

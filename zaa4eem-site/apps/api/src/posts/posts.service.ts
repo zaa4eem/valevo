@@ -6,7 +6,7 @@ import { ModerationService } from '../moderation/moderation.service';
 
 const POST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
-function serializePost(post: any, viewerId?: string) {
+function serializePost(post: any, viewerId?: string, followingIds?: Set<string>) {
   return {
     id: post.id,
     body: post.body,
@@ -18,6 +18,7 @@ function serializePost(post: any, viewerId?: string) {
       displayName: post.author.displayName,
       avatarUrl: post.author.avatarUrl,
       role: post.author.role,
+      viewerIsFollowing: viewerId ? Boolean(followingIds?.has(post.author.id)) : undefined,
     },
     likeCount: post._count?.likes ?? 0,
     commentCount: post._count?.comments ?? 0,
@@ -76,8 +77,21 @@ export class PostsService {
 
     const hasMore = posts.length > limit;
     const items = hasMore ? posts.slice(0, limit) : posts;
+
+    // One batched query for every author on the page instead of an N+1
+    // per-post follow lookup.
+    let followingIds: Set<string> | undefined;
+    if (opts.viewerId) {
+      const authorIds = [...new Set(items.map((post) => post.authorId))];
+      const follows = await this.prisma.follow.findMany({
+        where: { followerId: opts.viewerId, followingId: { in: authorIds } },
+        select: { followingId: true },
+      });
+      followingIds = new Set(follows.map((f) => f.followingId));
+    }
+
     return {
-      items: items.map((post) => serializePost(post, opts.viewerId)),
+      items: items.map((post) => serializePost(post, opts.viewerId, followingIds)),
       nextCursor: hasMore ? items[items.length - 1].id : null,
     };
   }

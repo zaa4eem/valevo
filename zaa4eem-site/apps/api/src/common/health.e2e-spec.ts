@@ -2,6 +2,7 @@ import { INestApplication, RequestMethod } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../app.module';
+import { HttpExceptionFilter } from './http-exception.filter';
 
 const canRun = Boolean(process.env.DATABASE_URL);
 
@@ -12,6 +13,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api', { exclude: [{ path: 'health', method: RequestMethod.GET }] });
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
   });
 

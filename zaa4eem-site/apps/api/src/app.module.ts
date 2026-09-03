@@ -11,6 +11,7 @@ import { PostsModule } from './posts/posts.module';
 import { IdeasModule } from './ideas/ideas.module';
 import { GamesModule } from './games/games.module';
 import { AdminModule } from './admin/admin.module';
+import { SearchModule } from './search/search.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { AdminModule } from './admin/admin.module';
     IdeasModule,
     GamesModule,
     AdminModule,
+    SearchModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -23,6 +23,7 @@ export const postSchema = z.object({
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
     role: z.enum(['OWNER', 'SUBSCRIBER']),
+    viewerIsFollowing: z.boolean().optional(),
   }),
   likeCount: z.number().int().nonnegative(),
   commentCount: z.number().int().nonnegative(),

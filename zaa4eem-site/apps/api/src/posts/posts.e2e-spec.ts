@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../app.module';
+import { HttpExceptionFilter } from '../common/http-exception.filter';
 import { PrismaService } from '../prisma/prisma.service';
 
 const canRun = Boolean(process.env.DATABASE_URL);
@@ -16,6 +17,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     app = moduleRef.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api');
+    app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
     prisma = app.get(PrismaService);
   });
@@ -153,5 +155,39 @@ const canRun = Boolean(process.env.DATABASE_URL);
     const secondPageIds = secondPage.body.items.map((p: any) => p.id);
     expect(secondPageIds).toContain(ids[0]);
     expect(secondPageIds.some((id: string) => firstPageIds.includes(id))).toBe(false);
+  });
+
+  it('marks author.viewerIsFollowing in one batched query, not one per post', async () => {
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `followed-${Date.now()}@test.dev`, password: 'password123', displayName: 'Followed Author' });
+
+    const follower = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `follower-${Date.now()}@test.dev`, password: 'password123', displayName: 'Follower' });
+
+    const post = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ body: 'post from someone the viewer follows', publish: true })
+      .expect(201);
+
+    const beforeFollow = await request(app.getHttpServer())
+      .get('/api/posts?limit=1')
+      .set('Authorization', `Bearer ${follower.body.accessToken}`)
+      .expect(200);
+    expect(beforeFollow.body.items[0].author.viewerIsFollowing).toBe(false);
+
+    await request(app.getHttpServer())
+      .post(`/api/users/${author.body.user.id}/follow`)
+      .set('Authorization', `Bearer ${follower.body.accessToken}`)
+      .expect(201);
+
+    const afterFollow = await request(app.getHttpServer())
+      .get('/api/posts?limit=1')
+      .set('Authorization', `Bearer ${follower.body.accessToken}`)
+      .expect(200);
+    expect(afterFollow.body.items[0].id).toBe(post.body.id);
+    expect(afterFollow.body.items[0].author.viewerIsFollowing).toBe(true);
   });
 });

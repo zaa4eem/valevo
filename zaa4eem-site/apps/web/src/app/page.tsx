@@ -196,11 +196,13 @@ function PostCard({
   post,
   onChange,
   onDelete,
+  onToggleFollowAuthor,
   index,
 }: {
   post: Post;
   onChange: (post: Post) => void;
   onDelete: (postId: string) => void;
+  onToggleFollowAuthor: (authorId: string, currentlyFollowing: boolean) => void;
   index: number;
 }) {
   const { user } = useAuth();
@@ -211,7 +213,8 @@ function PostCard({
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
   const isOwner = post.author.role === 'OWNER';
-  const canManage = user && (user.id === post.author.id || user.role === 'OWNER');
+  const isOwnPost = user?.id === post.author.id;
+  const canManage = user && (isOwnPost || user.role === 'OWNER');
 
   async function toggleLike() {
     if (!user || busy) return;
@@ -275,6 +278,24 @@ function PostCard({
             <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
               {formatMemberNumber(post.author.memberNumber)}
             </span>
+            {user && !isOwnPost && (
+              <button
+                onClick={() => onToggleFollowAuthor(post.author.id, Boolean(post.author.viewerIsFollowing))}
+                className="z-pop-on-active"
+                style={{
+                  fontSize: 'var(--z-fs-xs)',
+                  fontWeight: 700,
+                  padding: '2px 9px',
+                  borderRadius: 999,
+                  border: `1px solid ${post.author.viewerIsFollowing ? 'var(--z-border)' : 'var(--z-accent)'}`,
+                  background: post.author.viewerIsFollowing ? 'transparent' : 'var(--z-accent-soft)',
+                  color: post.author.viewerIsFollowing ? 'var(--z-text-faint)' : 'var(--z-accent)',
+                  cursor: 'pointer',
+                }}
+              >
+                {post.author.viewerIsFollowing ? 'Подписан' : '+ Подписаться'}
+              </button>
+            )}
           </div>
           <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
             {post.publishedAt ? formatDate(post.publishedAt) : ''}
@@ -410,6 +431,26 @@ export default function HomeFeedPage() {
     setList((list ?? []).filter((p) => p.id !== postId));
   }
 
+  function setFollowingForAuthor(authorId: string, isFollowing: boolean) {
+    setList(
+      (list ?? []).map((p) =>
+        p.author.id === authorId ? { ...p, author: { ...p.author, viewerIsFollowing: isFollowing } } : p,
+      ),
+    );
+  }
+
+  async function toggleFollowAuthor(authorId: string, currentlyFollowing: boolean) {
+    // Every post by this author flips together — the feed can show several
+    // posts from the same person, and only one follow state exists for them.
+    setFollowingForAuthor(authorId, !currentlyFollowing);
+    try {
+      if (currentlyFollowing) await api.delete(`/users/${authorId}/follow`);
+      else await api.post(`/users/${authorId}/follow`);
+    } catch {
+      setFollowingForAuthor(authorId, currentlyFollowing);
+    }
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <Card
@@ -471,7 +512,14 @@ export default function HomeFeedPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {list.map((post, i) => (
-            <PostCard key={post.id} post={post} onChange={replacePost} onDelete={removePostFromList} index={i} />
+            <PostCard
+              key={post.id}
+              post={post}
+              onChange={replacePost}
+              onDelete={removePostFromList}
+              onToggleFollowAuthor={toggleFollowAuthor}
+              index={i}
+            />
           ))}
           {nextCursor && (
             <button
