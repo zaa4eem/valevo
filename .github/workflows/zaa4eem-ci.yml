@@ -52,6 +52,13 @@ jobs:
       - name: Build shared package
         run: npm run build --workspace=@zaa4eem/shared
 
+      # tsc needs the real generated client (models, enums) to typecheck
+      # against — without this it silently falls back to some default/stale
+      # client and every Prisma-typed call looks like a type error.
+      - name: Generate Prisma Client
+        working-directory: zaa4eem-site/apps/api
+        run: npx prisma generate
+
       - name: Typecheck API
         working-directory: zaa4eem-site/apps/api
         run: npx tsc --noEmit -p tsconfig.json
