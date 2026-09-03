@@ -61,16 +61,16 @@ export class UsersService {
 
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) {
-      throw new ForbiddenException('You cannot follow yourself');
+      throw new ForbiddenException('Нельзя подписаться на самого себя');
     }
     const target = await this.prisma.user.findUnique({ where: { id: followingId } });
-    if (!target) throw new NotFoundException('User not found');
+    if (!target) throw new NotFoundException('Пользователь не найден');
 
     try {
       await this.prisma.follow.create({ data: { followerId, followingId } });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('You already follow this user');
+        throw new ConflictException('Вы уже подписаны на этого пользователя');
       }
       throw err;
     }

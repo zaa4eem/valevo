@@ -22,7 +22,7 @@ export function verifyTelegramInitData(
   const params = new URLSearchParams(initData);
   const hash = params.get('hash');
   if (!hash) {
-    throw new Error('initData is missing the hash field');
+    throw new Error('В initData отсутствует поле hash');
   }
   params.delete('hash');
 
@@ -40,17 +40,17 @@ export function verifyTelegramInitData(
     computedBuf.length !== providedBuf.length ||
     !timingSafeEqual(computedBuf, providedBuf)
   ) {
-    throw new Error('initData signature is invalid');
+    throw new Error('Подпись initData недействительна');
   }
 
   const authDate = Number(params.get('auth_date'));
   if (!authDate || Date.now() / 1000 - authDate > MAX_AUTH_AGE_SECONDS) {
-    throw new Error('initData has expired');
+    throw new Error('Срок действия initData истёк');
   }
 
   const userRaw = params.get('user');
   if (!userRaw) {
-    throw new Error('initData is missing the user field');
+    throw new Error('В initData отсутствует поле user');
   }
 
   const user = JSON.parse(userRaw) as TelegramUserPayload;

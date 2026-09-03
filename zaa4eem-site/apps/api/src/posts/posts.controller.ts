@@ -94,7 +94,7 @@ export class PostsController {
     if (user.role === 'OWNER') return;
     const authorId = await this.posts.getAuthorId(postId);
     if (authorId !== user.id) {
-      throw new ForbiddenException('You can only edit your own posts');
+      throw new ForbiddenException('Можно редактировать только свои посты');
     }
   }
 }

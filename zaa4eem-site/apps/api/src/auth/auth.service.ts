@@ -29,7 +29,7 @@ export class AuthService {
     try {
       return verifyTelegramInitData(initData, this.botToken());
     } catch (err) {
-      throw new UnauthorizedException(err instanceof Error ? err.message : 'Invalid Telegram data');
+      throw new UnauthorizedException(err instanceof Error ? err.message : 'Некорректные данные Telegram');
     }
   }
 
@@ -42,7 +42,7 @@ export class AuthService {
   /** Plain-browser login page path — classic Telegram Login Widget, not Mini App initData. */
   async loginWithTelegramWidget(data: Record<string, string | number>) {
     const ok = verifyTelegramLoginWidget(data, this.botToken());
-    if (!ok) throw new UnauthorizedException('Invalid Telegram login payload');
+    if (!ok) throw new UnauthorizedException('Не удалось подтвердить вход через Telegram');
 
     const tgUser: TelegramUserPayload = {
       id: Number(data.id),
@@ -79,7 +79,7 @@ export class AuthService {
 
     const existing = await this.users.findByTelegramId(telegramId);
     if (existing && existing.id !== userId) {
-      throw new ConflictException('This Telegram account is already linked to another user');
+      throw new ConflictException('Этот Telegram-аккаунт уже привязан к другому пользователю');
     }
 
     await this.users.linkTelegram(userId, telegramId, tgUser.username);
@@ -89,7 +89,7 @@ export class AuthService {
   async register(input: RegisterInput) {
     const existing = await this.users.findByEmail(input.email);
     if (existing) {
-      throw new ConflictException('An account with this email already exists');
+      throw new ConflictException('Аккаунт с такой почтой уже существует');
     }
 
     const passwordHash = await hashPassword(input.password);
@@ -105,7 +105,7 @@ export class AuthService {
   async login(input: LoginInput) {
     const user = await this.users.findByEmail(input.email);
     if (!user || !user.passwordHash || !(await verifyPassword(input.password, user.passwordHash))) {
-      throw new UnauthorizedException('Invalid email or password');
+      throw new UnauthorizedException('Неверная почта или пароль');
     }
     return this.issueSession(user.id, user.role);
   }
@@ -113,11 +113,11 @@ export class AuthService {
   async refresh(rawRefreshToken: string) {
     const rotated = await this.tokens.rotateRefreshToken(rawRefreshToken);
     if (!rotated) {
-      throw new UnauthorizedException('Refresh token is invalid or expired');
+      throw new UnauthorizedException('Сессия истекла — войдите заново');
     }
     const user = await this.users.findById(rotated.userId);
     if (!user) {
-      throw new UnauthorizedException('User not found');
+      throw new UnauthorizedException('Пользователь не найден');
     }
     return {
       accessToken: this.tokens.signAccessToken({ sub: user.id, role: user.role }),

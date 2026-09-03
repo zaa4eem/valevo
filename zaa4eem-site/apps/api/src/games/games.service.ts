@@ -16,13 +16,13 @@ export class GamesService {
 
   async getBySlug(slug: string) {
     const game = await this.prisma.game.findUnique({ where: { slug } });
-    if (!game) throw new NotFoundException('Game not found');
+    if (!game) throw new NotFoundException('Игра не найдена');
     return serializeGame(game);
   }
 
   async submitScore(slug: string, userId: string, value: number) {
     const game = await this.prisma.game.findUnique({ where: { slug } });
-    if (!game) throw new NotFoundException('Game not found');
+    if (!game) throw new NotFoundException('Игра не найдена');
 
     const reviewState =
       value > game.maxPlausibleScore ? ScoreReviewState.HELD_FOR_REVIEW : ScoreReviewState.NORMAL;
@@ -34,7 +34,7 @@ export class GamesService {
 
   async leaderboardForGame(slug: string, limit = 20) {
     const game = await this.prisma.game.findUnique({ where: { slug } });
-    if (!game) throw new NotFoundException('Game not found');
+    if (!game) throw new NotFoundException('Игра не найдена');
 
     // Best NORMAL score per user for this game.
     const scores = await this.prisma.score.findMany({

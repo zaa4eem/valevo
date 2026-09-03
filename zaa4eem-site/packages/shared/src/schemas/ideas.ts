@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { IdeaStatus, ModerationState } from '../enums';
 
 export const createIdeaSchema = z.object({
-  title: z.string().min(4, 'Title is too short').max(120),
-  description: z.string().min(10, 'Tell us a bit more').max(2000),
+  title: z.string().min(4, 'Слишком короткий заголовок').max(120),
+  description: z.string().min(10, 'Опиши идею чуть подробнее').max(2000),
 });
 export type CreateIdeaInput = z.infer<typeof createIdeaSchema>;
 

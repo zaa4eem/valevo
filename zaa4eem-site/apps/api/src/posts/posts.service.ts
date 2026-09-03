@@ -104,7 +104,7 @@ export class PostsService {
 
   async update(id: string, data: { body?: string; publish?: boolean }) {
     const existing = await this.prisma.post.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Post not found');
+    if (!existing) throw new NotFoundException('Пост не найден');
 
     const post = await this.prisma.post.update({
       where: { id },
@@ -138,7 +138,7 @@ export class PostsService {
       await this.prisma.like.create({ data: { postId, userId } });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('You already liked this post');
+        throw new ConflictException('Вы уже лайкнули этот пост');
       }
       throw err;
     }
@@ -174,18 +174,18 @@ export class PostsService {
 
   async deleteComment(postId: string, commentId: string, actor: { id: string; isOwner: boolean }) {
     const comment = await this.prisma.comment.findUnique({ where: { id: commentId } });
-    if (!comment || comment.postId !== postId) throw new NotFoundException('Comment not found');
+    if (!comment || comment.postId !== postId) throw new NotFoundException('Комментарий не найден');
     if (!actor.isOwner && comment.authorId !== actor.id) {
-      throw new ForbiddenException('You can only delete your own comments');
+      throw new ForbiddenException('Можно удалять только свои комментарии');
     }
     await this.prisma.comment.delete({ where: { id: commentId } });
   }
 
   private async assertVisible(postId: string) {
     const post = await this.prisma.post.findUnique({ where: { id: postId } });
-    if (!post) throw new NotFoundException('Post not found');
+    if (!post) throw new NotFoundException('Пост не найден');
     if (post.moderationState === ModerationState.REMOVED) {
-      throw new ForbiddenException('This post is not available');
+      throw new ForbiddenException('Этот пост недоступен');
     }
   }
 }

@@ -63,7 +63,7 @@ export class IdeasService {
       where: { id },
       include: { submitter: true, votes: viewerId ? true : false },
     });
-    if (!idea) throw new NotFoundException('Idea not found');
+    if (!idea) throw new NotFoundException('Идея не найдена');
     return serializeIdea(idea, viewerId);
   }
 
@@ -76,7 +76,7 @@ export class IdeasService {
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        throw new ConflictException('You already voted for this idea');
+        throw new ConflictException('Вы уже голосовали за эту идею');
       }
       throw err;
     }
@@ -134,9 +134,9 @@ export class IdeasService {
 
   private async assertVisible(ideaId: string) {
     const idea = await this.prisma.idea.findUnique({ where: { id: ideaId } });
-    if (!idea) throw new NotFoundException('Idea not found');
+    if (!idea) throw new NotFoundException('Идея не найдена');
     if (idea.moderationState === ModerationState.REMOVED) {
-      throw new ForbiddenException('This idea is not available');
+      throw new ForbiddenException('Эта идея недоступна');
     }
   }
 }

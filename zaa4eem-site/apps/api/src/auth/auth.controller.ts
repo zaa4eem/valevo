@@ -8,6 +8,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import {
   loginSchema,
   registerSchema,
@@ -47,6 +48,7 @@ export class AuthController {
     return { accessToken, user };
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   async register(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     const input = registerSchema.parse(body);
@@ -55,6 +57,7 @@ export class AuthController {
     return { accessToken, user };
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   async login(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     const input = loginSchema.parse(body);
@@ -63,10 +66,11 @@ export class AuthController {
     return { accessToken, user };
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('refresh')
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const raw = req.cookies?.[REFRESH_COOKIE];
-    if (!raw) throw new UnauthorizedException('No refresh token');
+    if (!raw) throw new UnauthorizedException('Сессия истекла, войдите заново');
     const { accessToken, refreshToken } = await this.auth.refresh(raw);
     res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
     return { accessToken };

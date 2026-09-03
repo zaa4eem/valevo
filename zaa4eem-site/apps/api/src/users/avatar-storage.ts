@@ -33,7 +33,7 @@ export const avatarUploadOptions = {
   limits: { fileSize: AVATAR_MAX_BYTES },
   fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (!EXT_BY_MIME[file.mimetype]) {
-      cb(new BadRequestException('Unsupported image type — use JPEG, PNG, WEBP or GIF'));
+      cb(new BadRequestException('Неподдерживаемый тип изображения — используйте JPEG, PNG, WEBP или GIF'));
       return;
     }
     cb(null, true);

@@ -8,7 +8,7 @@ export class OwnerGuard implements CanActivate {
     const request = context.switchToHttp().getRequest();
     const user: RequestUser | undefined = request.user;
     if (!user || user.role !== 'OWNER') {
-      throw new ForbiddenException('Owner access required');
+      throw new ForbiddenException('Доступно только владельцу');
     }
     return true;
   }

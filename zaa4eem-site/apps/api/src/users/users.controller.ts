@@ -36,7 +36,7 @@ export class UsersController {
   @Get('me')
   async me(@CurrentUser() user: RequestUser) {
     const profile = await this.users.getPublicProfile(user.id);
-    if (!profile) throw new NotFoundException('User not found');
+    if (!profile) throw new NotFoundException('Пользователь не найден');
     return profile;
   }
 
@@ -49,7 +49,7 @@ export class UsersController {
     for (const text of [input.bio, input.statusText]) {
       if (text && this.moderation.classify(text) === 'PENDING_REVIEW') {
         // Held rather than rejected: keep the previous value, surface the issue.
-        throw new BadRequestException('Text did not pass content review — please rephrase.');
+        throw new BadRequestException('Текст не прошёл проверку — попробуйте переформулировать.');
       }
     }
 
@@ -61,7 +61,7 @@ export class UsersController {
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('avatar', avatarUploadOptions))
   async uploadAvatar(@CurrentUser() user: RequestUser, @UploadedFile() file?: Express.Multer.File) {
-    if (!file) throw new BadRequestException('No file uploaded');
+    if (!file) throw new BadRequestException('Файл не загружен');
     const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
     const avatarUrl = `${origin}/uploads/avatars/${file.filename}`;
     await this.users.updateProfile(user.id, { avatarUrl });
@@ -72,7 +72,7 @@ export class UsersController {
   @Get(':id')
   async byId(@Param('id') id: string, @Req() req: Request & { user?: RequestUser }) {
     const profile = await this.users.getPublicProfile(id, req.user?.id);
-    if (!profile) throw new NotFoundException('User not found');
+    if (!profile) throw new NotFoundException('Пользователь не найден');
     return profile;
   }
 

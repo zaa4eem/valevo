@@ -1,3 +1,5 @@
+import './zod-ru';
+
 export * from './enums';
 export * from './moderation/classify';
 export * from './moderation/banned-words';
