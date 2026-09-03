@@ -18,6 +18,11 @@ import { AdminModule } from './admin/admin.module';
       {
         ttl: 60_000,
         limit: 60,
+        // Rate limits would otherwise trip on their own e2e suite: dozens of
+        // specs share one in-process "IP" and blow past a tight per-route
+        // limit (e.g. 5/min on POST /posts) well before real traffic ever
+        // would.
+        skipIf: () => process.env.NODE_ENV === 'test',
       },
     ]),
     PrismaModule,

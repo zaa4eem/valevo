@@ -1,22 +1,38 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Post } from '@zaa4eem/shared';
+import type { PaginatedPosts, Post } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 
 export default function AdminPostsPage() {
   const [posts, setPosts] = useState<Post[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
-    setPosts(await api.get<Post[]>('/posts'));
+    const page = await api.get<PaginatedPosts>('/posts?limit=50');
+    setPosts(page.items);
+    setNextCursor(page.nextCursor);
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.get<PaginatedPosts>(`/posts?limit=50&cursor=${nextCursor}`);
+      setPosts((prev) => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function publish(e: React.FormEvent) {
     e.preventDefault();
@@ -65,6 +81,16 @@ export default function AdminPostsPage() {
             </div>
           </Card>
         ))}
+        {nextCursor && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="z-btn-ghost z-pop-on-active"
+            style={{ alignSelf: 'center', opacity: loadingMore ? 0.6 : 1 }}
+          >
+            {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+          </button>
+        )}
       </div>
     </div>
   );

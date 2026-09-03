@@ -31,11 +31,13 @@ export class IdeasController {
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   list(@Query() query: unknown, @Req() req: Request & { user?: RequestUser }) {
-    const { sort } = ideasQuerySchema.parse(query);
+    const { sort, cursor, limit } = ideasQuerySchema.parse(query);
     return this.ideas.list({
       sort,
       viewerId: req.user?.id,
       viewerIsOwner: req.user?.role === 'OWNER',
+      cursor,
+      limit,
     });
   }
 

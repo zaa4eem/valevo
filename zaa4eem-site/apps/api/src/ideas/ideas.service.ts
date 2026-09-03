@@ -43,7 +43,14 @@ export class IdeasService {
    * (including PENDING_REVIEW) so they can moderate from the same board if
    * they choose, though the dedicated admin queue is the primary workflow.
    */
-  async list(opts: { sort: 'top' | 'new'; viewerId?: string; viewerIsOwner: boolean }) {
+  async list(opts: {
+    sort: 'top' | 'new';
+    viewerId?: string;
+    viewerIsOwner: boolean;
+    cursor?: string;
+    limit?: number;
+  }) {
+    const limit = opts.limit ?? 20;
     const where = opts.viewerIsOwner
       ? {}
       : { moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] } };
@@ -51,11 +58,20 @@ export class IdeasService {
     const ideas = await this.prisma.idea.findMany({
       where,
       include: { submitter: true, votes: opts.viewerId ? true : false },
-      orderBy: opts.sort === 'top' ? { voteCount: 'desc' } : { createdAt: 'desc' },
-      take: 50,
+      orderBy:
+        opts.sort === 'top'
+          ? [{ voteCount: 'desc' }, { id: 'desc' }]
+          : [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
     });
 
-    return ideas.map((idea) => serializeIdea(idea, opts.viewerId));
+    const hasMore = ideas.length > limit;
+    const items = hasMore ? ideas.slice(0, limit) : ideas;
+    return {
+      items: items.map((idea) => serializeIdea(idea, opts.viewerId)),
+      nextCursor: hasMore ? items[items.length - 1].id : null,
+    };
   }
 
   async getById(id: string, viewerId?: string) {

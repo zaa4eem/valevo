@@ -48,7 +48,13 @@ export class PostsService {
     private readonly moderation: ModerationService,
   ) {}
 
-  async listPublished(opts: { viewerId?: string; viewerIsOwner: boolean }, limit = 30) {
+  async listPublished(opts: {
+    viewerId?: string;
+    viewerIsOwner: boolean;
+    cursor?: string;
+    limit?: number;
+  }) {
+    const limit = opts.limit ?? 20;
     const where = opts.viewerIsOwner
       ? { publishedAt: { not: null } }
       : {
@@ -63,10 +69,17 @@ export class PostsService {
         _count: { select: { likes: true, comments: true } },
         likes: opts.viewerId ? { where: { userId: opts.viewerId } } : false,
       },
-      orderBy: { publishedAt: 'desc' },
-      take: limit,
+      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+      ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
     });
-    return posts.map((post) => serializePost(post, opts.viewerId));
+
+    const hasMore = posts.length > limit;
+    const items = hasMore ? posts.slice(0, limit) : posts;
+    return {
+      items: items.map((post) => serializePost(post, opts.viewerId)),
+      nextCursor: hasMore ? items[items.length - 1].id : null,
+    };
   }
 
   /** Owners may post any time; everyone else is limited to one post per 12h (FR: v1.0.1). */

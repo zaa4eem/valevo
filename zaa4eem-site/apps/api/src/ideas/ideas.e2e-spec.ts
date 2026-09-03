@@ -49,8 +49,11 @@ const canRun = Boolean(process.env.DATABASE_URL);
 
     expect(created.body.status).toBe('NEW');
 
-    const board = await request(app.getHttpServer()).get('/api/ideas').expect(200);
-    expect(board.body.some((idea: any) => idea.id === created.body.id)).toBe(true);
+    // sort=new (not the default "top") so a brand-new, zero-vote idea is
+    // guaranteed to be on the first page regardless of how many
+    // higher-voted ideas already exist.
+    const board = await request(app.getHttpServer()).get('/api/ideas?sort=new').expect(200);
+    expect(board.body.items.some((idea: any) => idea.id === created.body.id)).toBe(true);
   });
 
   it('rejects a second vote from the same user with 409', async () => {
@@ -87,5 +90,34 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .set('Authorization', `Bearer ${token}`)
       .send({ status: 'ACCEPTED' })
       .expect(403);
+  });
+
+  it('paginates the board with a cursor', async () => {
+    const token = await registerUser(`ideapager-${Date.now()}@test.dev`, 'Idea Pager');
+
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const created = await request(app.getHttpServer())
+        .post('/api/ideas')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ title: `Paged idea ${i}`, description: 'Used to test cursor pagination.' })
+        .expect(201);
+      ids.push(created.body.id);
+    }
+
+    const firstPage = await request(app.getHttpServer())
+      .get('/api/ideas?sort=new&limit=2')
+      .expect(200);
+    expect(firstPage.body.items).toHaveLength(2);
+    expect(firstPage.body.nextCursor).not.toBeNull();
+    const firstPageIds = firstPage.body.items.map((idea: any) => idea.id);
+    expect(new Set(firstPageIds)).toEqual(new Set([ids[1], ids[2]]));
+
+    const secondPage = await request(app.getHttpServer())
+      .get(`/api/ideas?sort=new&limit=2&cursor=${firstPage.body.nextCursor}`)
+      .expect(200);
+    const secondPageIds = secondPage.body.items.map((idea: any) => idea.id);
+    expect(secondPageIds).toContain(ids[0]);
+    expect(secondPageIds.some((id: string) => firstPageIds.includes(id))).toBe(false);
   });
 });

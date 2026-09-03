@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import type { Idea } from '@zaa4eem/shared';
+import type { Idea, PaginatedIdeas } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { IdeaCard } from '@/components/IdeaCard';
@@ -11,15 +11,18 @@ export default function IdeasPage() {
   const { user } = useAuth();
   const [sort, setSort] = useState<'top' | 'new'>('top');
   const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const data = await api.get<Idea[]>(`/ideas?sort=${sort}`);
-      setIdeas(data);
+      const page = await api.get<PaginatedIdeas>(`/ideas?sort=${sort}`);
+      setIdeas(page.items);
+      setNextCursor(page.nextCursor);
     } catch {
       setError(true);
     } finally {
@@ -30,6 +33,18 @@ export default function IdeasPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.get<PaginatedIdeas>(`/ideas?sort=${sort}&cursor=${nextCursor}`);
+      setIdeas((prev) => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <div>
@@ -77,8 +92,18 @@ export default function IdeasPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {ideas.map((idea) => (
-            <IdeaCard key={idea.id} idea={idea} onVoteChange={load} />
+            <IdeaCard key={idea.id} idea={idea} />
           ))}
+          {nextCursor && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="z-btn-ghost z-pop-on-active"
+              style={{ alignSelf: 'center', opacity: loadingMore ? 0.6 : 1 }}
+            >
+              {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+            </button>
+          )}
         </div>
       )}
     </div>

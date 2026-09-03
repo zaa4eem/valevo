@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import type { Idea, IdeaStatus } from '@zaa4eem/shared';
+import type { Idea, IdeaStatus, PaginatedIdeas } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 
@@ -16,6 +16,8 @@ const STATUS_FLOW: { value: IdeaStatus; label: string }[] = [
 
 export default function AdminIdeasPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -23,8 +25,9 @@ export default function AdminIdeasPage() {
     setLoading(true);
     setError(false);
     try {
-      const data = await api.get<Idea[]>('/ideas?sort=new');
-      setIdeas(data);
+      const page = await api.get<PaginatedIdeas>('/ideas?sort=new&limit=50');
+      setIdeas(page.items);
+      setNextCursor(page.nextCursor);
     } catch {
       setError(true);
     } finally {
@@ -35,6 +38,18 @@ export default function AdminIdeasPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.get<PaginatedIdeas>(`/ideas?sort=new&limit=50&cursor=${nextCursor}`);
+      setIdeas((prev) => [...prev, ...page.items]);
+      setNextCursor(page.nextCursor);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function changeStatus(id: string, status: IdeaStatus) {
     await api.patch(`/ideas/${id}/status`, { status });
@@ -95,6 +110,16 @@ export default function AdminIdeasPage() {
             </div>
           </Card>
         ))}
+        {nextCursor && (
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="z-btn-ghost z-pop-on-active"
+            style={{ alignSelf: 'center', opacity: loadingMore ? 0.6 : 1 }}
+          >
+            {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+          </button>
+        )}
       </div>
     </div>
   );

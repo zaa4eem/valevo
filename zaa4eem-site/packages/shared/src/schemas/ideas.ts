@@ -40,6 +40,13 @@ export type Idea = z.infer<typeof ideaSchema>;
 
 export const ideasQuerySchema = z.object({
   sort: z.enum(['top', 'new']).default('top'),
-  cursor: z.string().optional(),
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
 });
 export type IdeasQuery = z.infer<typeof ideasQuerySchema>;
+
+export const paginatedIdeasSchema = z.object({
+  items: z.array(ideaSchema),
+  nextCursor: z.string().uuid().nullable(),
+});
+export type PaginatedIdeas = z.infer<typeof paginatedIdeasSchema>;

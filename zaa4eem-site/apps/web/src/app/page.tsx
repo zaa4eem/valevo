@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import type { Comment, Post } from '@zaa4eem/shared';
+import { useCallback, useEffect, useState } from 'react';
+import type { Comment, PaginatedPosts, Post } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
 import { api, ApiError } from '@/lib/api-client';
@@ -230,16 +230,47 @@ function PostCard({ post, onChange, index }: { post: Post; onChange: (post: Post
 
 export default function HomeFeedPage() {
   const { user } = useAuth();
-  const { data: fetched, error } = useApiData<Post[]>('/posts');
-  const [posts, setPosts] = useState<Post[] | null>(null);
-  const list = posts ?? fetched;
+  const [list, setList] = useState<Post[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const loadFirstPage = useCallback(async () => {
+    setError(false);
+    try {
+      const page = await api.get<PaginatedPosts>('/posts');
+      setList(page.items);
+      setNextCursor(page.nextCursor);
+    } catch {
+      setError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFirstPage();
+  }, [loadFirstPage]);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await api.get<PaginatedPosts>(`/posts?cursor=${nextCursor}`);
+      setList([...(list ?? []), ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch {
+      // Leave the loaded posts as-is — the "Показать ещё" button stays put
+      // so the viewer can simply try again instead of losing their scroll spot.
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   function replacePost(updated: Post) {
-    setPosts((list ?? []).map((p) => (p.id === updated.id ? updated : p)));
+    setList((list ?? []).map((p) => (p.id === updated.id ? updated : p)));
   }
 
   function prependPost(post: Post) {
-    setPosts([post, ...(list ?? [])]);
+    setList([post, ...(list ?? [])]);
   }
 
   return (
@@ -305,6 +336,16 @@ export default function HomeFeedPage() {
           {list.map((post, i) => (
             <PostCard key={post.id} post={post} onChange={replacePost} index={i} />
           ))}
+          {nextCursor && (
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="z-btn-ghost z-pop-on-active"
+              style={{ alignSelf: 'center', opacity: loadingMore ? 0.6 : 1 }}
+            >
+              {loadingMore ? 'Загрузка…' : 'Показать ещё'}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -49,3 +49,15 @@ export const commentSchema = z.object({
   }),
 });
 export type Comment = z.infer<typeof commentSchema>;
+
+export const postsQuerySchema = z.object({
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type PostsQuery = z.infer<typeof postsQuerySchema>;
+
+export const paginatedPostsSchema = z.object({
+  items: z.array(postSchema),
+  nextCursor: z.string().uuid().nullable(),
+});
+export type PaginatedPosts = z.infer<typeof paginatedPostsSchema>;

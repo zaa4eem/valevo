@@ -7,12 +7,18 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
-import { createCommentSchema, createPostSchema, updatePostSchema } from '@zaa4eem/shared';
+import {
+  createCommentSchema,
+  createPostSchema,
+  postsQuerySchema,
+  updatePostSchema,
+} from '@zaa4eem/shared';
 import { PostsService } from './posts.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
@@ -24,10 +30,13 @@ export class PostsController {
 
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
-  list(@Req() req: Request & { user?: RequestUser }) {
+  list(@Query() query: unknown, @Req() req: Request & { user?: RequestUser }) {
+    const { cursor, limit } = postsQuerySchema.parse(query);
     return this.posts.listPublished({
       viewerId: req.user?.id,
       viewerIsOwner: req.user?.role === 'OWNER',
+      cursor,
+      limit,
     });
   }
 
