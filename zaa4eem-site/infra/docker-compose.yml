@@ -34,6 +34,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Healthcheck is defined in apps/api/Dockerfile (image-level, so it also
+    # applies when this image runs outside this compose file).
     expose:
       - '3001'
     networks:
@@ -62,7 +64,8 @@ services:
       # while nginx-proxy connects on VIRTUAL_PORT=3000 above → 502.
       PORT: '3000'
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     expose:
       - '3000'
     networks:
@@ -77,7 +80,8 @@ services:
     restart: unless-stopped
     env_file: .env
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - default
 

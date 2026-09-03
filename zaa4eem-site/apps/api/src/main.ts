@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import * as path from 'path';
@@ -22,7 +22,9 @@ async function bootstrap() {
   app.enableCors({ origin: webOrigins, credentials: true });
 
   app.use(cookieParser());
-  app.setGlobalPrefix('api');
+  // Bare /health (not /api/health) so Docker's HEALTHCHECK and an external
+  // uptime monitor don't need to know about API path versioning.
+  app.setGlobalPrefix('api', { exclude: [{ path: 'health', method: RequestMethod.GET }] });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new HttpExceptionFilter());
 

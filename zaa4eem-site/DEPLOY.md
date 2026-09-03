@@ -115,11 +115,20 @@ docker compose -f infra/docker-compose.yml exec api npm run prisma:seed --worksp
 
 - `https://zaa4eem.ru` loads the site with a valid padlock.
 - `https://api.zaa4eem.ru/api/games` returns the seeded Neon Snake JSON.
+- `https://api.zaa4eem.ru/health` returns `{"status":"ok","db":true,...}` —
+  also what `docker compose ps` checks under the hood (see `HEALTHCHECK` in
+  `apps/api/Dockerfile`); `web` and `bot` won't start until it reports
+  healthy.
 - Open the bot in Telegram, tap the menu button — the Mini App should load
   and auto-sign you in as the owner.
 - Run through `specs/001-zaa4eem-platform/quickstart.md`'s four validation
   scenarios (P1–P4), plus `apps/web/e2e/telegram-miniapp.md`'s manual
   Telegram checklist.
+
+## Backups
+
+Set up `infra/backup.sh` on a cron schedule once the stack is running — see
+`infra/BACKUPS.md` for the cron line and how to restore a dump.
 
 ## Updating a running deployment
 

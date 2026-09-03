@@ -1,0 +1,73 @@
+name: ZAA4EEM CI
+
+# Scoped to the zaa4eem-site/ subtree only — this repo also hosts the
+# unrelated Н12 bot project, and this workflow must never run for or
+# interfere with changes there.
+on:
+  push:
+    branches: [zaa4eem-site, main]
+    paths: ['zaa4eem-site/**']
+  pull_request:
+    paths: ['zaa4eem-site/**']
+
+defaults:
+  run:
+    working-directory: zaa4eem-site
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: zaa4eem
+          POSTGRES_PASSWORD: zaa4eem
+          POSTGRES_DB: zaa4eem_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zaa4eem -d zaa4eem_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://zaa4eem:zaa4eem@localhost:5432/zaa4eem_ci
+      JWT_ACCESS_SECRET: ci-only-access-secret-do-not-reuse
+      JWT_REFRESH_SECRET: ci-only-refresh-secret-do-not-reuse
+      TELEGRAM_BOT_TOKEN: '123:ci-test-token'
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: zaa4eem-site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        run: npm run build --workspace=@zaa4eem/shared
+
+      - name: Typecheck API
+        working-directory: zaa4eem-site/apps/api
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Typecheck web
+        working-directory: zaa4eem-site/apps/web
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Apply database migrations
+        working-directory: zaa4eem-site/apps/api
+        run: npx prisma migrate deploy
+
+      - name: Run API tests
+        working-directory: zaa4eem-site/apps/api
+        run: npm test
+
+      - name: Build web
+        working-directory: zaa4eem-site/apps/web
+        run: npx next build

@@ -10,6 +10,7 @@ build/
 apps/api/generated/
 apps/api/prisma/dev.db
 apps/api/uploads/
+infra/backups/
 *.tsbuildinfo
 test-results/
 playwright-report/

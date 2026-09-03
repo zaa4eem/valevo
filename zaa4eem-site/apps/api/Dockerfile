@@ -50,4 +50,8 @@ COPY apps/api/tsconfig.json apps/api/tsconfig.json
 
 WORKDIR /repo/apps/api
 EXPOSE 3001
+# No curl/wget in node:20-slim — use Node's own http client instead of
+# adding an apt package just for this.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:3001/health',res=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "dist/main.js"]
