@@ -11,6 +11,11 @@ function serializeUserSummary(user: any) {
     displayName: user.displayName,
     avatarUrl: user.avatarUrl,
     role: user.role,
+    isPremium: user.isPremium,
+    nameStyle: user.nameStyle,
+    nameColor: user.nameColor,
+    ringStyle: user.ringStyle,
+    badgeEmoji: user.badgeEmoji,
   };
 }
 
@@ -196,6 +201,11 @@ export class UsersService {
       followerCount,
       followingCount,
       viewerIsFollowing: viewerId ? Boolean(viewerFollow) : undefined,
+      isPremium: user.isPremium,
+      nameStyle: user.nameStyle,
+      nameColor: user.nameColor,
+      ringStyle: user.ringStyle,
+      badgeEmoji: user.badgeEmoji,
       stats: {
         ideasSubmittedCount,
         ideasAcceptedCount,

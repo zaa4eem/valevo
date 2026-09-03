@@ -82,4 +82,77 @@ const canRun = Boolean(process.env.DATABASE_URL);
     const todayCount = res.body.userGrowth[res.body.userGrowth.length - 1].count;
     expect(todayCount).toBeGreaterThanOrEqual(1);
   });
+
+  it('grants and revokes Premium, owner-only', async () => {
+    const ownerEmail = `premowner-${Date.now()}@test.dev`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: ownerEmail, password: 'password123', displayName: 'Prem Owner' });
+    await prisma.user.update({ where: { email: ownerEmail }, data: { role: 'OWNER' } });
+    const ownerLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ownerEmail, password: 'password123' });
+    const ownerToken = ownerLogin.body.accessToken as string;
+
+    const target = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `premtarget-${Date.now()}@test.dev`, password: 'password123', displayName: 'Prem Target' });
+    const targetToken = target.body.accessToken as string;
+    const targetId = target.body.user.id as string;
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${targetId}/premium`)
+      .set('Authorization', `Bearer ${targetToken}`)
+      .send({ isPremium: true, nameStyle: 'GLOW', nameColor: '#ff00aa', ringStyle: 'SPIN', badgeEmoji: '👑' })
+      .expect(403);
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${targetId}/premium`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ isPremium: true, nameStyle: 'GLOW', nameColor: '#ff00aa', ringStyle: 'SPIN', badgeEmoji: '👑' })
+      .expect(200);
+
+    const profileAfterGrant = await request(app.getHttpServer())
+      .get(`/api/users/${targetId}`)
+      .expect(200);
+    expect(profileAfterGrant.body.isPremium).toBe(true);
+    expect(profileAfterGrant.body.nameStyle).toBe('GLOW');
+    expect(profileAfterGrant.body.nameColor).toBe('#ff00aa');
+    expect(profileAfterGrant.body.ringStyle).toBe('SPIN');
+    expect(profileAfterGrant.body.badgeEmoji).toBe('👑');
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${targetId}/premium`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ isPremium: false })
+      .expect(200);
+
+    const profileAfterRevoke = await request(app.getHttpServer())
+      .get(`/api/users/${targetId}`)
+      .expect(200);
+    expect(profileAfterRevoke.body.isPremium).toBe(false);
+    expect(profileAfterRevoke.body.nameStyle).toBeNull();
+    expect(profileAfterRevoke.body.badgeEmoji).toBeNull();
+  });
+
+  it('rejects an invalid Premium name color', async () => {
+    const ownerEmail = `premowner2-${Date.now()}@test.dev`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: ownerEmail, password: 'password123', displayName: 'Prem Owner 2' });
+    await prisma.user.update({ where: { email: ownerEmail }, data: { role: 'OWNER' } });
+    const ownerLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ownerEmail, password: 'password123' });
+
+    const target = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `premtarget2-${Date.now()}@test.dev`, password: 'password123', displayName: 'Prem Target 2' });
+
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${target.body.user.id}/premium`)
+      .set('Authorization', `Bearer ${ownerLogin.body.accessToken}`)
+      .send({ isPremium: true, nameStyle: 'GLOW', nameColor: 'not-a-color' })
+      .expect(400);
+  });
 });

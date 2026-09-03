@@ -1,0 +1,135 @@
+/* Premium cosmetics — owner-granted nickname/avatar effects. Deliberately a
+   standalone stylesheet (not tokens.css) imported directly by the premium
+   components that use it, so it never collides with the app's shared design
+   tokens. Colors are theme-aware via tokens.css's --z-* custom properties
+   except where a style is explicitly a custom solid color (GLOW) or needs
+   its own dedicated stops (HOLO). */
+
+@keyframes zp-flow {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.pname-flow {
+  background: linear-gradient(90deg, var(--z-accent), #60a5fa, #c084fc, var(--z-accent));
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: zp-flow 6s ease-in-out infinite;
+  font-weight: 800;
+}
+
+:root {
+  --holo-1: #ffb6d9;
+  --holo-2: #c4b5fd;
+  --holo-3: #93e8fd;
+  --holo-4: #bbf7d0;
+  --holo-5: #fde68a;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="light"]) {
+    --holo-1: #d6336c;
+    --holo-2: #7c3aed;
+    --holo-3: #0891b2;
+    --holo-4: #15803d;
+    --holo-5: #b45309;
+  }
+}
+:root[data-theme="light"] {
+  --holo-1: #d6336c;
+  --holo-2: #7c3aed;
+  --holo-3: #0891b2;
+  --holo-4: #15803d;
+  --holo-5: #b45309;
+}
+
+@keyframes zp-holo {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+.pname-holo {
+  background: linear-gradient(
+    90deg,
+    var(--holo-1),
+    var(--holo-2),
+    var(--holo-3),
+    var(--holo-4),
+    var(--holo-5),
+    var(--holo-1)
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: zp-holo 5s linear infinite;
+  font-weight: 800;
+}
+
+.pname-glow {
+  color: var(--glow-color, var(--z-accent));
+  text-shadow: 0 0 8px var(--glow-shadow, var(--z-accent-soft)), 0 0 2px var(--glow-shadow, var(--z-accent-soft));
+  font-weight: 800;
+}
+
+@keyframes zp-ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+.ring-spin {
+  position: relative;
+}
+.ring-spin::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  padding: 3px;
+  background: conic-gradient(from 0deg, var(--z-accent), #60a5fa, #c084fc, var(--z-accent));
+  -webkit-mask:
+    radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask:
+    radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  animation: zp-ring-spin 3s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes zp-ring-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}
+
+.ring-pulse {
+  position: relative;
+}
+.ring-pulse::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--z-accent-soft) 0%, transparent 70%);
+  animation: zp-ring-pulse 2.2s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes zp-emoji-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.pemoji {
+  display: inline-block;
+  animation: zp-emoji-bounce 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pname-flow,
+  .pname-holo,
+  .ring-spin::before,
+  .ring-pulse::before,
+  .pemoji {
+    animation: none;
+  }
+}

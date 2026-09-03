@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { premiumBadgeEmojiValues, premiumFieldsSchema, premiumNameStyleValues, premiumRingStyleValues } from './users';
 
 export const moderationActionSchema = z.object({
   reason: z.string().min(1).max(500),
@@ -44,16 +45,32 @@ export const adminStatsSchema = z.object({
 });
 export type AdminStats = z.infer<typeof adminStatsSchema>;
 
-export const adminUserListItemSchema = z.object({
-  id: z.string().uuid(),
-  memberNumber: z.number().int().positive(),
-  displayName: z.string(),
-  avatarUrl: z.string().nullable(),
-  role: z.enum(['OWNER', 'SUBSCRIBER']),
-  status: z.enum(['ACTIVE', 'MUTED', 'BANNED']),
-  email: z.string().nullable(),
-  telegramUsername: z.string().nullable(),
-  followerCount: z.number().int().nonnegative(),
-  createdAt: z.string(),
-});
+export const adminUserListItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    memberNumber: z.number().int().positive(),
+    displayName: z.string(),
+    avatarUrl: z.string().nullable(),
+    role: z.enum(['OWNER', 'SUBSCRIBER']),
+    status: z.enum(['ACTIVE', 'MUTED', 'BANNED']),
+    email: z.string().nullable(),
+    telegramUsername: z.string().nullable(),
+    followerCount: z.number().int().nonnegative(),
+    createdAt: z.string(),
+  })
+  .merge(premiumFieldsSchema);
 export type AdminUserListItem = z.infer<typeof adminUserListItemSchema>;
+
+/** Owner-only Premium grant/config — never self-service, hence no "self" variant of this schema. */
+export const setPremiumSchema = z.object({
+  isPremium: z.boolean(),
+  nameStyle: z.enum(premiumNameStyleValues).nullable().optional(),
+  nameColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, 'Цвет должен быть в формате #RRGGBB')
+    .nullable()
+    .optional(),
+  ringStyle: z.enum(premiumRingStyleValues).nullable().optional(),
+  badgeEmoji: z.enum(premiumBadgeEmojiValues).nullable().optional(),
+});
+export type SetPremiumInput = z.infer<typeof setPremiumSchema>;

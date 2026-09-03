@@ -27,6 +27,17 @@ enum IdeaStatus {
   DECLINED
 }
 
+enum PremiumNameStyle {
+  FLOW
+  HOLO
+  GLOW
+}
+
+enum PremiumRingStyle {
+  SPIN
+  PULSE
+}
+
 enum ModerationState {
   CLEAN
   PENDING_REVIEW
@@ -61,6 +72,15 @@ model User {
   passwordHash      String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
+
+  // Premium cosmetics — owner-granted only, never self-service. nameColor is
+  // only meaningful when nameStyle is GLOW; FLOW/HOLO compute their colors
+  // from the viewer's theme instead (see the frontend's premium styles).
+  isPremium         Boolean           @default(false)
+  nameStyle         PremiumNameStyle?
+  nameColor         String?
+  ringStyle         PremiumRingStyle?
+  badgeEmoji        String?
 
   posts             Post[]
   ideas             Idea[]

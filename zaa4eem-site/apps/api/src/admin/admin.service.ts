@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { IdeaStatus, ModerationState } from '@zaa4eem/shared';
+import { IdeaStatus, ModerationState, SetPremiumInput } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from '../auth/token.service';
 
@@ -75,6 +75,11 @@ export class AdminService {
       telegramUsername: u.telegramUsername,
       followerCount: u._count.followers,
       createdAt: u.createdAt.toISOString(),
+      isPremium: u.isPremium,
+      nameStyle: u.nameStyle,
+      nameColor: u.nameColor,
+      ringStyle: u.ringStyle,
+      badgeEmoji: u.badgeEmoji,
     }));
   }
 
@@ -176,6 +181,22 @@ export class AdminService {
   async activateUser(userId: string, actorId: string) {
     await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
     await this.logAction(actorId, 'USER', userId, 'activate');
+  }
+
+  /** Cosmetic-only, owner-granted — never self-service (no equivalent user-facing endpoint exists). */
+  async setPremium(userId: string, actorId: string, input: SetPremiumInput) {
+    const data = input.isPremium
+      ? {
+          isPremium: true,
+          nameStyle: input.nameStyle ?? null,
+          nameColor: input.nameColor ?? null,
+          ringStyle: input.ringStyle ?? null,
+          badgeEmoji: input.badgeEmoji ?? null,
+        }
+      : { isPremium: false, nameStyle: null, nameColor: null, ringStyle: null, badgeEmoji: null };
+
+    await this.prisma.user.update({ where: { id: userId }, data });
+    await this.logAction(actorId, 'USER', userId, input.isPremium ? 'premium:granted' : 'premium:revoked');
   }
 
   private logAction(
