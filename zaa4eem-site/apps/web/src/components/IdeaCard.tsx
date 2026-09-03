@@ -6,6 +6,7 @@ import type { Idea } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { haptic } from '@/lib/telegram';
+import { Avatar } from './Avatar';
 import { Card } from './Card';
 
 const STATUS_LABELS: Record<string, string> = {
@@ -17,7 +18,37 @@ const STATUS_LABELS: Record<string, string> = {
   DECLINED: 'Отклонена',
 };
 
-export function IdeaCard({ idea, onVoteChange }: { idea: Idea; onVoteChange?: () => void }) {
+// A sequential accent ramp for status, the same color-mix technique the
+// admin dashboard's charts use — brighter accent the further along an idea
+// is, rather than an arbitrary hardcoded color per status.
+const STATUS_TINTS: Record<string, string> = {
+  NEW: 'color-mix(in oklab, var(--z-accent) 20%, var(--z-surface))',
+  UNDER_REVIEW: 'color-mix(in oklab, var(--z-accent) 35%, var(--z-surface))',
+  ACCEPTED: 'color-mix(in oklab, var(--z-accent) 55%, var(--z-surface))',
+  IN_PROGRESS: 'color-mix(in oklab, var(--z-accent) 75%, var(--z-surface))',
+  SHIPPED: 'color-mix(in oklab, var(--z-accent) 90%, var(--z-surface))',
+  DECLINED: 'var(--z-surface-hover)',
+};
+// Lighter tints keep the accent as text color for contrast; the more
+// saturated tints (IN_PROGRESS/SHIPPED) switch to the on-accent color.
+const STATUS_TEXT: Record<string, string> = {
+  NEW: 'var(--z-accent)',
+  UNDER_REVIEW: 'var(--z-accent)',
+  ACCEPTED: 'var(--z-accent)',
+  IN_PROGRESS: 'var(--z-accent-text-on)',
+  SHIPPED: 'var(--z-accent-text-on)',
+  DECLINED: 'var(--z-text-faint)',
+};
+
+export function IdeaCard({
+  idea,
+  onVoteChange,
+  index = 0,
+}: {
+  idea: Idea;
+  onVoteChange?: () => void;
+  index?: number;
+}) {
   const { user } = useAuth();
   const [voteCount, setVoteCount] = useState(idea.voteCount);
   const [hasVoted, setHasVoted] = useState(Boolean(idea.viewerHasVoted));
@@ -48,12 +79,20 @@ export function IdeaCard({ idea, onVoteChange }: { idea: Idea; onVoteChange?: ()
   }
 
   return (
-    <Card>
+    <Card
+      hover
+      className="z-animate-in"
+      style={{
+        animationDelay: `${Math.min(index, 8) * 45}ms`,
+        borderLeft: `3px solid ${STATUS_TINTS[idea.status] ?? 'transparent'}`,
+      }}
+    >
       <div style={{ display: 'flex', gap: 16 }}>
         <button
           onClick={toggleVote}
           disabled={!user || pending}
           title={user ? 'Голосовать' : 'Войдите, чтобы голосовать'}
+          className="z-pop-on-active"
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -68,14 +107,23 @@ export function IdeaCard({ idea, onVoteChange }: { idea: Idea; onVoteChange?: ()
             color: hasVoted ? 'var(--z-accent)' : 'var(--z-text-muted)',
             cursor: user ? 'pointer' : 'not-allowed',
             fontWeight: 800,
+            transition: 'transform .25s cubic-bezier(0.34, 1.56, 0.64, 1), color .2s ease, border-color .2s ease',
           }}
         >
-          <span>▲</span>
+          <span style={{ fontSize: 'var(--z-fs-lg)', lineHeight: 1 }}>▲</span>
           <span>{voteCount}</span>
         </button>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-            <span className="z-badge">{STATUS_LABELS[idea.status] ?? idea.status}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
+            <span
+              className="z-badge"
+              style={{
+                background: STATUS_TINTS[idea.status] ?? 'var(--z-accent-soft)',
+                color: STATUS_TEXT[idea.status] ?? 'var(--z-accent)',
+              }}
+            >
+              {STATUS_LABELS[idea.status] ?? idea.status}
+            </span>
             {idea.moderationState === 'PENDING_REVIEW' && (
               <span className="z-badge" style={{ background: 'rgba(251,191,36,0.15)', color: 'var(--z-warning)' }}>
                 На проверке
@@ -88,7 +136,8 @@ export function IdeaCard({ idea, onVoteChange }: { idea: Idea; onVoteChange?: ()
           <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: 6 }}>
             {idea.description.length > 160 ? `${idea.description.slice(0, 160)}…` : idea.description}
           </p>
-          <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginTop: 8 }}>
+            <Avatar name={idea.submitter.displayName} avatarUrl={idea.submitter.avatarUrl} size={18} />
             от {idea.submitter.displayName}
           </div>
         </div>

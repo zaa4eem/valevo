@@ -7,7 +7,13 @@ import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { Leaderboard } from '@/components/Leaderboard';
+import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
+
+const GAME_ICONS: Record<string, string> = {
+  'neon-snake': '🐍',
+};
+const DEFAULT_GAME_ICON = '🎮';
 
 export default function GameDetailPage() {
   const params = useParams<{ slug: string }>();
@@ -43,23 +49,68 @@ export default function GameDetailPage() {
   }
 
   if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить игру.</p>;
-  if (!game) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
+
+  if (!game) {
+    return (
+      <div className="z-game-layout">
+        <SkeletonCard lines={2} />
+        <SkeletonCard lines={4} />
+      </div>
+    );
+  }
+
+  const icon = GAME_ICONS[game.slug] ?? DEFAULT_GAME_ICON;
 
   return (
     <div className="z-game-layout">
       <div>
-        <h1 style={{ marginTop: 0 }}>{game.title}</h1>
-        <p style={{ color: 'var(--z-text-muted)' }}>{game.description}</p>
-        {game.slug === 'neon-snake' ? (
-          <NeonSnake onGameOver={onGameOver} />
-        ) : (
-          <Card>Игра скоро появится.</Card>
-        )}
+        <Card
+          className="z-animate-in"
+          style={{
+            marginBottom: 16,
+            background: 'linear-gradient(135deg, var(--z-surface) 0%, var(--z-accent-soft) 140%)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 'var(--z-radius-md)',
+                background: 'var(--z-accent-soft)',
+                display: 'grid',
+                placeItems: 'center',
+                fontSize: 28,
+                flexShrink: 0,
+              }}
+            >
+              {icon}
+            </div>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 'var(--z-fs-2xl)', fontWeight: 900 }}>{game.title}</h1>
+              <p style={{ color: 'var(--z-text-muted)', margin: '4px 0 0', fontSize: 'var(--z-fs-sm)' }}>
+                {game.description}
+              </p>
+            </div>
+          </div>
+        </Card>
+
+        <Card className="z-animate-in" style={{ animationDelay: '60ms' }}>
+          {game.slug === 'neon-snake' ? (
+            <NeonSnake onGameOver={onGameOver} />
+          ) : (
+            <p style={{ color: 'var(--z-text-muted)', margin: 0, textAlign: 'center', padding: '24px 0' }}>
+              Игра скоро появится. 🛠️
+            </p>
+          )}
+        </Card>
         {savedMessage && (
           <p style={{ marginTop: 12, color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>{savedMessage}</p>
         )}
       </div>
-      <Leaderboard title="Лидерборд" entries={leaderboard} />
+      <div className="z-animate-in" style={{ animationDelay: '100ms' }}>
+        <Leaderboard title="Лидерборд" entries={leaderboard} />
+      </div>
     </div>
   );
 }

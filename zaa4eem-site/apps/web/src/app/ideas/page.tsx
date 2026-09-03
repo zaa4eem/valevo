@@ -5,7 +5,10 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Idea, PaginatedIdeas } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { Card } from '@/components/Card';
 import { IdeaCard } from '@/components/IdeaCard';
+import { EmptyState } from '@/components/EmptyState';
+import { SkeletonCard } from '@/components/Skeleton';
 
 export default function IdeasPage() {
   const { user } = useAuth();
@@ -47,52 +50,90 @@ export default function IdeasPage() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 'var(--z-fs-2xl)', margin: 0 }}>Идеи</h1>
-          <p style={{ color: 'var(--z-text-muted)', margin: '4px 0 0' }}>
-            Предложи, что добавить — самое хайповое попадёт в разработку.
-          </p>
+    <div style={{ maxWidth: 640, margin: '0 auto' }}>
+      <Card
+        className="z-animate-in"
+        style={{
+          marginBottom: 20,
+          background: 'linear-gradient(135deg, var(--z-surface) 0%, var(--z-accent-soft) 140%)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 'var(--z-fs-xs)',
+                color: 'var(--z-accent)',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                marginBottom: 6,
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: 'var(--z-accent)',
+                  boxShadow: '0 0 0 4px var(--z-accent-soft)',
+                }}
+              />
+              Идеи
+            </div>
+            <h1 style={{ fontSize: 'var(--z-fs-3xl)', margin: 0, fontWeight: 900, lineHeight: 1.05 }}>
+              💡 Что <span className="z-accent-text">добавить</span>?
+            </h1>
+            <p style={{ color: 'var(--z-text-muted)', margin: '8px 0 0', fontSize: 'var(--z-fs-sm)' }}>
+              Предложи, что добавить — самое хайповое попадёт в разработку.
+            </p>
+          </div>
+          {user ? (
+            <Link href="/ideas/new" className="z-btn-accent z-pop-on-active">
+              + Предложить идею
+            </Link>
+          ) : (
+            <Link href="/login" className="z-btn-ghost z-pop-on-active">
+              Войдите, чтобы предложить
+            </Link>
+          )}
         </div>
-        {user ? (
-          <Link href="/ideas/new" className="z-btn-accent">
-            + Предложить идею
-          </Link>
-        ) : (
-          <Link href="/login" className="z-btn-ghost">
-            Войдите, чтобы предложить
-          </Link>
-        )}
-      </div>
+      </Card>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div className="z-animate-in" style={{ animationDelay: '60ms', display: 'flex', gap: 8, marginBottom: 16 }}>
         <button
-          className={sort === 'top' ? 'z-btn-accent' : 'z-btn-ghost'}
+          className={`${sort === 'top' ? 'z-btn-accent' : 'z-btn-ghost'} z-pop-on-active`}
           onClick={() => setSort('top')}
         >
-          Топ
+          🔥 Топ
         </button>
         <button
-          className={sort === 'new' ? 'z-btn-accent' : 'z-btn-ghost'}
+          className={`${sort === 'new' ? 'z-btn-accent' : 'z-btn-ghost'} z-pop-on-active`}
           onClick={() => setSort('new')}
         >
-          Новые
+          🆕 Новые
         </button>
       </div>
 
       {error ? (
         <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить идеи. Попробуйте обновить страницу.</p>
       ) : loading ? (
-        <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonCard key={i} lines={2} />
+          ))}
+        </div>
       ) : ideas.length === 0 ? (
-        <p style={{ color: 'var(--z-text-muted)' }}>
-          Пока нет идей — стань первым, кто предложит что-то хайповое.
-        </p>
+        <EmptyState icon="💡" description="Пока нет идей — стань первым, кто предложит что-то хайповое." />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {ideas.map((idea) => (
-            <IdeaCard key={idea.id} idea={idea} />
+          {ideas.map((idea, i) => (
+            <IdeaCard key={idea.id} idea={idea} index={i} />
           ))}
           {nextCursor && (
             <button

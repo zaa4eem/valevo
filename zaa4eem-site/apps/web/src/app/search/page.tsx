@@ -8,6 +8,8 @@ import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
+import { EmptyState } from '@/components/EmptyState';
+import { SkeletonCard } from '@/components/Skeleton';
 
 const IDEA_STATUS_LABELS: Record<string, string> = {
   NEW: 'Новая',
@@ -71,26 +73,31 @@ export default function SearchPage() {
         <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-sm)' }}>Введите ещё хотя бы один символ.</p>
       )}
       {error && <p style={{ color: 'var(--z-danger)' }}>Не удалось выполнить поиск. Попробуйте ещё раз.</p>}
-      {loading && <p style={{ color: 'var(--z-text-muted)' }}>Поиск…</p>}
+      {loading && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <SkeletonCard key={i} lines={1} avatar />
+          ))}
+        </div>
+      )}
 
       {results &&
         !loading &&
         (totalCount === 0 ? (
-          <Card style={{ textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>🔍</div>
-            <p style={{ color: 'var(--z-text-muted)', margin: 0 }}>
-              Ничего не найдено по запросу «{trimmedQuery}».
-            </p>
-          </Card>
+          <EmptyState icon="🔍" description={`Ничего не найдено по запросу «${trimmedQuery}».`} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             {results.users.length > 0 && (
               <section>
                 <h2 style={sectionTitleStyle}>Профили</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {results.users.map((u) => (
+                  {results.users.map((u, i) => (
                     <Link key={u.id} href={`/u/${u.id}`}>
-                      <Card hover style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <Card
+                        hover
+                        className="z-animate-in"
+                        style={{ display: 'flex', alignItems: 'center', gap: 12, animationDelay: `${Math.min(i, 8) * 40}ms` }}
+                      >
                         <Avatar name={u.displayName} avatarUrl={u.avatarUrl} size={36} />
                         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                           <span style={{ fontWeight: 700 }}>{u.displayName}</span>
@@ -110,9 +117,9 @@ export default function SearchPage() {
               <section>
                 <h2 style={sectionTitleStyle}>Посты</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {results.posts.map((p) => (
+                  {results.posts.map((p, i) => (
                     <Link key={p.id} href={`/u/${p.author.id}`}>
-                      <Card hover>
+                      <Card hover className="z-animate-in" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                           <Avatar name={p.author.displayName} avatarUrl={p.author.avatarUrl} size={24} />
                           <span style={{ fontSize: 'var(--z-fs-sm)', fontWeight: 700 }}>{p.author.displayName}</span>
@@ -131,9 +138,9 @@ export default function SearchPage() {
               <section>
                 <h2 style={sectionTitleStyle}>Идеи</h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {results.ideas.map((i) => (
+                  {results.ideas.map((i, idx) => (
                     <Link key={i.id} href={`/ideas/${i.id}`}>
-                      <Card hover>
+                      <Card hover className="z-animate-in" style={{ animationDelay: `${Math.min(idx, 8) * 40}ms` }}>
                         <span className="z-badge">{IDEA_STATUS_LABELS[i.status] ?? i.status}</span>
                         <div style={{ fontWeight: 700, marginTop: 6 }}>{i.title}</div>
                         <p style={{ margin: '4px 0 0', color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>

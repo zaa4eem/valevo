@@ -7,6 +7,7 @@ import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from './Card';
 import { Avatar } from './Avatar';
+import { EmptyState } from './EmptyState';
 
 export function FollowList({
   userId,
@@ -64,12 +65,16 @@ export function FollowList({
       ) : loading ? (
         <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>
       ) : users.length === 0 ? (
-        <p style={{ color: 'var(--z-text-muted)' }}>{emptyText}</p>
+        <EmptyState icon="👥" description={emptyText} />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {users.map((u) => (
+          {users.map((u, i) => (
             <Link key={u.id} href={`/u/${u.id}`}>
-              <Card hover style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Card
+                hover
+                className="z-animate-in"
+                style={{ display: 'flex', alignItems: 'center', gap: 12, animationDelay: `${Math.min(i, 8) * 40}ms` }}
+              >
                 <Avatar name={u.displayName} avatarUrl={u.avatarUrl} size={40} />
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <span style={{ fontWeight: 700 }}>{u.displayName}</span>

@@ -154,6 +154,23 @@ body {
   animation: z-pop 0.35s ease;
 }
 
+/* Skeleton loaders — a pulsing placeholder block, built entirely from
+   theme tokens so it reads correctly in both light and dark mode. */
+@keyframes z-skeleton-pulse {
+  0%,
+  100% {
+    background-color: var(--z-surface-hover);
+  }
+  50% {
+    background-color: var(--z-border);
+  }
+}
+
+.z-skeleton {
+  display: block;
+  animation: z-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

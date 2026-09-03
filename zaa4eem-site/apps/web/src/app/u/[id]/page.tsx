@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/auth-context';
 import { haptic } from '@/lib/telegram';
 import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
+import { Skeleton, SkeletonCircle, SkeletonText } from '@/components/Skeleton';
 
 export default function PublicProfilePage() {
   const params = useParams<{ id: string }>();
@@ -54,7 +55,31 @@ export default function PublicProfilePage() {
   }, [params.id]);
 
   if (notFound) return <p style={{ color: 'var(--z-text-muted)' }}>Пользователь не найден.</p>;
-  if (!profile) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
+
+  if (!profile) {
+    return (
+      <div style={{ maxWidth: 640, margin: '0 auto' }}>
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <Skeleton height={96} radius={0} />
+          <div style={{ padding: 20, marginTop: -48 }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
+              <SkeletonCircle size={88} />
+            </div>
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <SkeletonText width="45%" height={22} />
+              <SkeletonText width="70%" />
+              <SkeletonText width="30%" />
+            </div>
+          </div>
+        </Card>
+        <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} width={120} height={72} radius="var(--z-radius-md)" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   const isOwner = profile.role === 'OWNER';
 

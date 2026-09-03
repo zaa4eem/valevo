@@ -4,9 +4,32 @@ import '../styles/tokens.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { AppChrome } from '@/components/AppChrome';
 
+const SITE_DESCRIPTION = 'ZAA4EEM — идеи и мини-игры.';
+
 export const metadata: Metadata = {
+  // Resolves the relative OG/Twitter image URLs below to absolute ones —
+  // without it, Next.js falls back to http://localhost:3000 even in the
+  // production build, which shared-link previews can't reach.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://zaa4eem.ru'),
   title: 'ZAA4EEM',
-  description: 'ZAA4EEM — идеи и мини-игры.',
+  description: SITE_DESCRIPTION,
+  icons: {
+    icon: '/favicon.png',
+    shortcut: '/favicon.png',
+    apple: '/favicon.png',
+  },
+  openGraph: {
+    title: 'ZAA4EEM',
+    description: SITE_DESCRIPTION,
+    type: 'website',
+    images: [{ url: '/og-image.png', width: 1200, height: 630, alt: 'ZAA4EEM' }],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'ZAA4EEM',
+    description: SITE_DESCRIPTION,
+    images: ['/og-image.png'],
+  },
 };
 
 // Pinned scale + safe-area coverage — the Telegram Mini App WebView otherwise
