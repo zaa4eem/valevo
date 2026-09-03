@@ -74,11 +74,13 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
 }
 
 function CommentThread({ postId }: { postId: string }) {
+  const { user } = useAuth();
   const { data: comments, error } = useApiData<Comment[]>(`/posts/${postId}/comments`, [postId]);
   const [items, setItems] = useState<Comment[] | null>(null);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const list = items ?? comments;
 
@@ -98,6 +100,19 @@ function CommentThread({ postId }: { postId: string }) {
     }
   }
 
+  async function removeComment(commentId: string) {
+    if (!window.confirm('Удалить комментарий?')) return;
+    setDeletingId(commentId);
+    try {
+      await api.delete(`/posts/${postId}/comments/${commentId}`);
+      setItems((list ?? []).filter((c) => c.id !== commentId));
+    } catch {
+      // Leave the comment in place — the click can simply be retried.
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   return (
     <div className="z-animate-fade" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--z-border)' }}>
       {error && <p style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>Не удалось загрузить комментарии.</p>}
@@ -107,31 +122,57 @@ function CommentThread({ postId }: { postId: string }) {
       )}
       {list && list.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
-          {list.map((comment) => (
-            <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <Avatar name={comment.author.displayName} size={26} />
-              <div
-                style={{
-                  background: 'var(--z-bg-elevated)',
-                  border: '1px solid var(--z-border)',
-                  borderRadius: 'var(--z-radius-sm)',
-                  padding: '6px 10px',
-                  flex: 1,
-                }}
-              >
-                <span style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}>
-                  {comment.author.displayName}
-                </span>
-                <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
-                  {formatMemberNumber(comment.author.memberNumber)}
-                </span>
-                <div style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>{comment.body}</div>
-                {comment.moderationState === 'PENDING_REVIEW' && (
-                  <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-warning)' }}>на проверке</span>
-                )}
+          {list.map((comment) => {
+            const canDelete = user && (user.id === comment.author.id || user.role === 'OWNER');
+            return (
+              <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                <Avatar name={comment.author.displayName} size={26} />
+                <div
+                  style={{
+                    background: 'var(--z-bg-elevated)',
+                    border: '1px solid var(--z-border)',
+                    borderRadius: 'var(--z-radius-sm)',
+                    padding: '6px 10px',
+                    flex: 1,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}>
+                        {comment.author.displayName}
+                      </span>
+                      <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+                        {formatMemberNumber(comment.author.memberNumber)}
+                      </span>
+                    </div>
+                    {canDelete && (
+                      <button
+                        onClick={() => removeComment(comment.id)}
+                        disabled={deletingId === comment.id}
+                        className="z-pop-on-active"
+                        title="Удалить комментарий"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--z-text-faint)',
+                          fontSize: 'var(--z-fs-xs)',
+                          padding: 0,
+                          flexShrink: 0,
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>{comment.body}</div>
+                  {comment.moderationState === 'PENDING_REVIEW' && (
+                    <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-warning)' }}>на проверке</span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <form onSubmit={submit} style={{ display: 'flex', gap: 8 }}>
@@ -151,11 +192,26 @@ function CommentThread({ postId }: { postId: string }) {
   );
 }
 
-function PostCard({ post, onChange, index }: { post: Post; onChange: (post: Post) => void; index: number }) {
+function PostCard({
+  post,
+  onChange,
+  onDelete,
+  index,
+}: {
+  post: Post;
+  onChange: (post: Post) => void;
+  onDelete: (postId: string) => void;
+  index: number;
+}) {
   const { user } = useAuth();
   const [showComments, setShowComments] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(post.body);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const isOwner = post.author.role === 'OWNER';
+  const canManage = user && (user.id === post.author.id || user.role === 'OWNER');
 
   async function toggleLike() {
     if (!user || busy) return;
@@ -173,6 +229,31 @@ function PostCard({ post, onChange, index }: { post: Post; onChange: (post: Post
       onChange(post);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!draft.trim()) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      const updated = await api.patch<Post>(`/posts/${post.id}`, { body: draft.trim() });
+      onChange({ ...post, ...updated });
+      setEditing(false);
+    } catch (err) {
+      setEditError(err instanceof ApiError ? err.message : 'Не удалось сохранить изменения');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removePost() {
+    if (!window.confirm('Удалить пост? Это действие нельзя отменить.')) return;
+    try {
+      await api.delete(`/posts/${post.id}`);
+      onDelete(post.id);
+    } catch {
+      // Leave the post in place — the click can simply be retried.
     }
   }
 
@@ -199,8 +280,60 @@ function PostCard({ post, onChange, index }: { post: Post; onChange: (post: Post
             {post.publishedAt ? formatDate(post.publishedAt) : ''}
           </div>
         </div>
+        {canManage && !editing && (
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+            <button
+              onClick={() => {
+                setDraft(post.body);
+                setEditError(null);
+                setEditing(true);
+              }}
+              className="z-btn-ghost z-pop-on-active"
+              title="Редактировать"
+              style={{ padding: '4px 10px', fontSize: 'var(--z-fs-xs)' }}
+            >
+              ✎
+            </button>
+            <button
+              onClick={removePost}
+              className="z-btn-ghost z-pop-on-active"
+              title="Удалить"
+              style={{ padding: '4px 10px', fontSize: 'var(--z-fs-xs)', color: 'var(--z-danger)' }}
+            >
+              🗑
+            </button>
+          </div>
+        )}
       </div>
-      <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.55 }}>{post.body}</p>
+      {editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <textarea
+            className="z-textarea"
+            rows={3}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            maxLength={5000}
+            style={{ resize: 'none' }}
+            autoFocus
+          />
+          {editError && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{editError}</div>}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={saveEdit}
+              disabled={saving || !draft.trim()}
+              className="z-btn-accent z-pop-on-active"
+              style={{ opacity: saving || !draft.trim() ? 0.6 : 1 }}
+            >
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </button>
+            <button onClick={() => setEditing(false)} disabled={saving} className="z-btn-ghost z-pop-on-active">
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.55 }}>{post.body}</p>
+      )}
       <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--z-border)' }}>
         <button
           onClick={toggleLike}
@@ -273,6 +406,10 @@ export default function HomeFeedPage() {
     setList([post, ...(list ?? [])]);
   }
 
+  function removePostFromList(postId: string) {
+    setList((list ?? []).filter((p) => p.id !== postId));
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <Card
@@ -334,7 +471,7 @@ export default function HomeFeedPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {list.map((post, i) => (
-            <PostCard key={post.id} post={post} onChange={replacePost} index={i} />
+            <PostCard key={post.id} post={post} onChange={replacePost} onDelete={removePostFromList} index={i} />
           ))}
           {nextCursor && (
             <button
