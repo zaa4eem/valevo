@@ -16,11 +16,31 @@ export const moderationLogEntrySchema = z.object({
 });
 export type ModerationLogEntry = z.infer<typeof moderationLogEntrySchema>;
 
+/** One day's bucket in the growth/activity time series (`stats().userGrowth` / `.activity`). */
+export const adminDailyCountSchema = z.object({
+  date: z.string(),
+  count: z.number().int().nonnegative(),
+});
+export type AdminDailyCount = z.infer<typeof adminDailyCountSchema>;
+
+/** One day's bucket of platform activity (new posts/ideas/game scores) for the activity chart. */
+export const adminDailyActivitySchema = z.object({
+  date: z.string(),
+  posts: z.number().int().nonnegative(),
+  ideas: z.number().int().nonnegative(),
+  scores: z.number().int().nonnegative(),
+});
+export type AdminDailyActivity = z.infer<typeof adminDailyActivitySchema>;
+
 export const adminStatsSchema = z.object({
   totalUsers: z.number().int().nonnegative(),
   ideasByStatus: z.record(z.string(), z.number().int().nonnegative()),
   ideasPendingModeration: z.number().int().nonnegative(),
   totalGamePlays: z.number().int().nonnegative(),
+  /** Daily new-user counts for roughly the last 30 days, oldest first, zero-filled. */
+  userGrowth: z.array(adminDailyCountSchema),
+  /** Daily new posts/ideas/game-scores for roughly the last 30 days, oldest first, zero-filled. */
+  activity: z.array(adminDailyActivitySchema),
 });
 export type AdminStats = z.infer<typeof adminStatsSchema>;
 

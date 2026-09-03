@@ -79,18 +79,87 @@ export class AdminService {
   }
 
   async stats() {
-    const [totalUsers, ideaCounts, ideasPendingModeration, totalGamePlays] = await Promise.all([
-      this.prisma.user.count(),
-      this.prisma.idea.groupBy({ by: ['status'], _count: true }),
-      this.prisma.idea.count({ where: { moderationState: ModerationState.PENDING_REVIEW } }),
-      this.prisma.score.count(),
-    ]);
+    const [totalUsers, ideaCounts, ideasPendingModeration, totalGamePlays, dailySeries] =
+      await Promise.all([
+        this.prisma.user.count(),
+        this.prisma.idea.groupBy({ by: ['status'], _count: true }),
+        this.prisma.idea.count({ where: { moderationState: ModerationState.PENDING_REVIEW } }),
+        this.prisma.score.count(),
+        this.dailySeries(),
+      ]);
 
     const ideasByStatus: Record<string, number> = {};
     for (const status of Object.values(IdeaStatus)) ideasByStatus[status] = 0;
     for (const row of ideaCounts) ideasByStatus[row.status] = row._count;
 
-    return { totalUsers, ideasByStatus, ideasPendingModeration, totalGamePlays };
+    const userGrowth = dailySeries.map((row) => ({ date: row.date, count: row.users }));
+    const activity = dailySeries.map((row) => ({
+      date: row.date,
+      posts: row.posts,
+      ideas: row.ideas,
+      scores: row.scores,
+    }));
+
+    return { totalUsers, ideasByStatus, ideasPendingModeration, totalGamePlays, userGrowth, activity };
+  }
+
+  /**
+   * Daily counts (zero-filled) of new users/posts/ideas/game-scores for the
+   * trailing 30 days, oldest day first. One raw query with `generate_series`
+   * so days with no rows still appear as zero — this is a young platform
+   * (dozens to low hundreds of rows), so a single Postgres pass is plenty;
+   * no need for a rollup table or a heavier time-series approach yet.
+   */
+  private async dailySeries(): Promise<Array<{ date: string; users: number; posts: number; ideas: number; scores: number }>> {
+    const rows = await this.prisma.$queryRaw<Array<{ day: Date; users: number; posts: number; ideas: number; scores: number }>>`
+      WITH days AS (
+        SELECT generate_series(current_date - interval '29 days', current_date, interval '1 day')::date AS day
+      ),
+      u AS (
+        SELECT date_trunc('day', "createdAt")::date AS day, COUNT(*)::int AS n
+        FROM "User"
+        WHERE "createdAt" >= current_date - interval '29 days'
+        GROUP BY 1
+      ),
+      p AS (
+        SELECT date_trunc('day', "createdAt")::date AS day, COUNT(*)::int AS n
+        FROM "Post"
+        WHERE "createdAt" >= current_date - interval '29 days'
+        GROUP BY 1
+      ),
+      i AS (
+        SELECT date_trunc('day', "createdAt")::date AS day, COUNT(*)::int AS n
+        FROM "Idea"
+        WHERE "createdAt" >= current_date - interval '29 days'
+        GROUP BY 1
+      ),
+      s AS (
+        SELECT date_trunc('day', "createdAt")::date AS day, COUNT(*)::int AS n
+        FROM "Score"
+        WHERE "createdAt" >= current_date - interval '29 days'
+        GROUP BY 1
+      )
+      SELECT
+        days.day AS day,
+        COALESCE(u.n, 0) AS users,
+        COALESCE(p.n, 0) AS posts,
+        COALESCE(i.n, 0) AS ideas,
+        COALESCE(s.n, 0) AS scores
+      FROM days
+      LEFT JOIN u ON u.day = days.day
+      LEFT JOIN p ON p.day = days.day
+      LEFT JOIN i ON i.day = days.day
+      LEFT JOIN s ON s.day = days.day
+      ORDER BY days.day ASC;
+    `;
+
+    return rows.map((row) => ({
+      date: row.day.toISOString().slice(0, 10),
+      users: Number(row.users),
+      posts: Number(row.posts),
+      ideas: Number(row.ideas),
+      scores: Number(row.scores),
+    }));
   }
 
   async muteUser(userId: string, actorId: string, reason: string) {
