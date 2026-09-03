@@ -23,3 +23,17 @@ export const adminStatsSchema = z.object({
   totalGamePlays: z.number().int().nonnegative(),
 });
 export type AdminStats = z.infer<typeof adminStatsSchema>;
+
+export const adminUserListItemSchema = z.object({
+  id: z.string().uuid(),
+  memberNumber: z.number().int().positive(),
+  displayName: z.string(),
+  avatarUrl: z.string().nullable(),
+  role: z.enum(['OWNER', 'SUBSCRIBER']),
+  status: z.enum(['ACTIVE', 'MUTED', 'BANNED']),
+  email: z.string().nullable(),
+  telegramUsername: z.string().nullable(),
+  followerCount: z.number().int().nonnegative(),
+  createdAt: z.string(),
+});
+export type AdminUserListItem = z.infer<typeof adminUserListItemSchema>;

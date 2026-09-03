@@ -59,6 +59,25 @@ export class AdminService {
     }));
   }
 
+  async listUsers() {
+    const users = await this.prisma.user.findMany({
+      include: { _count: { select: { followers: true } } },
+      orderBy: { memberNumber: 'asc' },
+    });
+    return users.map((u) => ({
+      id: u.id,
+      memberNumber: u.memberNumber,
+      displayName: u.displayName,
+      avatarUrl: u.avatarUrl,
+      role: u.role,
+      status: u.status,
+      email: u.email,
+      telegramUsername: u.telegramUsername,
+      followerCount: u._count.followers,
+      createdAt: u.createdAt.toISOString(),
+    }));
+  }
+
   async stats() {
     const [totalUsers, ideaCounts, ideasPendingModeration, totalGamePlays] = await Promise.all([
       this.prisma.user.count(),
@@ -83,6 +102,11 @@ export class AdminService {
     await this.prisma.user.update({ where: { id: userId }, data: { status: 'BANNED' } });
     await this.tokens.revokeAllForUser(userId);
     await this.logAction(actorId, 'USER', userId, 'ban', reason);
+  }
+
+  async activateUser(userId: string, actorId: string) {
+    await this.prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE' } });
+    await this.logAction(actorId, 'USER', userId, 'activate');
   }
 
   private logAction(

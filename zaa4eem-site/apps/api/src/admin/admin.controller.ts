@@ -25,6 +25,11 @@ export class AdminController {
     return this.admin.stats();
   }
 
+  @Get('users')
+  listUsers() {
+    return this.admin.listUsers();
+  }
+
   @Post('users/:id/mute')
   async mute(@Param('id') id: string, @CurrentUser() actor: RequestUser, @Body() body: unknown) {
     const { reason } = moderationActionSchema.parse(body);
@@ -35,5 +40,10 @@ export class AdminController {
   async ban(@Param('id') id: string, @CurrentUser() actor: RequestUser, @Body() body: unknown) {
     const { reason } = moderationActionSchema.parse(body);
     await this.admin.banUser(id, actor.id, reason);
+  }
+
+  @Post('users/:id/activate')
+  async activate(@Param('id') id: string, @CurrentUser() actor: RequestUser) {
+    await this.admin.activateUser(id, actor.id);
   }
 }
