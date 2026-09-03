@@ -48,6 +48,7 @@ enum ModerationTargetType {
 
 model User {
   id                String     @id @default(uuid())
+  memberNumber      Int        @unique @default(autoincrement())
   role              UserRole   @default(SUBSCRIBER)
   status            UserStatus @default(ACTIVE)
   displayName       String

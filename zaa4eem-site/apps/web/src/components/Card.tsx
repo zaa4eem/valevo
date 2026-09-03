@@ -1,17 +1,18 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = '',
+  hover = false,
+  style,
+}: {
+  children: ReactNode;
+  className?: string;
+  hover?: boolean;
+  style?: CSSProperties;
+}) {
   return (
-    <div
-      className={className}
-      style={{
-        background: 'var(--z-surface)',
-        border: '1px solid var(--z-border)',
-        borderRadius: 'var(--z-radius-lg)',
-        boxShadow: 'var(--z-shadow-card)',
-        padding: 20,
-      }}
-    >
+    <div className={`z-card ${hover ? 'z-card-hover' : ''} ${className}`.trim()} style={style}>
       {children}
     </div>
   );

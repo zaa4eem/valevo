@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { Navbar } from './Navbar';
 import { Footer } from './Footer';
+import { ThemeToggle } from './ThemeToggle';
 
 /**
  * Telegram's WebView is just a regular viewport — it doesn't provide its
@@ -29,6 +30,7 @@ export function AppChrome({ children }: { children: ReactNode }) {
         {children}
       </main>
       <Footer />
+      <ThemeToggle />
     </div>
   );
 }

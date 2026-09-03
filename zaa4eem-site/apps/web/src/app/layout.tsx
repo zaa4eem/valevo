@@ -23,6 +23,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru">
       <body>
+        {/* Applies the saved theme before first paint — without this, the page
+            would always flash the dark default for a frame before React
+            hydrates and ThemeToggle corrects it. */}
+        <Script id="theme-init" strategy="beforeInteractive">
+          {`try{var t=localStorage.getItem('zaa4eem_theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}`}
+        </Script>
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
         <AuthProvider>
           <AppChrome>{children}</AppChrome>

@@ -1,9 +1,8 @@
 export function StatTile({ label, value }: { label: string; value: string | number }) {
   return (
     <div
+      className="z-card z-card-hover"
       style={{
-        background: 'var(--z-surface)',
-        border: '1px solid var(--z-border)',
         borderRadius: 'var(--z-radius-md)',
         padding: '16px 18px',
         minWidth: 120,

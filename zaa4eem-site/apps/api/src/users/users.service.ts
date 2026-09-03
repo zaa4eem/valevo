@@ -92,6 +92,7 @@ export class UsersService {
 
     return {
       id: user.id,
+      memberNumber: user.memberNumber,
       role: user.role,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,

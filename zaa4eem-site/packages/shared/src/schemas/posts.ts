@@ -19,8 +19,10 @@ export const postSchema = z.object({
   createdAt: z.string(),
   author: z.object({
     id: z.string().uuid(),
+    memberNumber: z.number().int().positive(),
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
+    role: z.enum(['OWNER', 'SUBSCRIBER']),
   }),
   likeCount: z.number().int().nonnegative(),
   commentCount: z.number().int().nonnegative(),
@@ -41,6 +43,7 @@ export const commentSchema = z.object({
   createdAt: z.string(),
   author: z.object({
     id: z.string().uuid(),
+    memberNumber: z.number().int().positive(),
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
   }),

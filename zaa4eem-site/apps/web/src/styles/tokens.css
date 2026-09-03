@@ -46,11 +46,55 @@
   --z-radius-lg: 20px;
   --z-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
 
+  /* Sticky navbar backdrop — a translucent tint of the theme's own
+     background, not a fixed color, so it stays correct in both themes. */
+  --z-navbar-bg: rgba(11, 14, 13, 0.85);
+
   color-scheme: dark;
+}
+
+/* Light theme — opt-in via the toggle (ThemeToggle.tsx sets this attribute
+   on <html>); the brand default stays the dark neon look. */
+:root[data-theme='light'] {
+  --z-bg: #f4f7f5;
+  --z-bg-elevated: #ffffff;
+  --z-surface: #ffffff;
+  --z-surface-hover: #eef3f0;
+  --z-border: #dce6e1;
+
+  --z-text: #0e1512;
+  --z-text-muted: #4c5e57;
+  --z-text-faint: #7c8d86;
+
+  --z-accent: #16a34a;
+  --z-accent-strong: #15803d;
+  --z-accent-soft: rgba(22, 163, 74, 0.12);
+  --z-accent-text-on: #ffffff;
+
+  --z-danger: #dc2626;
+  --z-warning: #b45309;
+  --z-info: #2563eb;
+
+  --z-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 8px 24px rgba(15, 23, 20, 0.08);
+  --z-navbar-bg: rgba(244, 247, 245, 0.85);
+
+  color-scheme: light;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Smooth, non-jank theme switching — color/surface properties only, never
+   layout ones, so toggling never causes reflow jitter. */
+*,
+*::before,
+*::after {
+  transition:
+    background-color 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease,
+    box-shadow 0.25s ease;
 }
 
 html,
@@ -64,6 +108,60 @@ body {
   /* Telegram's WebView reports viewport-fit=cover (see layout.tsx) — keep
      content clear of notches/home-indicators on devices that have them. */
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+@keyframes z-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes z-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes z-pop {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.z-animate-in {
+  animation: z-fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.z-animate-fade {
+  animation: z-fade-in 0.3s ease backwards;
+}
+
+.z-pop-on-active:active {
+  animation: z-pop 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 a {
@@ -114,7 +212,17 @@ img {
   padding: 9px 16px;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: opacity 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+.z-btn-accent:active,
+.z-btn-ghost:active,
+.z-btn-danger:active {
+  transform: scale(0.96);
 }
 
 .z-btn-accent {
@@ -123,6 +231,7 @@ img {
 }
 .z-btn-accent:hover {
   opacity: 0.9;
+  transform: translateY(-1px);
 }
 
 .z-btn-ghost {
@@ -133,12 +242,17 @@ img {
 .z-btn-ghost:hover {
   color: var(--z-text);
   border-color: var(--z-text-muted);
+  background: var(--z-surface-hover);
 }
 
 .z-btn-danger {
   background: transparent;
   color: var(--z-danger);
   border-color: var(--z-danger);
+}
+.z-btn-danger:hover {
+  background: var(--z-danger);
+  color: #fff;
 }
 
 .z-input,
@@ -151,12 +265,17 @@ img {
   font-family: inherit;
   font-size: var(--z-fs-base);
   padding: 10px 12px;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.25s ease;
 }
 
 .z-input:focus,
 .z-textarea:focus {
   outline: none;
   border-color: var(--z-accent);
+  box-shadow: 0 0 0 3px var(--z-accent-soft);
 }
 
 .z-badge {
@@ -169,6 +288,54 @@ img {
   border-radius: 999px;
   background: var(--z-accent-soft);
   color: var(--z-accent);
+}
+
+.z-card {
+  background: var(--z-surface);
+  border: 1px solid var(--z-border);
+  border-radius: var(--z-radius-lg);
+  box-shadow: var(--z-shadow-card);
+  padding: 20px;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.25s ease,
+    border-color 0.25s ease,
+    background-color 0.25s ease;
+}
+
+.z-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: var(--z-text-faint);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 16px 32px rgba(0, 0, 0, 0.28);
+}
+
+.z-theme-toggle {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 60;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  color: var(--z-text);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--z-shadow-card);
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background-color 0.25s ease,
+    border-color 0.25s ease;
+}
+.z-theme-toggle:hover {
+  transform: scale(1.08) rotate(-10deg);
+}
+.z-theme-toggle:active {
+  transform: scale(0.9);
 }
 
 /* Responsive: mobile is the primary surface given the Telegram audience. */

@@ -11,7 +11,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:seed": "ts-node --transpile-only prisma/seed.ts"
+    "prisma:seed": "ts-node --transpile-only prisma/seed.ts",
+    "owner:set": "ts-node --transpile-only prisma/set-owner.ts"
   },
   "dependencies": {
     "@zaa4eem/shared": "*",

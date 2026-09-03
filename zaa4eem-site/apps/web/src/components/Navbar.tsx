@@ -19,7 +19,7 @@ export function Navbar() {
         borderBottom: '1px solid var(--z-border)',
         position: 'sticky',
         top: 0,
-        background: 'rgba(11,14,13,0.9)',
+        background: 'var(--z-navbar-bg)',
         backdropFilter: 'blur(6px)',
         zIndex: 10,
       }}

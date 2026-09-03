@@ -10,6 +10,7 @@ export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
 export const publicProfileSchema = z.object({
   id: z.string().uuid(),
+  memberNumber: z.number().int().positive(),
   role: z.enum(['OWNER', 'SUBSCRIBER']),
   displayName: z.string(),
   avatarUrl: z.string().nullable(),
@@ -26,3 +27,8 @@ export const publicProfileSchema = z.object({
   }),
 });
 export type PublicProfile = z.infer<typeof publicProfileSchema>;
+
+/** "#0001" style member tag. Range is a display convention (4 digits), not a hard cap — the sequence keeps counting past 9999. */
+export function formatMemberNumber(memberNumber: number): string {
+  return `#${String(memberNumber).padStart(4, '0')}`;
+}

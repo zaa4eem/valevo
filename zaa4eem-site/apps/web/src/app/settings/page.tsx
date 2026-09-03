@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { updateProfileSchema, type PublicProfile } from '@zaa4eem/shared';
+import { updateProfileSchema, formatMemberNumber, type PublicProfile } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
@@ -81,7 +81,7 @@ export default function SettingsPage() {
   return (
     <div style={{ maxWidth: 480 }}>
       <h1>Настройки профиля</h1>
-      <Card>
+      <Card hover className="z-animate-in">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
           <div
             style={{
@@ -96,6 +96,7 @@ export default function SettingsPage() {
               color: 'var(--z-accent)',
               flexShrink: 0,
               overflow: 'hidden',
+              boxShadow: '0 0 0 3px var(--z-bg), 0 0 0 5px var(--z-accent-soft)',
             }}
           >
             {profile.avatarUrl ? (
@@ -110,6 +111,9 @@ export default function SettingsPage() {
             )}
           </div>
           <div>
+            <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginBottom: 6 }}>
+              {formatMemberNumber(profile.memberNumber)}
+            </div>
             <input
               ref={fileInputRef}
               type="file"
@@ -119,7 +123,7 @@ export default function SettingsPage() {
               style={{ display: 'none' }}
               id="avatar-input"
             />
-            <label htmlFor="avatar-input" className="z-btn-ghost" style={{ cursor: 'pointer' }}>
+            <label htmlFor="avatar-input" className="z-btn-ghost z-pop-on-active" style={{ cursor: 'pointer' }}>
               {avatarUploading ? 'Загрузка…' : 'Сменить аватар'}
             </label>
             {avatarError && (
@@ -153,7 +157,7 @@ export default function SettingsPage() {
           </label>
           {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
           {saved && <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>Сохранено!</div>}
-          <button type="submit" className="z-btn-accent" style={{ alignSelf: 'flex-start' }}>
+          <button type="submit" className="z-btn-accent z-pop-on-active" style={{ alignSelf: 'flex-start' }}>
             Сохранить
           </button>
         </form>

@@ -14,8 +14,10 @@ function serializePost(post: any, viewerId?: string) {
     createdAt: post.createdAt.toISOString(),
     author: {
       id: post.author.id,
+      memberNumber: post.author.memberNumber,
       displayName: post.author.displayName,
       avatarUrl: post.author.avatarUrl,
+      role: post.author.role,
     },
     likeCount: post._count?.likes ?? 0,
     commentCount: post._count?.comments ?? 0,
@@ -32,6 +34,7 @@ function serializeComment(comment: any) {
     createdAt: comment.createdAt.toISOString(),
     author: {
       id: comment.author.id,
+      memberNumber: comment.author.memberNumber,
       displayName: comment.author.displayName,
       avatarUrl: comment.author.avatarUrl,
     },

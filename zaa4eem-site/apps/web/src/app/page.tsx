@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Comment, Post } from '@zaa4eem/shared';
+import { formatMemberNumber } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -11,7 +12,17 @@ function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function Avatar({ name, size = 32 }: { name: string; size?: number }) {
+function Avatar({
+  name,
+  avatarUrl,
+  size = 40,
+  ring = false,
+}: {
+  name: string;
+  avatarUrl?: string | null;
+  size?: number;
+  ring?: boolean;
+}) {
   return (
     <div
       style={{
@@ -24,17 +35,27 @@ function Avatar({ name, size = 32 }: { name: string; size?: number }) {
         fontWeight: 800,
         color: 'var(--z-accent)',
         flexShrink: 0,
+        overflow: 'hidden',
+        boxShadow: ring ? '0 0 0 2px var(--z-bg), 0 0 0 4px var(--z-accent-soft)' : undefined,
+        fontSize: size * 0.4,
       }}
     >
-      {name.charAt(0).toUpperCase()}
+      {avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={avatarUrl} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+      ) : (
+        name.charAt(0).toUpperCase()
+      )}
     </div>
   );
 }
 
 function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
+  const { user } = useAuth();
   const [body, setBody] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -52,21 +73,38 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
     }
   }
 
+  if (!user) return null;
+
   return (
-    <Card>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <textarea
-          className="z-textarea"
-          rows={3}
-          placeholder="Что нового?"
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          maxLength={5000}
-        />
-        {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
-        <button type="submit" className="z-btn-accent" disabled={busy} style={{ alignSelf: 'flex-start' }}>
-          {busy ? 'Публикация…' : 'Опубликовать'}
-        </button>
+    <Card className="z-animate-in" hover>
+      <form onSubmit={submit} style={{ display: 'flex', gap: 12 }}>
+        <Avatar name={user.displayName} avatarUrl={user.avatarUrl} ring />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <textarea
+            className="z-textarea"
+            rows={focused || body ? 3 : 1}
+            placeholder="Что нового? 🟢"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onFocus={() => setFocused(true)}
+            maxLength={5000}
+            style={{ resize: 'none', border: 'none', background: 'var(--z-bg-elevated)' }}
+          />
+          {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+              {user.role === 'OWNER' ? 'Без ограничений' : 'Раз в 12 часов'}
+            </span>
+            <button
+              type="submit"
+              className="z-btn-accent z-pop-on-active"
+              disabled={busy || !body.trim()}
+              style={{ opacity: busy || !body.trim() ? 0.6 : 1 }}
+            >
+              {busy ? 'Публикация…' : 'Опубликовать 🚀'}
+            </button>
+          </div>
+        </div>
       </form>
     </Card>
   );
@@ -98,26 +136,35 @@ function CommentThread({ postId }: { postId: string }) {
   }
 
   return (
-    <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--z-border)' }}>
+    <div className="z-animate-fade" style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed var(--z-border)' }}>
       {error && <p style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>Не удалось загрузить комментарии.</p>}
       {!error && list === null && <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>Загрузка…</p>}
       {list && list.length === 0 && (
-        <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-sm)' }}>Пока нет комментариев.</p>
+        <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-sm)' }}>Пока нет комментариев — будь первым.</p>
       )}
       {list && list.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
           {list.map((comment) => (
             <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-              <Avatar name={comment.author.displayName} size={24} />
-              <div>
+              <Avatar name={comment.author.displayName} size={26} />
+              <div
+                style={{
+                  background: 'var(--z-bg-elevated)',
+                  border: '1px solid var(--z-border)',
+                  borderRadius: 'var(--z-radius-sm)',
+                  padding: '6px 10px',
+                  flex: 1,
+                }}
+              >
                 <span style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}>
                   {comment.author.displayName}
                 </span>
-                <span style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>{comment.body}</span>
+                <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+                  {formatMemberNumber(comment.author.memberNumber)}
+                </span>
+                <div style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>{comment.body}</div>
                 {comment.moderationState === 'PENDING_REVIEW' && (
-                  <span style={{ marginLeft: 6, fontSize: 'var(--z-fs-xs)', color: 'var(--z-warning)' }}>
-                    на проверке
-                  </span>
+                  <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-warning)' }}>на проверке</span>
                 )}
               </div>
             </div>
@@ -132,7 +179,7 @@ function CommentThread({ postId }: { postId: string }) {
           onChange={(e) => setBody(e.target.value)}
           maxLength={1000}
         />
-        <button type="submit" className="z-btn-ghost" disabled={busy}>
+        <button type="submit" className="z-btn-ghost z-pop-on-active" disabled={busy}>
           Отправить
         </button>
       </form>
@@ -141,10 +188,11 @@ function CommentThread({ postId }: { postId: string }) {
   );
 }
 
-function PostCard({ post, onChange }: { post: Post; onChange: (post: Post) => void }) {
+function PostCard({ post, onChange, index }: { post: Post; onChange: (post: Post) => void; index: number }) {
   const { user } = useAuth();
   const [showComments, setShowComments] = useState(false);
   const [busy, setBusy] = useState(false);
+  const isOwner = post.author.role === 'OWNER';
 
   async function toggleLike() {
     if (!user || busy) return;
@@ -166,27 +214,49 @@ function PostCard({ post, onChange }: { post: Post; onChange: (post: Post) => vo
   }
 
   return (
-    <Card>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <Avatar name={post.author.displayName} />
-        <div>
-          <div style={{ fontWeight: 700 }}>{post.author.displayName}</div>
+    <Card
+      hover
+      className="z-animate-in"
+      style={{
+        animationDelay: `${Math.min(index, 8) * 45}ms`,
+        borderLeft: isOwner ? '3px solid var(--z-accent)' : undefined,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <Avatar name={post.author.displayName} avatarUrl={post.author.avatarUrl} ring={isOwner} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 700 }}>{post.author.displayName}</span>
+            {isOwner && <span className="z-badge">Owner</span>}
+            <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+              {formatMemberNumber(post.author.memberNumber)}
+            </span>
+          </div>
           <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
             {post.publishedAt ? formatDate(post.publishedAt) : ''}
           </div>
         </div>
       </div>
-      <p style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{post.body}</p>
-      <div style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+      <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.55 }}>{post.body}</p>
+      <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--z-border)' }}>
         <button
           onClick={toggleLike}
           disabled={!user}
-          className="z-btn-ghost"
-          style={{ color: post.viewerHasLiked ? 'var(--z-accent)' : undefined }}
+          className="z-btn-ghost z-pop-on-active"
+          style={{
+            color: post.viewerHasLiked ? 'var(--z-accent)' : undefined,
+            borderColor: post.viewerHasLiked ? 'var(--z-accent)' : undefined,
+            transform: post.viewerHasLiked ? 'scale(1.03)' : 'scale(1)',
+            transition: 'transform .25s cubic-bezier(0.34, 1.56, 0.64, 1), color .2s ease, border-color .2s ease',
+          }}
         >
           {post.viewerHasLiked ? '💚' : '🤍'} {post.likeCount}
         </button>
-        <button onClick={() => setShowComments((s) => !s)} className="z-btn-ghost">
+        <button
+          onClick={() => setShowComments((s) => !s)}
+          className="z-btn-ghost z-pop-on-active"
+          style={{ color: showComments ? 'var(--z-text)' : undefined }}
+        >
           💬 {post.commentCount}
         </button>
       </div>
@@ -211,28 +281,66 @@ export default function HomeFeedPage() {
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 'var(--z-fs-3xl)', margin: 0, fontWeight: 900 }}>
+      <Card
+        className="z-animate-in"
+        style={{
+          marginBottom: 20,
+          background: 'linear-gradient(135deg, var(--z-surface) 0%, var(--z-accent-soft) 140%)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 'var(--z-fs-xs)',
+            color: 'var(--z-accent)',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            marginBottom: 6,
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: 'var(--z-accent)',
+              boxShadow: '0 0 0 4px var(--z-accent-soft)',
+            }}
+          />
+          Лента
+        </div>
+        <h1 style={{ fontSize: 'var(--z-fs-3xl)', margin: 0, fontWeight: 900, lineHeight: 1.05 }}>
           ZAA<span className="z-accent-text">4</span>EEM
         </h1>
-      </div>
+        <p style={{ color: 'var(--z-text-muted)', margin: '8px 0 0', fontSize: 'var(--z-fs-sm)' }}>
+          Всё новое появляется здесь — публикуй, лайкай, обсуждай.
+        </p>
+      </Card>
 
-      {user && (
-        <div style={{ marginBottom: 16 }}>
-          <Composer onPosted={prependPost} />
-        </div>
-      )}
+      <div style={{ marginBottom: 16 }}>
+        <Composer onPosted={prependPost} />
+      </div>
 
       {error ? (
         <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить ленту. Попробуйте обновить страницу.</p>
       ) : list === null ? (
         <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>
       ) : list.length === 0 ? (
-        <p style={{ color: 'var(--z-text-muted)' }}>Пока нет постов — скоро здесь появятся новости.</p>
+        <Card className="z-animate-in" style={{ textAlign: 'center', padding: 40 }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>🟢</div>
+          <p style={{ color: 'var(--z-text-muted)', margin: 0 }}>
+            {user ? 'Пока нет постов — напиши первый!' : 'Пока нет постов — загляни чуть позже.'}
+          </p>
+        </Card>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {list.map((post) => (
-            <PostCard key={post.id} post={post} onChange={replacePost} />
+          {list.map((post, i) => (
+            <PostCard key={post.id} post={post} onChange={replacePost} index={i} />
           ))}
         </div>
       )}
