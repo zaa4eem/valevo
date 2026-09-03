@@ -14,7 +14,7 @@ import { BottomNav } from './BottomNav';
  * move between Feed/Ideas/Games/Leaderboard at all).
  */
 export function AppChrome({ children }: { children: ReactNode }) {
-  const { loading } = useAuth();
+  const { loading, isTelegram, telegramAuthError, user, retryTelegramAuth } = useAuth();
 
   if (loading) {
     return (
@@ -27,6 +27,41 @@ export function AppChrome({ children }: { children: ReactNode }) {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
+      {isTelegram && !user && telegramAuthError && (
+        <div
+          className="z-animate-fade"
+          style={{
+            background: 'var(--z-danger)',
+            color: '#fff',
+            padding: '10px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+            fontSize: 'var(--z-fs-sm)',
+            textAlign: 'center',
+          }}
+        >
+          <span>{telegramAuthError}</span>
+          <button
+            onClick={retryTelegramAuth}
+            className="z-pop-on-active"
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.4)',
+              borderRadius: 'var(--z-radius-sm)',
+              padding: '4px 12px',
+              fontSize: 'var(--z-fs-xs)',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
       <main className="z-container z-main-content" style={{ paddingTop: 24, paddingBottom: 48, flex: 1 }}>
         {children}
       </main>

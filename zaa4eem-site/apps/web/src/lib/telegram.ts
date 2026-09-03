@@ -28,12 +28,3 @@ export function getTelegramWebApp(): TelegramWebApp | null {
   if (typeof window === 'undefined') return null;
   return window.Telegram?.WebApp ?? null;
 }
-
-export function isTelegramRuntime(): boolean {
-  const app = getTelegramWebApp();
-  return Boolean(app?.initData);
-}
-
-export function getInitData(): string | null {
-  return getTelegramWebApp()?.initData || null;
-}

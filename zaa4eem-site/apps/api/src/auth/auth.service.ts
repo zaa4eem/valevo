@@ -22,8 +22,19 @@ export class AuthService {
     return this.config.getOrThrow<string>('TELEGRAM_BOT_TOKEN');
   }
 
+  /** verifyTelegramInitData throws a plain Error — wrap it so the client sees
+   * the real reason (expired, bad signature) as a 401 instead of a generic
+   * 500 "Something went wrong" from the global exception filter. */
+  private verifyInitDataOrThrow(initData: string): { user: TelegramUserPayload } {
+    try {
+      return verifyTelegramInitData(initData, this.botToken());
+    } catch (err) {
+      throw new UnauthorizedException(err instanceof Error ? err.message : 'Invalid Telegram data');
+    }
+  }
+
   async loginWithTelegram(input: TelegramAuthInput) {
-    const { user: tgUser } = verifyTelegramInitData(input.initData, this.botToken());
+    const { user: tgUser } = this.verifyInitDataOrThrow(input.initData);
     const user = await this.findOrCreateFromTelegram(tgUser);
     return this.issueSession(user.id, user.role);
   }
@@ -63,7 +74,7 @@ export class AuthService {
   }
 
   async linkTelegram(userId: string, input: TelegramAuthInput) {
-    const { user: tgUser } = verifyTelegramInitData(input.initData, this.botToken());
+    const { user: tgUser } = this.verifyInitDataOrThrow(input.initData);
     const telegramId = BigInt(tgUser.id);
 
     const existing = await this.users.findByTelegramId(telegramId);

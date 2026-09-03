@@ -2,8 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { AuthResponse, LoginInput, RegisterInput } from '@zaa4eem/shared';
-import { api, setAccessToken } from './api-client';
-import { getInitData, getTelegramWebApp, isTelegramRuntime } from './telegram';
+import { ApiError, api, setAccessToken } from './api-client';
+import { getTelegramWebApp } from './telegram';
 
 type CurrentUser = AuthResponse['user'] | null;
 
@@ -11,6 +11,8 @@ interface AuthContextValue {
   user: CurrentUser;
   loading: boolean;
   isTelegram: boolean;
+  telegramAuthError: string | null;
+  retryTelegramAuth: () => void;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
@@ -19,14 +21,30 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Telegram injects window.Telegram.WebApp synchronously when the page is
+// opened as a real Mini App, but `initData` itself can be empty for a brief
+// moment on some clients before Telegram finishes populating it — poll a
+// few times before concluding we're not inside Telegram at all.
+async function waitForInitData(maxAttempts = 5, delayMs = 200): Promise<string | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const initData = getTelegramWebApp()?.initData;
+    if (initData) return initData;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return null;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser>(null);
   const [loading, setLoading] = useState(true);
   const [isTelegram, setIsTelegram] = useState(false);
+  const [telegramAuthError, setTelegramAuthError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   const applySession = useCallback((res: AuthResponse) => {
     setAccessToken(res.accessToken);
     setUser(res.user);
+    setTelegramAuthError(null);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -48,26 +66,56 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       telegram.expand();
     }
 
+    let cancelled = false;
+
     async function bootstrap() {
-      if (isTelegramRuntime()) {
+      setTelegramAuthError(null);
+
+      // window.Telegram.WebApp existing at all (even with initData still
+      // empty) is the real "are we inside Telegram" signal — checking
+      // initData alone raced against Telegram populating it.
+      if (getTelegramWebApp()) {
         setIsTelegram(true);
-        const initData = getInitData();
-        if (initData) {
-          try {
-            const res = await api.post<AuthResponse>('/auth/telegram', { initData });
-            applySession(res);
-          } catch {
-            // Falls through to logged-out state; user can retry via the login page.
-          }
+        const initData = await waitForInitData();
+        if (cancelled) return;
+
+        if (!initData) {
+          setTelegramAuthError(
+            'Telegram не передал данные для входа. Попробуй закрыть и снова открыть мини-приложение.',
+          );
+          setLoading(false);
+          return;
+        }
+
+        try {
+          const res = await api.post<AuthResponse>('/auth/telegram', { initData });
+          if (cancelled) return;
+          applySession(res);
+        } catch (err) {
+          if (cancelled) return;
+          console.error('Telegram auto-login failed:', err);
+          setTelegramAuthError(
+            err instanceof ApiError
+              ? `Не удалось войти через Telegram: ${err.message}`
+              : 'Не удалось войти через Telegram — проверь соединение и попробуй ещё раз.',
+          );
         }
       } else {
         await refresh();
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }
 
     bootstrap();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryTick]);
+
+  const retryTelegramAuth = useCallback(() => {
+    setLoading(true);
+    setRetryTick((t) => t + 1);
   }, []);
 
   const login = useCallback(
@@ -93,8 +141,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, isTelegram, login, register, logout, refresh }),
-    [user, loading, isTelegram, login, register, logout, refresh],
+    () => ({ user, loading, isTelegram, telegramAuthError, retryTelegramAuth, login, register, logout, refresh }),
+    [user, loading, isTelegram, telegramAuthError, retryTelegramAuth, login, register, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
