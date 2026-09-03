@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import type { PublicProfile } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
@@ -47,40 +48,47 @@ export default function PublicProfilePage() {
           }}
         />
         <div style={{ padding: 20, marginTop: -48 }}>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-            <div
-              style={{
-                width: 88,
-                height: 88,
-                borderRadius: '50%',
-                background: 'var(--z-accent-soft)',
-                display: 'grid',
-                placeItems: 'center',
-                fontWeight: 800,
-                fontSize: 'var(--z-fs-xl)',
-                color: 'var(--z-accent)',
-                flexShrink: 0,
-                overflow: 'hidden',
-                border: '4px solid var(--z-surface)',
-                boxShadow: 'var(--z-shadow-card)',
-              }}
-            >
-              {profile.avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatarUrl}
-                  alt={profile.displayName}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-              ) : (
-                profile.displayName.charAt(0).toUpperCase()
-              )}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
+              <div
+                style={{
+                  width: 88,
+                  height: 88,
+                  borderRadius: '50%',
+                  background: 'var(--z-accent-soft)',
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontWeight: 800,
+                  fontSize: 'var(--z-fs-xl)',
+                  color: 'var(--z-accent)',
+                  flexShrink: 0,
+                  overflow: 'hidden',
+                  border: '4px solid var(--z-surface)',
+                  boxShadow: 'var(--z-shadow-card)',
+                }}
+              >
+                {profile.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={profile.avatarUrl}
+                    alt={profile.displayName}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                ) : (
+                  profile.displayName.charAt(0).toUpperCase()
+                )}
+              </div>
+              <div style={{ paddingBottom: 4 }}>
+                <span className="z-badge" style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-faint)' }}>
+                  {formatMemberNumber(profile.memberNumber)}
+                </span>
+              </div>
             </div>
-            <div style={{ paddingBottom: 4 }}>
-              <span className="z-badge" style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-faint)' }}>
-                {formatMemberNumber(profile.memberNumber)}
-              </span>
-            </div>
+            {viewer?.id === profile.id && (
+              <Link href="/settings" className="z-btn-ghost z-pop-on-active" style={{ marginBottom: 4 }}>
+                ⚙️ Редактировать профиль
+              </Link>
+            )}
           </div>
 
           <div style={{ marginTop: 12 }}>

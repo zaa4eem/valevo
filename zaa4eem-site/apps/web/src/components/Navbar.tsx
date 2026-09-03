@@ -57,6 +57,9 @@ export function Navbar() {
               >
                 {user.displayName}
               </Link>
+              <Link href="/settings" className="z-btn-ghost z-pop-on-active" title="Настройки профиля" aria-label="Настройки профиля" style={{ padding: '6px 10px' }}>
+                ⚙️
+              </Link>
               {user.role === 'OWNER' && (
                 <Link href="/admin" style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-accent)' }}>
                   Admin
