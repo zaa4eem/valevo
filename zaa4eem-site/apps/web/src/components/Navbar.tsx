@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { Avatar } from './Avatar';
+import { PremiumAvatar } from './PremiumAvatar';
+import { PremiumName } from './PremiumName';
 
 const links = [
   { href: '/', label: 'Лента' },
@@ -36,12 +37,12 @@ function UserMenu() {
         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}
         aria-label="Меню профиля"
       >
-        <Avatar name={user.displayName} avatarUrl={user.avatarUrl} size={36} />
+        <PremiumAvatar name={user.displayName} avatarUrl={user.avatarUrl} size={36} premium={user} />
       </button>
       {open && (
         <div className="z-navbar-menu z-animate-fade">
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--z-border)', fontWeight: 700 }}>
-            {user.displayName}
+            <PremiumName name={user.displayName} premium={user} />
           </div>
           <Link href={`/u/${user.id}`} className="z-navbar-menu-item" onClick={() => setOpen(false)}>
             👤 Профиль
@@ -123,7 +124,7 @@ export function Navbar() {
                   whiteSpace: 'nowrap',
                 }}
               >
-                {user.displayName}
+                <PremiumName name={user.displayName} premium={user} />
               </Link>
               <Link href="/settings" className="z-btn-ghost z-pop-on-active" title="Настройки профиля" aria-label="Настройки профиля" style={{ padding: '6px 10px' }}>
                 ⚙️

@@ -8,7 +8,8 @@ import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { haptic, hapticNotify } from '@/lib/telegram';
 import { Card } from '@/components/Card';
-import { Avatar } from '@/components/Avatar';
+import { PremiumAvatar } from '@/components/PremiumAvatar';
+import { PremiumName } from '@/components/PremiumName';
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -71,7 +72,7 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
   return (
     <Card className="z-animate-in" hover>
       <form onSubmit={submit} style={{ display: 'flex', gap: 12 }}>
-        <Avatar name={user.displayName} avatarUrl={user.avatarUrl} ring />
+        <PremiumAvatar name={user.displayName} avatarUrl={user.avatarUrl} ring premium={user} />
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
           <textarea
             className="z-textarea"
@@ -216,7 +217,7 @@ function CommentThread({ postId }: { postId: string }) {
             const canDelete = user && (user.id === comment.author.id || user.role === 'OWNER');
             return (
               <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <Avatar name={comment.author.displayName} size={26} />
+                <PremiumAvatar name={comment.author.displayName} size={26} premium={comment.author} />
                 <div
                   style={{
                     background: 'var(--z-bg-elevated)',
@@ -228,9 +229,11 @@ function CommentThread({ postId }: { postId: string }) {
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                     <div>
-                      <span style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}>
-                        {comment.author.displayName}
-                      </span>
+                      <PremiumName
+                        name={comment.author.displayName}
+                        premium={comment.author}
+                        style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}
+                      />
                       <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
                         {formatMemberNumber(comment.author.memberNumber)}
                       </span>
@@ -361,10 +364,15 @@ function PostCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <Avatar name={post.author.displayName} avatarUrl={post.author.avatarUrl} ring={isOwner} />
+        <PremiumAvatar
+          name={post.author.displayName}
+          avatarUrl={post.author.avatarUrl}
+          ring={isOwner}
+          premium={post.author}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 700 }}>{post.author.displayName}</span>
+            <PremiumName name={post.author.displayName} premium={post.author} style={{ fontWeight: 700 }} />
             {isOwner && <span className="z-badge">Owner</span>}
             <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
               {formatMemberNumber(post.author.memberNumber)}

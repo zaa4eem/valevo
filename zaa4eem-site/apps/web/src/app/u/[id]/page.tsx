@@ -11,6 +11,8 @@ import { haptic } from '@/lib/telegram';
 import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 import { Skeleton, SkeletonCircle, SkeletonText } from '@/components/Skeleton';
+import { PremiumName } from '@/components/PremiumName';
+import '@/styles/premium.css';
 
 export default function PublicProfilePage() {
   const params = useParams<{ id: string }>();
@@ -97,34 +99,49 @@ export default function PublicProfilePage() {
         <div style={{ padding: 20, marginTop: -48 }}>
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
-              <div
-                style={{
-                  width: 88,
-                  height: 88,
-                  borderRadius: '50%',
-                  background: 'var(--z-accent-soft)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  fontWeight: 800,
-                  fontSize: 'var(--z-fs-xl)',
-                  color: 'var(--z-accent)',
-                  flexShrink: 0,
-                  overflow: 'hidden',
-                  border: '4px solid var(--z-surface)',
-                  boxShadow: 'var(--z-shadow-card)',
-                }}
+              {/* The ring effect's ::before extends outside the avatar's own box
+                  (inset: -4px/-6px), so it needs its own wrapper — putting the
+                  ring class directly on the avatar div would get clipped by
+                  that div's own overflow: hidden (used to crop the photo). */}
+              <span
+                className={
+                  profile.isPremium && profile.ringStyle === 'SPIN'
+                    ? 'ring-spin'
+                    : profile.isPremium && profile.ringStyle === 'PULSE'
+                      ? 'ring-pulse'
+                      : undefined
+                }
+                style={{ display: 'inline-flex', borderRadius: '50%', flexShrink: 0 }}
               >
-                {profile.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={profile.avatarUrl}
-                    alt={profile.displayName}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                ) : (
-                  profile.displayName.charAt(0).toUpperCase()
-                )}
-              </div>
+                <div
+                  style={{
+                    width: 88,
+                    height: 88,
+                    borderRadius: '50%',
+                    background: 'var(--z-accent-soft)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontWeight: 800,
+                    fontSize: 'var(--z-fs-xl)',
+                    color: 'var(--z-accent)',
+                    flexShrink: 0,
+                    overflow: 'hidden',
+                    border: '4px solid var(--z-surface)',
+                    boxShadow: 'var(--z-shadow-card)',
+                  }}
+                >
+                  {profile.avatarUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={profile.avatarUrl}
+                      alt={profile.displayName}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    profile.displayName.charAt(0).toUpperCase()
+                  )}
+                </div>
+              </span>
               <div style={{ paddingBottom: 4 }}>
                 <span className="z-badge" style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-faint)' }}>
                   {formatMemberNumber(profile.memberNumber)}
@@ -151,7 +168,7 @@ export default function PublicProfilePage() {
 
           <div style={{ marginTop: 12 }}>
             <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              {profile.displayName}
+              <PremiumName name={profile.displayName} premium={profile} />
               {isOwner && <span className="z-badge">Owner</span>}
             </h1>
             {profile.statusText && (

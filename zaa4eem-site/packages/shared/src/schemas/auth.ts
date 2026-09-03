@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { premiumFieldsSchema } from './users';
 
 export const telegramAuthSchema = z.object({
   initData: z.string().min(1, 'Отсутствуют данные авторизации Telegram'),
@@ -43,11 +44,18 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 export const authResponseSchema = z.object({
   accessToken: z.string(),
-  user: z.object({
-    id: z.string().uuid(),
-    role: z.enum(['OWNER', 'SUBSCRIBER']),
-    displayName: z.string(),
-    avatarUrl: z.string().nullable(),
-  }),
+  // The actual endpoints (register/login/refresh, and GET /users/me which
+  // shares the same shape) all return the full PublicProfile-shaped user via
+  // UsersService.getPublicProfile — merging premiumFieldsSchema here just
+  // makes that already-present data visible to the type, so callers like
+  // Navbar can render PremiumName/PremiumAvatar for the signed-in user.
+  user: z
+    .object({
+      id: z.string().uuid(),
+      role: z.enum(['OWNER', 'SUBSCRIBER']),
+      displayName: z.string(),
+      avatarUrl: z.string().nullable(),
+    })
+    .merge(premiumFieldsSchema),
 });
 export type AuthResponse = z.infer<typeof authResponseSchema>;

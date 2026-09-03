@@ -22,6 +22,11 @@ function serializePost(post: any, viewerId?: string, followingIds?: Set<string>)
       avatarUrl: post.author.avatarUrl,
       role: post.author.role,
       viewerIsFollowing: viewerId ? Boolean(followingIds?.has(post.author.id)) : undefined,
+      isPremium: post.author.isPremium,
+      nameStyle: post.author.nameStyle,
+      nameColor: post.author.nameColor,
+      ringStyle: post.author.ringStyle,
+      badgeEmoji: post.author.badgeEmoji,
     },
     likeCount: post._count?.likes ?? 0,
     commentCount: post._count?.comments ?? 0,
@@ -41,6 +46,11 @@ function serializeComment(comment: any) {
       memberNumber: comment.author.memberNumber,
       displayName: comment.author.displayName,
       avatarUrl: comment.author.avatarUrl,
+      isPremium: comment.author.isPremium,
+      nameStyle: comment.author.nameStyle,
+      nameColor: comment.author.nameColor,
+      ringStyle: comment.author.ringStyle,
+      badgeEmoji: comment.author.badgeEmoji,
     },
   };
 }

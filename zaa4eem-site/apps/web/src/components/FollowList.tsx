@@ -6,7 +6,8 @@ import type { PaginatedUserSummaries } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from './Card';
-import { Avatar } from './Avatar';
+import { PremiumAvatar } from './PremiumAvatar';
+import { PremiumName } from './PremiumName';
 import { EmptyState } from './EmptyState';
 
 export function FollowList({
@@ -75,9 +76,9 @@ export function FollowList({
                 className="z-animate-in"
                 style={{ display: 'flex', alignItems: 'center', gap: 12, animationDelay: `${Math.min(i, 8) * 40}ms` }}
               >
-                <Avatar name={u.displayName} avatarUrl={u.avatarUrl} size={40} />
+                <PremiumAvatar name={u.displayName} avatarUrl={u.avatarUrl} size={40} premium={u} />
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <span style={{ fontWeight: 700 }}>{u.displayName}</span>
+                  <PremiumName name={u.displayName} premium={u} style={{ fontWeight: 700 }} />
                   {u.role === 'OWNER' && <span className="z-badge">Owner</span>}
                   <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
                     {formatMemberNumber(u.memberNumber)}

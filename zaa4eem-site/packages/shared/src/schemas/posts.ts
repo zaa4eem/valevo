@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { premiumFieldsSchema } from './users';
 
 export const createPostSchema = z.object({
   body: z.string().min(1).max(5000),
@@ -22,14 +23,16 @@ export const postSchema = z.object({
   moderationState: z.enum(['CLEAN', 'PENDING_REVIEW', 'APPROVED', 'REMOVED']),
   publishedAt: z.string().nullable(),
   createdAt: z.string(),
-  author: z.object({
-    id: z.string().uuid(),
-    memberNumber: z.number().int().positive(),
-    displayName: z.string(),
-    avatarUrl: z.string().nullable(),
-    role: z.enum(['OWNER', 'SUBSCRIBER']),
-    viewerIsFollowing: z.boolean().optional(),
-  }),
+  author: z
+    .object({
+      id: z.string().uuid(),
+      memberNumber: z.number().int().positive(),
+      displayName: z.string(),
+      avatarUrl: z.string().nullable(),
+      role: z.enum(['OWNER', 'SUBSCRIBER']),
+      viewerIsFollowing: z.boolean().optional(),
+    })
+    .merge(premiumFieldsSchema),
   likeCount: z.number().int().nonnegative(),
   commentCount: z.number().int().nonnegative(),
   viewerHasLiked: z.boolean().optional(),
@@ -47,12 +50,14 @@ export const commentSchema = z.object({
   body: z.string(),
   moderationState: z.enum(['CLEAN', 'PENDING_REVIEW', 'APPROVED', 'REMOVED']),
   createdAt: z.string(),
-  author: z.object({
-    id: z.string().uuid(),
-    memberNumber: z.number().int().positive(),
-    displayName: z.string(),
-    avatarUrl: z.string().nullable(),
-  }),
+  author: z
+    .object({
+      id: z.string().uuid(),
+      memberNumber: z.number().int().positive(),
+      displayName: z.string(),
+      avatarUrl: z.string().nullable(),
+    })
+    .merge(premiumFieldsSchema),
 });
 export type Comment = z.infer<typeof commentSchema>;
 
