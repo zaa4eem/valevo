@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Comment, PaginatedPosts, Post } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
@@ -20,6 +20,25 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  function pickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  function clearImage() {
+    if (imagePreview) URL.revokeObjectURL(imagePreview);
+    setImageFile(null);
+    setImagePreview(null);
+    if (imageInputRef.current) imageInputRef.current.value = '';
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -27,8 +46,16 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
     setBusy(true);
     setError(null);
     try {
-      const post = await api.post<Post>('/posts', { body: body.trim(), publish: true });
+      let imageUrl: string | undefined;
+      if (imageFile) {
+        const form = new FormData();
+        form.append('image', imageFile);
+        const uploaded = await api.upload<{ imageUrl: string }>('/posts/me/image', form);
+        imageUrl = uploaded.imageUrl;
+      }
+      const post = await api.post<Post>('/posts', { body: body.trim(), publish: true, imageUrl });
       setBody('');
+      clearImage();
       onPosted(post);
       hapticNotify('success');
     } catch (err) {
@@ -56,11 +83,70 @@ function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
             maxLength={5000}
             style={{ resize: 'none', border: 'none', background: 'var(--z-bg-elevated)' }}
           />
+          {imagePreview && (
+            <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagePreview}
+                alt="Предпросмотр изображения"
+                style={{
+                  maxHeight: 180,
+                  maxWidth: '100%',
+                  borderRadius: 'var(--z-radius-md)',
+                  border: '1px solid var(--z-border)',
+                  display: 'block',
+                }}
+              />
+              <button
+                type="button"
+                onClick={clearImage}
+                title="Убрать изображение"
+                className="z-pop-on-active"
+                style={{
+                  position: 'absolute',
+                  top: -8,
+                  right: -8,
+                  width: 24,
+                  height: 24,
+                  borderRadius: '50%',
+                  border: '1px solid var(--z-border)',
+                  background: 'var(--z-surface)',
+                  color: 'var(--z-text)',
+                  cursor: 'pointer',
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontSize: 12,
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          )}
           {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
-              {user.role === 'OWNER' ? 'Без ограничений' : 'Раз в 12 часов'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={pickImage}
+                disabled={busy}
+                style={{ display: 'none' }}
+                id="post-image-input"
+              />
+              <label
+                htmlFor="post-image-input"
+                className="z-btn-ghost z-pop-on-active"
+                title="Прикрепить изображение"
+                style={{ cursor: 'pointer', padding: '4px 10px', fontSize: 'var(--z-fs-sm)' }}
+              >
+                📷
+              </label>
+              <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+                {user.role === 'OWNER' ? 'Без ограничений' : 'Раз в 12 часов'}
+              </span>
+            </div>
             <button
               type="submit"
               className="z-btn-accent z-pop-on-active"
@@ -359,6 +445,33 @@ function PostCard({
         </div>
       ) : (
         <p style={{ whiteSpace: 'pre-wrap', margin: 0, lineHeight: 1.55 }}>{post.body}</p>
+      )}
+      {!editing && post.imageUrl && (
+        // contain (not cover) inside a bounded box — post photos come in every
+        // aspect ratio, and cropping someone's uploaded picture reads as broken.
+        <div
+          style={{
+            marginTop: 12,
+            maxHeight: 420,
+            display: 'flex',
+            justifyContent: 'center',
+            background: 'var(--z-bg-elevated)',
+            borderRadius: 'var(--z-radius-md)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={post.imageUrl}
+            alt="Изображение к посту"
+            style={{ maxWidth: '100%', maxHeight: 420, objectFit: 'contain' }}
+          />
+        </div>
+      )}
+      {!editing && post.moderationState === 'PENDING_REVIEW' && (
+        <div style={{ marginTop: 10, fontSize: 'var(--z-fs-xs)', color: 'var(--z-warning)' }}>
+          🕓 На проверке — пока видно только вам, скоро появится в общей ленте
+        </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--z-border)' }}>
         <button

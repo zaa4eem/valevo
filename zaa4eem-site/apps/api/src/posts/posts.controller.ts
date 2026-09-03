@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,9 +10,13 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import {
   createCommentSchema,
@@ -23,10 +28,14 @@ import { PostsService } from './posts.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
+import { postImageUploadOptions } from './post-image-storage';
 
 @Controller('posts')
 export class PostsController {
-  constructor(private readonly posts: PostsService) {}
+  constructor(
+    private readonly posts: PostsService,
+    private readonly config: ConfigService,
+  ) {}
 
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
@@ -45,7 +54,19 @@ export class PostsController {
   @Post()
   create(@CurrentUser() user: RequestUser, @Body() body: unknown) {
     const input = createPostSchema.parse(body);
-    return this.posts.create(user.id, input.body, input.publish, user.role === 'OWNER');
+    return this.posts.create(user.id, input.body, input.publish, user.role === 'OWNER', input.imageUrl);
+  }
+
+  // Upload-then-reference, mirroring UsersController's POST /users/me/avatar:
+  // the image has no post to attach to yet at select-time, so it's stored
+  // first and its URL is passed to POST /posts as `imageUrl` right after.
+  @UseGuards(JwtAuthGuard)
+  @Post('me/image')
+  @UseInterceptors(FileInterceptor('image', postImageUploadOptions))
+  uploadImage(@UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
+    return { imageUrl: `${origin}/uploads/post-images/${file.filename}` };
   }
 
   @UseGuards(JwtAuthGuard)

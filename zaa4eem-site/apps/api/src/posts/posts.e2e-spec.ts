@@ -196,4 +196,72 @@ const canRun = Boolean(process.env.DATABASE_URL);
     expect(afterFollow.body.items[0].id).toBe(post.body.id);
     expect(afterFollow.body.items[0].author.viewerIsFollowing).toBe(true);
   });
+
+  it('forces PENDING_REVIEW on a post with an image even when the caption text is completely clean', async () => {
+    const email = `imageposter-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Image Poster' });
+
+    // The banned-words classifier only ever reads text, so this caption on
+    // its own would classify CLEAN — the image attachment must override that.
+    const upload = await request(app.getHttpServer())
+      .post('/api/posts/me/image')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .attach('image', Buffer.from(TINY_PNG_BASE64, 'base64'), {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      })
+      .expect(201);
+    expect(upload.body.imageUrl).toEqual(expect.stringContaining('/uploads/post-images/'));
+
+    const created = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ body: 'совершенно чистая подпись', publish: true, imageUrl: upload.body.imageUrl })
+      .expect(201);
+    expect(created.body.imageUrl).toBe(upload.body.imageUrl);
+    expect(created.body.moderationState).toBe('PENDING_REVIEW');
+
+    // The pending image post stays visible to its own author in their own
+    // feed (the own-post-visibility fix) ...
+    const ownFeed = await request(app.getHttpServer())
+      .get('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .expect(200);
+    const ownFeedPost = ownFeed.body.items.find((p: any) => p.id === created.body.id);
+    expect(ownFeedPost).toBeDefined();
+    expect(ownFeedPost.moderationState).toBe('PENDING_REVIEW');
+
+    // ... but not to a different, unrelated non-owner viewer, nor anonymously.
+    const other = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `otherviewer-${Date.now()}@test.dev`, password: 'password123', displayName: 'Other Viewer' });
+    const otherFeed = await request(app.getHttpServer())
+      .get('/api/posts')
+      .set('Authorization', `Bearer ${other.body.accessToken}`)
+      .expect(200);
+    expect(otherFeed.body.items.some((p: any) => p.id === created.body.id)).toBe(false);
+
+    const anonFeed = await request(app.getHttpServer()).get('/api/posts').expect(200);
+    expect(anonFeed.body.items.some((p: any) => p.id === created.body.id)).toBe(false);
+  });
+
+  it('rejects an unsupported file type on the post-image upload endpoint', async () => {
+    const email = `badupload-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Bad Upload' });
+
+    await request(app.getHttpServer())
+      .post('/api/posts/me/image')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .attach('image', Buffer.from('not an image'), { filename: 'note.txt', contentType: 'text/plain' })
+      .expect(400);
+  });
 });
+
+// A minimal valid 1x1 transparent PNG, used to exercise the real multer
+// fileFilter/diskStorage pipeline rather than faking a mimetype.
+const TINY_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';

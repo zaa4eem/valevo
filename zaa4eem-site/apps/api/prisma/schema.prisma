@@ -138,6 +138,7 @@ model Post {
   authorId        String
   author          User            @relation(fields: [authorId], references: [id])
   body            String
+  imageUrl        String?
   moderationState ModerationState @default(CLEAN)
   publishedAt     DateTime?
   createdAt       DateTime        @default(now())

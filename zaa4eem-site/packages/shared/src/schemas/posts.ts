@@ -3,6 +3,9 @@ import { z } from 'zod';
 export const createPostSchema = z.object({
   body: z.string().min(1).max(5000),
   publish: z.boolean().default(true),
+  // Set only after a prior upload to POST /posts/me/image — the image itself
+  // never travels through this JSON endpoint, just its resulting URL.
+  imageUrl: z.string().url().optional(),
 });
 export type CreatePostInput = z.infer<typeof createPostSchema>;
 
@@ -15,6 +18,8 @@ export type UpdatePostInput = z.infer<typeof updatePostSchema>;
 export const postSchema = z.object({
   id: z.string().uuid(),
   body: z.string(),
+  imageUrl: z.string().nullable(),
+  moderationState: z.enum(['CLEAN', 'PENDING_REVIEW', 'APPROVED', 'REMOVED']),
   publishedAt: z.string().nullable(),
   createdAt: z.string(),
   author: z.object({

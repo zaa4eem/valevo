@@ -11,6 +11,8 @@ function serializePost(post: any, viewerId?: string, followingIds?: Set<string>)
   return {
     id: post.id,
     body: post.body,
+    imageUrl: post.imageUrl ?? null,
+    moderationState: post.moderationState,
     publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
     createdAt: post.createdAt.toISOString(),
     author: {
@@ -58,12 +60,26 @@ export class PostsService {
     limit?: number;
   }) {
     const limit = opts.limit ?? 20;
+    // The owner sees every post regardless of moderation state. Everyone else
+    // sees only CLEAN/APPROVED posts by other people — but a signed-in
+    // viewer's *own* post stays visible to them no matter its moderation
+    // state, so posting something that lands in PENDING_REVIEW (e.g. it has
+    // an image, see PostsService.create) doesn't just vanish from the
+    // poster's own feed; it still shows the "на проверке" state instead.
     const where = opts.viewerIsOwner
       ? { publishedAt: { not: null } }
-      : {
-          publishedAt: { not: null },
-          moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] },
-        };
+      : opts.viewerId
+        ? {
+            publishedAt: { not: null },
+            OR: [
+              { moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] } },
+              { authorId: opts.viewerId },
+            ],
+          }
+        : {
+            publishedAt: { not: null },
+            moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] },
+          };
 
     const posts = await this.prisma.post.findMany({
       where,
@@ -99,7 +115,13 @@ export class PostsService {
   }
 
   /** Owners may post any time; everyone else is limited to one post per 12h (FR: v1.0.1). */
-  async create(authorId: string, body: string, publish: boolean, isOwner: boolean) {
+  async create(
+    authorId: string,
+    body: string,
+    publish: boolean,
+    isOwner: boolean,
+    imageUrl?: string,
+  ) {
     if (!isOwner) {
       const last = await this.prisma.post.findFirst({
         where: { authorId },
@@ -116,11 +138,19 @@ export class PostsService {
       }
     }
 
-    const moderationState = this.moderation.classify(body);
+    // The banned-words classifier (this.moderation.classify) only ever reads
+    // the caption text — it cannot inspect image content at all. So a post
+    // with an image is *always* forced into PENDING_REVIEW for a human
+    // (owner) review, regardless of how clean the caption is, rather than
+    // trusting a text-only filter to vouch for a picture it never looked at.
+    // This is a hard legal/moderation requirement (152-FZ/436-FZ content
+    // review), not a heuristic — don't let a CLEAN caption override it.
+    const moderationState = imageUrl ? ModerationState.PENDING_REVIEW : this.moderation.classify(body);
     const post = await this.prisma.post.create({
       data: {
         authorId,
         body,
+        imageUrl,
         moderationState,
         // Non-owners always publish immediately — the draft/schedule workflow
         // (publish: false) stays an owner-only tool.
