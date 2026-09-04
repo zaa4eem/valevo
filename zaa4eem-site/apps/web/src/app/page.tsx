@@ -219,7 +219,12 @@ function CommentThread({ postId }: { postId: string }) {
             return (
               <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
                 <Link href={`/u/${comment.author.id}`} style={{ flexShrink: 0 }}>
-                  <PremiumAvatar name={comment.author.displayName} size={26} premium={comment.author} />
+                  <PremiumAvatar
+                    name={comment.author.displayName}
+                    avatarUrl={comment.author.avatarUrl}
+                    size={26}
+                    premium={comment.author}
+                  />
                 </Link>
                 <div
                   style={{
@@ -390,18 +395,24 @@ function PostCard({
               <button
                 onClick={() => onToggleFollowAuthor(post.author.id, Boolean(post.author.viewerIsFollowing))}
                 className="z-pop-on-active"
+                title={post.author.viewerIsFollowing ? 'Отписаться' : 'Подписаться'}
                 style={{
-                  fontSize: 'var(--z-fs-xs)',
+                  width: 20,
+                  height: 20,
+                  display: 'grid',
+                  placeItems: 'center',
+                  fontSize: 13,
+                  lineHeight: 1,
                   fontWeight: 700,
-                  padding: '2px 9px',
-                  borderRadius: 999,
+                  padding: 0,
+                  borderRadius: '50%',
                   border: `1px solid ${post.author.viewerIsFollowing ? 'var(--z-border)' : 'var(--z-accent)'}`,
                   background: post.author.viewerIsFollowing ? 'transparent' : 'var(--z-accent-soft)',
                   color: post.author.viewerIsFollowing ? 'var(--z-text-faint)' : 'var(--z-accent)',
                   cursor: 'pointer',
                 }}
               >
-                {post.author.viewerIsFollowing ? 'Подписан' : '+ Подписаться'}
+                {post.author.viewerIsFollowing ? '✓' : '+'}
               </button>
             )}
           </div>

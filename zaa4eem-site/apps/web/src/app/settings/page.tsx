@@ -11,6 +11,7 @@ import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
+import { AvatarCropper } from '@/components/AvatarCropper';
 
 function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; onLinked: (p: PublicProfile) => void }) {
   const [code, setCode] = useState<string | null>(null);
@@ -168,6 +169,7 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -211,21 +213,32 @@ export default function SettingsPage() {
     }
   }
 
-  async function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+  function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (file) {
+      setAvatarError(null);
+      setAvatarFile(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  function onCropCancel() {
+    setAvatarFile(null);
+  }
+
+  async function onCropped(blob: Blob) {
+    setAvatarFile(null);
     setAvatarError(null);
     setAvatarUploading(true);
     try {
       const form = new FormData();
-      form.append('avatar', file);
+      form.append('avatar', blob, 'avatar.jpg');
       const updated = await api.upload<PublicProfile>('/users/me/avatar', form);
       setProfile(updated);
     } catch (err) {
       setAvatarError(err instanceof ApiError ? err.message : 'Не удалось загрузить аватар');
     } finally {
       setAvatarUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }
 
@@ -317,6 +330,8 @@ export default function SettingsPage() {
       <TelegramLinkSettings profile={profile} onLinked={setProfile} />
 
       {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
+
+      {avatarFile && <AvatarCropper file={avatarFile} onCancel={onCropCancel} onCropped={onCropped} />}
     </div>
   );
 }
