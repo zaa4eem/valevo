@@ -387,7 +387,7 @@ function PostCard({
             <Link href={`/u/${post.author.id}`}>
               <PremiumName name={post.author.displayName} premium={post.author} style={{ fontWeight: 700 }} />
             </Link>
-            {isOwner && <span className="z-badge">Owner</span>}
+            {isOwner && <span className="z-badge-owner">Owner</span>}
             <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
               {formatMemberNumber(post.author.memberNumber)}
             </span>

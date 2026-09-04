@@ -64,6 +64,9 @@ export const publicProfileSchema = z
     // Public by design — an invite code is meant to be shared, not a secret.
     referralCode: z.string(),
     usedTrialPremium: z.boolean(),
+    ideaCredits: z.array(
+      z.object({ id: z.string().uuid(), description: z.string(), createdAt: z.string() }),
+    ),
     stats: z.object({
       ideasSubmittedCount: z.number().int().nonnegative(),
       ideasAcceptedCount: z.number().int().nonnegative(),

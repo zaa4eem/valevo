@@ -11,3 +11,4 @@ export * from './schemas/posts';
 export * from './schemas/admin';
 export * from './schemas/search';
 export * from './schemas/clicker';
+export * from './schemas/idea-credits';

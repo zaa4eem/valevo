@@ -26,6 +26,9 @@ export function Footer() {
           <Link href="/legal/terms" style={{ color: 'var(--z-text-muted)' }}>
             Пользовательское соглашение
           </Link>
+          <Link href="/hall-of-fame" style={{ color: 'var(--z-text-muted)' }}>
+            💡 Зал славы
+          </Link>
           <span className="z-badge" title="Возрастное ограничение">
             12+
           </span>

@@ -262,7 +262,7 @@ export class UsersService {
     if (!raw) return null;
     const user = await ensurePremiumFresh(this.prisma, raw);
 
-    const [ideasSubmittedCount, ideasAcceptedCount, scores, followerCount, followingCount, viewerFollow] =
+    const [ideasSubmittedCount, ideasAcceptedCount, scores, followerCount, followingCount, viewerFollow, ideaCredits] =
       await Promise.all([
         this.prisma.idea.count({ where: { submitterId: userId } }),
         this.prisma.idea.count({
@@ -283,6 +283,7 @@ export class UsersService {
               where: { followerId_followingId: { followerId: viewerId, followingId: userId } },
             })
           : null,
+        this.prisma.ideaCredit.findMany({ where: { creditedId: userId }, orderBy: { createdAt: 'desc' } }),
       ]);
 
     const bestByGame = new Map<string, { gameSlug: string; gameTitle: string; value: number }>();
@@ -320,6 +321,11 @@ export class UsersService {
       premiumUntil: user.premiumUntil?.toISOString() ?? null,
       referralCode: user.referralCode,
       usedTrialPremium: user.usedTrialPremium,
+      ideaCredits: ideaCredits.map((c) => ({
+        id: c.id,
+        description: c.description,
+        createdAt: c.createdAt.toISOString(),
+      })),
       stats: {
         ideasSubmittedCount,
         ideasAcceptedCount,

@@ -26,6 +26,7 @@ export default function PublicProfilePage() {
   const [modActionMessage, setModActionMessage] = useState<string | null>(null);
   const [followBusy, setFollowBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [ideaCreditsOpen, setIdeaCreditsOpen] = useState(false);
 
   async function onShareProfile() {
     if (!profile) return;
@@ -190,8 +191,39 @@ export default function PublicProfilePage() {
           <div style={{ marginTop: 12 }}>
             <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <PremiumName name={profile.displayName} premium={profile} />
-              {isOwner && <span className="z-badge">Owner</span>}
+              {isOwner && <span className="z-badge-owner">Owner</span>}
+              {profile.ideaCredits.length > 0 && (
+                <button
+                  className="z-badge-idea-credit z-pop-on-active"
+                  onClick={() => setIdeaCreditsOpen((v) => !v)}
+                >
+                  💡 Автор идеи
+                </button>
+              )}
             </h1>
+            {ideaCreditsOpen && profile.ideaCredits.length > 0 && (
+              <div
+                className="z-animate-fade"
+                style={{
+                  marginTop: 8,
+                  background: 'var(--z-bg-elevated)',
+                  border: '1px solid var(--z-border)',
+                  borderRadius: 'var(--z-radius-sm)',
+                  padding: '10px 12px',
+                  fontSize: 'var(--z-fs-sm)',
+                  color: 'var(--z-text-muted)',
+                }}
+              >
+                {profile.ideaCredits.map((credit) => (
+                  <div key={credit.id} style={{ marginBottom: 4 }}>
+                    Предложил(а): <b style={{ color: 'var(--z-text)' }}>«{credit.description}»</b>
+                  </div>
+                ))}
+                <Link href="/hall-of-fame" style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-xs)' }}>
+                  Зал славы →
+                </Link>
+              </div>
+            )}
             {profile.statusText && (
               <p style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)', margin: '4px 0 0', fontStyle: 'italic' }}>
                 {profile.statusText}

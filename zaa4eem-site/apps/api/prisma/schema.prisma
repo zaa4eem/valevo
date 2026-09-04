@@ -131,12 +131,27 @@ model User {
   passwordResetTokens PasswordResetToken[]
   telegramLinkCodes TelegramLinkCode[]
   pendingReferrals  PendingReferral[]
+  ideaCredits       IdeaCredit[]
   moderationActions ModerationLogEntry[] @relation("ModerationActor")
   following         Follow[]             @relation("Follower")
   followers         Follow[]             @relation("Following")
 
   @@index([role])
   @@index([invitedById])
+}
+
+// The owner manually crediting someone's real-world (outside-the-app) idea
+// that shipped as a feature — separate from the in-app Idea board, which is
+// self-service voting/submission. Shows as a badge on the credited user's
+// profile, linking to the public /hall-of-fame list.
+model IdeaCredit {
+  id          String   @id @default(uuid())
+  creditedId  String
+  credited    User     @relation(fields: [creditedId], references: [id], onDelete: Cascade)
+  description String
+  createdAt   DateTime @default(now())
+
+  @@index([creditedId])
 }
 
 // Bridges the gap between "someone clicked a Telegram referral deep-link"

@@ -79,7 +79,7 @@ export function FollowList({
                 <PremiumAvatar name={u.displayName} avatarUrl={u.avatarUrl} size={40} premium={u} />
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                   <PremiumName name={u.displayName} premium={u} style={{ fontWeight: 700 }} />
-                  {u.role === 'OWNER' && <span className="z-badge">Owner</span>}
+                  {u.role === 'OWNER' && <span className="z-badge-owner">Owner</span>}
                   <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
                     {formatMemberNumber(u.memberNumber)}
                   </span>

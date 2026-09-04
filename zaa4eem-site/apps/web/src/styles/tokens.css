@@ -307,6 +307,39 @@ img {
   color: var(--z-accent);
 }
 
+/* Distinct from .z-badge on purpose — the owner's role tag, not a generic label. */
+.z-badge-owner {
+  display: inline-block;
+  font-size: var(--z-fs-xs);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fde68a, #eab308 55%, #ca8a04);
+  color: #140f00;
+  box-shadow: 0 0 8px rgba(234, 179, 8, 0.55), 0 0 2px rgba(234, 179, 8, 0.4);
+}
+
+/* Owner-granted recognition for a real-world idea that shipped — see IdeaCredit. */
+.z-badge-idea-credit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(251, 113, 133, 0.14);
+  color: #fb7185;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.z-badge-idea-credit:hover {
+  background: rgba(251, 113, 133, 0.22);
+}
+
 .z-card {
   background: var(--z-surface);
   border: 1px solid var(--z-border);

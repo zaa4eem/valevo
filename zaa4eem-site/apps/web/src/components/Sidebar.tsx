@@ -9,6 +9,7 @@ const items = [
   { href: '/admin/ideas', label: 'Идеи' },
   { href: '/admin/moderation', label: 'Модерация' },
   { href: '/admin/posts', label: 'Лента' },
+  { href: '/admin/idea-credits', label: 'Авторы идей' },
 ];
 
 export function Sidebar() {

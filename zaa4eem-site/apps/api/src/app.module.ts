@@ -15,6 +15,7 @@ import { AdminModule } from './admin/admin.module';
 import { SearchModule } from './search/search.module';
 import { ClickerModule } from './clicker/clicker.module';
 import { DigestModule } from './digest/digest.module';
+import { IdeaCreditsModule } from './idea-credits/idea-credits.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DigestModule } from './digest/digest.module';
     SearchModule,
     ClickerModule,
     DigestModule,
+    IdeaCreditsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
