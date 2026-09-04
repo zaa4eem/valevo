@@ -79,6 +79,13 @@
 
 .ring-spin {
   position: relative;
+  /* Always used on a span wrapping a fixed-size avatar, but the caller's
+     parent is often an unadorned flex row (e.g. the composer's <form>) —
+     flex's default align-items: stretch would otherwise stretch this span
+     to the row's full height, and inset: -4px below then draws the ring
+     around that stretched box instead of the avatar, as a huge ellipse. */
+  align-self: flex-start;
+  flex-shrink: 0;
 }
 .ring-spin::before {
   content: '';
@@ -102,6 +109,8 @@
 
 .ring-pulse {
   position: relative;
+  align-self: flex-start;
+  flex-shrink: 0;
 }
 .ring-pulse::before {
   content: '';
