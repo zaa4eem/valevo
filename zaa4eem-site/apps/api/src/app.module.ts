@@ -14,6 +14,7 @@ import { GamesModule } from './games/games.module';
 import { AdminModule } from './admin/admin.module';
 import { SearchModule } from './search/search.module';
 import { ClickerModule } from './clicker/clicker.module';
+import { DigestModule } from './digest/digest.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ClickerModule } from './clicker/clicker.module';
     AdminModule,
     SearchModule,
     ClickerModule,
+    DigestModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
