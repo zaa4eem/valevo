@@ -9,8 +9,10 @@ const SITE_DESCRIPTION = 'ZAA4EEM — идеи и мини-игры.';
 export const metadata: Metadata = {
   // Resolves the relative OG/Twitter image URLs below to absolute ones —
   // without it, Next.js falls back to http://localhost:3000 even in the
-  // production build, which shared-link previews can't reach.
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://zaa4eem.ru'),
+  // production build, which shared-link previews can't reach. `||`, not
+  // `??`: docker-compose substitutes an unset build ARG with an empty
+  // string (not undefined), and `new URL('')` throws and fails the build.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://zaa4eem.ru'),
   title: 'ZAA4EEM',
   description: SITE_DESCRIPTION,
   icons: {
