@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { LeaderboardEntry } from '@zaa4eem/shared';
 import { Card } from './Card';
 import { Avatar } from './Avatar';
@@ -57,10 +58,13 @@ export function Leaderboard({ title, entries }: { title: string; entries: Leader
                 >
                   {medal ?? entry.rank}
                 </span>
-                <Avatar name={entry.displayName} avatarUrl={entry.avatarUrl} size={34} />
-                <span style={{ flex: 1, fontWeight: entry.rank <= 3 ? 700 : 500, minWidth: 0 }}>
-                  {entry.displayName}
-                </span>
+                <Link
+                  href={`/u/${entry.userId}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}
+                >
+                  <Avatar name={entry.displayName} avatarUrl={entry.avatarUrl} size={34} />
+                  <span style={{ fontWeight: entry.rank <= 3 ? 700 : 500, minWidth: 0 }}>{entry.displayName}</span>
+                </Link>
                 <span style={{ fontWeight: 800, color: entry.rank <= 3 ? 'var(--z-accent)' : 'var(--z-text)' }}>
                   {entry.value}
                 </span>

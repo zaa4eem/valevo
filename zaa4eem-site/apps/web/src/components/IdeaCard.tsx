@@ -136,10 +136,13 @@ export function IdeaCard({
           <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: 6 }}>
             {idea.description.length > 160 ? `${idea.description.slice(0, 160)}…` : idea.description}
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginTop: 8 }}>
+          <Link
+            href={`/u/${idea.submitter.id}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginTop: 8 }}
+          >
             <Avatar name={idea.submitter.displayName} avatarUrl={idea.submitter.avatarUrl} size={18} />
             от {idea.submitter.displayName}
-          </div>
+          </Link>
         </div>
       </div>
     </Card>

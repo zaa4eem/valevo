@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { Comment, PaginatedPosts, Post } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
@@ -217,7 +218,9 @@ function CommentThread({ postId }: { postId: string }) {
             const canDelete = user && (user.id === comment.author.id || user.role === 'OWNER');
             return (
               <div key={comment.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <PremiumAvatar name={comment.author.displayName} size={26} premium={comment.author} />
+                <Link href={`/u/${comment.author.id}`} style={{ flexShrink: 0 }}>
+                  <PremiumAvatar name={comment.author.displayName} size={26} premium={comment.author} />
+                </Link>
                 <div
                   style={{
                     background: 'var(--z-bg-elevated)',
@@ -229,11 +232,13 @@ function CommentThread({ postId }: { postId: string }) {
                 >
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
                     <div>
-                      <PremiumName
-                        name={comment.author.displayName}
-                        premium={comment.author}
-                        style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}
-                      />
+                      <Link href={`/u/${comment.author.id}`}>
+                        <PremiumName
+                          name={comment.author.displayName}
+                          premium={comment.author}
+                          style={{ fontWeight: 700, fontSize: 'var(--z-fs-sm)', marginRight: 6 }}
+                        />
+                      </Link>
                       <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
                         {formatMemberNumber(comment.author.memberNumber)}
                       </span>
@@ -364,15 +369,19 @@ function PostCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <PremiumAvatar
-          name={post.author.displayName}
-          avatarUrl={post.author.avatarUrl}
-          ring={isOwner}
-          premium={post.author}
-        />
+        <Link href={`/u/${post.author.id}`} style={{ flexShrink: 0 }}>
+          <PremiumAvatar
+            name={post.author.displayName}
+            avatarUrl={post.author.avatarUrl}
+            ring={isOwner}
+            premium={post.author}
+          />
+        </Link>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <PremiumName name={post.author.displayName} premium={post.author} style={{ fontWeight: 700 }} />
+            <Link href={`/u/${post.author.id}`}>
+              <PremiumName name={post.author.displayName} premium={post.author} style={{ fontWeight: 700 }} />
+            </Link>
             {isOwner && <span className="z-badge">Owner</span>}
             <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
               {formatMemberNumber(post.author.memberNumber)}
