@@ -196,6 +196,24 @@ export class PostsService {
     await this.prisma.post.delete({ where: { id } });
   }
 
+  async setModeration(postId: string, moderationState: ModerationState, actorId: string, reason?: string) {
+    const post = await this.prisma.post.update({
+      where: { id: postId },
+      data: { moderationState },
+      include: { author: true, _count: { select: { likes: true, comments: true } } },
+    });
+    await this.prisma.moderationLogEntry.create({
+      data: {
+        actorId,
+        targetType: 'POST',
+        targetId: postId,
+        action: `moderation:${moderationState}`,
+        reason,
+      },
+    });
+    return serializePost(post);
+  }
+
   async getAuthorId(id: string): Promise<string | null> {
     const post = await this.prisma.post.findUnique({ where: { id }, select: { authorId: true } });
     return post?.authorId ?? null;

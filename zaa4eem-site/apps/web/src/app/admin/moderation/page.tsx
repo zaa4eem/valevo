@@ -14,6 +14,13 @@ interface ModerationQueue {
     user: { displayName: string };
     createdAt: string;
   }[];
+  posts: {
+    id: string;
+    body: string;
+    imageUrl: string | null;
+    author: { displayName: string };
+    createdAt: string;
+  }[];
 }
 
 export default function AdminModerationPage() {
@@ -49,12 +56,54 @@ export default function AdminModerationPage() {
     load();
   }
 
+  async function approvePost(id: string) {
+    await api.patch(`/posts/${id}/moderation`, { moderationState: 'APPROVED' });
+    load();
+  }
+
+  async function removePost(id: string) {
+    await api.patch(`/posts/${id}/moderation`, { moderationState: 'REMOVED', reason: 'Removed by owner' });
+    load();
+  }
+
   if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить модерацию.</p>;
   if (!queue) return <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>;
 
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Модерация</h1>
+
+      <h3>Посты на проверке</h3>
+      {queue.posts.length === 0 ? (
+        <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>Очередь пуста.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+          {queue.posts.map((post) => (
+            <Card key={post.id}>
+              {post.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={post.imageUrl}
+                  alt=""
+                  style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 'var(--z-radius-sm)', marginBottom: 10 }}
+                />
+              )}
+              {post.body && <p style={{ whiteSpace: 'pre-wrap' }}>{post.body}</p>}
+              <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginBottom: 10 }}>
+                от {post.author.displayName}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="z-btn-accent" onClick={() => approvePost(post.id)}>
+                  Одобрить
+                </button>
+                <button className="z-btn-danger" onClick={() => removePost(post.id)}>
+                  Удалить
+                </button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <h3>Идеи на проверке</h3>
       {queue.ideas.length === 0 ? (

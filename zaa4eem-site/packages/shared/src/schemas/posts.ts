@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { premiumFieldsSchema } from './users';
+import { ModerationState } from '../enums';
+
+const moderationStateValues = Object.values(ModerationState) as [ModerationState, ...ModerationState[]];
 
 export const createPostSchema = z.object({
   body: z.string().min(1).max(5000),
@@ -15,6 +18,12 @@ export const updatePostSchema = z.object({
   publish: z.boolean().optional(),
 });
 export type UpdatePostInput = z.infer<typeof updatePostSchema>;
+
+export const updatePostModerationSchema = z.object({
+  moderationState: z.enum(moderationStateValues),
+  reason: z.string().max(500).optional(),
+});
+export type UpdatePostModerationInput = z.infer<typeof updatePostModerationSchema>;
 
 export const postSchema = z.object({
   id: z.string().uuid(),

@@ -63,9 +63,19 @@ export function Leaderboard({ title, entries }: { title: string; entries: Leader
                   style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}
                 >
                   <Avatar name={entry.displayName} avatarUrl={entry.avatarUrl} size={34} />
-                  <span style={{ fontWeight: entry.rank <= 3 ? 700 : 500, minWidth: 0 }}>{entry.displayName}</span>
+                  <span
+                    style={{
+                      fontWeight: entry.rank <= 3 ? 700 : 500,
+                      minWidth: 0,
+                      overflowX: 'auto',
+                      whiteSpace: 'nowrap',
+                      scrollbarWidth: 'thin',
+                    }}
+                  >
+                    {entry.displayName}
+                  </span>
                 </Link>
-                <span style={{ fontWeight: 800, color: entry.rank <= 3 ? 'var(--z-accent)' : 'var(--z-text)' }}>
+                <span style={{ fontWeight: 800, color: entry.rank <= 3 ? 'var(--z-accent)' : 'var(--z-text)', flexShrink: 0 }}>
                   {entry.value}
                 </span>
               </li>

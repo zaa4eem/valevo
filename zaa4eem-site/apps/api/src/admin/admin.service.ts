@@ -11,7 +11,7 @@ export class AdminService {
   ) {}
 
   async moderationQueue() {
-    const [pendingIdeas, heldScores] = await Promise.all([
+    const [pendingIdeas, heldScores, pendingPosts] = await Promise.all([
       this.prisma.idea.findMany({
         where: { moderationState: ModerationState.PENDING_REVIEW },
         include: { submitter: true },
@@ -20,6 +20,11 @@ export class AdminService {
       this.prisma.score.findMany({
         where: { reviewState: 'HELD_FOR_REVIEW' },
         include: { user: true, game: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.post.findMany({
+        where: { moderationState: ModerationState.PENDING_REVIEW },
+        include: { author: true },
         orderBy: { createdAt: 'asc' },
       }),
     ]);
@@ -38,6 +43,13 @@ export class AdminService {
         game: { slug: score.game.slug, title: score.game.title },
         user: { id: score.user.id, displayName: score.user.displayName },
         createdAt: score.createdAt.toISOString(),
+      })),
+      posts: pendingPosts.map((post) => ({
+        id: post.id,
+        body: post.body,
+        imageUrl: post.imageUrl,
+        author: { id: post.author.id, displayName: post.author.displayName },
+        createdAt: post.createdAt.toISOString(),
       })),
     };
   }

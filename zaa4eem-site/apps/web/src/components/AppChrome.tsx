@@ -62,7 +62,7 @@ export function AppChrome({ children }: { children: ReactNode }) {
           </button>
         </div>
       )}
-      <main className="z-container z-main-content" style={{ paddingTop: 24, paddingBottom: 48, flex: 1 }}>
+      <main className="z-container z-main-content" style={{ paddingTop: 24, paddingBottom: 48, flex: 1, minWidth: 0, width: '100%' }}>
         {children}
       </main>
       <Footer />

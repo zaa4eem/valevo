@@ -22,10 +22,12 @@ import {
   createCommentSchema,
   createPostSchema,
   postsQuerySchema,
+  updatePostModerationSchema,
   updatePostSchema,
 } from '@zaa4eem/shared';
 import { PostsService } from './posts.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OwnerGuard } from '../auth/owner.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { postImageUploadOptions } from './post-image-storage';
@@ -82,6 +84,13 @@ export class PostsController {
   async remove(@Param('id') id: string, @CurrentUser() user: RequestUser) {
     await this.assertAuthorOrOwner(id, user);
     await this.posts.delete(id);
+  }
+
+  @UseGuards(JwtAuthGuard, OwnerGuard)
+  @Patch(':id/moderation')
+  setModeration(@Param('id') id: string, @CurrentUser() user: RequestUser, @Body() body: unknown) {
+    const { moderationState, reason } = updatePostModerationSchema.parse(body);
+    return this.posts.setModeration(id, moderationState, user.id, reason);
   }
 
   @UseGuards(JwtAuthGuard)

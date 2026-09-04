@@ -259,6 +259,84 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .attach('image', Buffer.from('not an image'), { filename: 'note.txt', contentType: 'text/plain' })
       .expect(400);
   });
+
+  it('lets the owner approve a pending image post, surfacing it in the moderation queue and then the public feed', async () => {
+    const authorEmail = `pendingimg-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: authorEmail, password: 'password123', displayName: 'Pending Poster' });
+
+    const upload = await request(app.getHttpServer())
+      .post('/api/posts/me/image')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .attach('image', Buffer.from(TINY_PNG_BASE64, 'base64'), { filename: 'photo.png', contentType: 'image/png' })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ body: 'ждёт проверки', publish: true, imageUrl: upload.body.imageUrl })
+      .expect(201);
+    expect(created.body.moderationState).toBe('PENDING_REVIEW');
+
+    const ownerEmail = `modowner-${Date.now()}@test.dev`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: ownerEmail, password: 'password123', displayName: 'Mod Owner' });
+    await prisma.user.update({ where: { email: ownerEmail }, data: { role: 'OWNER' } });
+    const ownerLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ownerEmail, password: 'password123' });
+    const ownerToken = ownerLogin.body.accessToken as string;
+
+    const queue = await request(app.getHttpServer())
+      .get('/api/admin/moderation-queue')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    expect(queue.body.posts.some((p: any) => p.id === created.body.id)).toBe(true);
+
+    await request(app.getHttpServer())
+      .patch(`/api/posts/${created.body.id}/moderation`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ moderationState: 'APPROVED' })
+      .expect(200);
+
+    const anonFeed = await request(app.getHttpServer()).get('/api/posts').expect(200);
+    const approved = anonFeed.body.items.find((p: any) => p.id === created.body.id);
+    expect(approved).toBeDefined();
+    expect(approved.moderationState).toBe('APPROVED');
+
+    const queueAfter = await request(app.getHttpServer())
+      .get('/api/admin/moderation-queue')
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .expect(200);
+    expect(queueAfter.body.posts.some((p: any) => p.id === created.body.id)).toBe(false);
+  });
+
+  it('rejects a non-owner trying to moderate a post', async () => {
+    const authorEmail = `pendingimg2-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: authorEmail, password: 'password123', displayName: 'Pending Poster Two' });
+
+    const upload = await request(app.getHttpServer())
+      .post('/api/posts/me/image')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .attach('image', Buffer.from(TINY_PNG_BASE64, 'base64'), { filename: 'photo.png', contentType: 'image/png' })
+      .expect(201);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/posts')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ body: 'ждёт проверки', publish: true, imageUrl: upload.body.imageUrl })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .patch(`/api/posts/${created.body.id}/moderation`)
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .send({ moderationState: 'APPROVED' })
+      .expect(403);
+  });
 });
 
 // A minimal valid 1x1 transparent PNG, used to exercise the real multer
