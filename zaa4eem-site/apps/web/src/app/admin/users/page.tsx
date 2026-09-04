@@ -28,6 +28,7 @@ function PremiumEditor({
     nameStyle: user.nameStyle ?? 'NONE',
     nameColor: user.nameColor ?? '#22c55e',
     ringStyle: user.ringStyle ?? 'NONE',
+    nameFont: user.nameFont ?? 'NONE',
     badgeEmoji: user.badgeEmoji,
   });
   const [duration, setDuration] = useState<number | null>(3);
@@ -43,6 +44,7 @@ function PremiumEditor({
         nameStyle: style.nameStyle === 'NONE' ? null : style.nameStyle,
         nameColor: style.nameStyle === 'GLOW' ? style.nameColor : null,
         ringStyle: style.ringStyle === 'NONE' ? null : style.ringStyle,
+        nameFont: style.nameFont === 'NONE' ? null : style.nameFont,
         badgeEmoji: style.badgeEmoji,
         durationMonths: duration,
       });

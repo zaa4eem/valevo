@@ -261,7 +261,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     await request(app.getHttpServer())
       .patch('/api/users/me/premium')
       .set('Authorization', `Bearer ${player.token}`)
-      .send({ nameStyle: 'GLOW', nameColor: '#ffffff', ringStyle: 'PULSE', badgeEmoji: null })
+      .send({ nameStyle: 'GLOW', nameColor: '#ffffff', ringStyle: 'PULSE', nameFont: null, badgeEmoji: null })
       .expect(403);
   });
 });

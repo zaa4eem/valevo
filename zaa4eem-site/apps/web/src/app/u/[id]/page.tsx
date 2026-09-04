@@ -12,7 +12,11 @@ import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 import { Skeleton, SkeletonCircle, SkeletonText } from '@/components/Skeleton';
 import { PremiumName } from '@/components/PremiumName';
+import { getRingClass } from '@/components/PremiumAvatar';
+import { shareProfileCard } from '@/lib/share-card';
 import '@/styles/premium.css';
+
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== 'undefined' ? window.location.origin : '');
 
 export default function PublicProfilePage() {
   const params = useParams<{ id: string }>();
@@ -21,6 +25,29 @@ export default function PublicProfilePage() {
   const [notFound, setNotFound] = useState(false);
   const [modActionMessage, setModActionMessage] = useState<string | null>(null);
   const [followBusy, setFollowBusy] = useState(false);
+  const [sharing, setSharing] = useState(false);
+
+  async function onShareProfile() {
+    if (!profile) return;
+    setSharing(true);
+    try {
+      const bestScore = profile.stats.bestScoresByGame.length
+        ? Math.max(...profile.stats.bestScoresByGame.map((s) => s.value))
+        : null;
+      await shareProfileCard(
+        {
+          displayName: profile.displayName,
+          memberNumber: profile.memberNumber,
+          ideasAcceptedCount: profile.stats.ideasAcceptedCount,
+          gamesPlayedCount: profile.stats.gamesPlayedCount,
+          bestScore,
+        },
+        `${SITE_URL}/u/${profile.id}`,
+      );
+    } finally {
+      setSharing(false);
+    }
+  }
 
   async function moderateUser(action: 'mute' | 'ban') {
     const reason = window.prompt(`Причина (${action === 'mute' ? 'мут' : 'бан'}):`);
@@ -104,13 +131,7 @@ export default function PublicProfilePage() {
                   ring class directly on the avatar div would get clipped by
                   that div's own overflow: hidden (used to crop the photo). */}
               <span
-                className={
-                  profile.isPremium && profile.ringStyle === 'SPIN'
-                    ? 'ring-spin'
-                    : profile.isPremium && profile.ringStyle === 'PULSE'
-                      ? 'ring-pulse'
-                      : undefined
-                }
+                className={getRingClass(profile) || undefined}
                 style={{ display: 'inline-flex', borderRadius: '50%', flexShrink: 0 }}
               >
                 <div
@@ -190,6 +211,14 @@ export default function PublicProfilePage() {
             <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-xs)', margin: '8px 0 0' }}>
               На платформе с {new Date(profile.createdAt).toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' })}
             </p>
+            <button
+              onClick={onShareProfile}
+              disabled={sharing}
+              className="z-btn-ghost z-pop-on-active"
+              style={{ marginTop: 10, fontSize: 'var(--z-fs-xs)', padding: '6px 12px' }}
+            >
+              {sharing ? '…' : '📤 Поделиться профилем'}
+            </button>
           </div>
 
           {viewer?.role === 'OWNER' && viewer.id !== profile.id && (

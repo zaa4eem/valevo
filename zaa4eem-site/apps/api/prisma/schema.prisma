@@ -36,6 +36,15 @@ enum PremiumNameStyle {
 enum PremiumRingStyle {
   SPIN
   PULSE
+  GLOW
+  RAINBOW
+  VENOM
+}
+
+enum PremiumNameFont {
+  SPACE
+  SERIF
+  PIXEL
 }
 
 enum ModerationState {
@@ -85,6 +94,7 @@ model User {
   nameColor         String?
   ringStyle         PremiumRingStyle?
   badgeEmoji        String?
+  nameFont          PremiumNameFont?
 
   // Z-Coin clicker economy (ClickerService). No offline/idle production —
   // coinsEarnedToday + coinsEarnedDay enforce a per-UTC-day earn cap on

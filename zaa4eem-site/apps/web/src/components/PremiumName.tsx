@@ -2,7 +2,13 @@ import type { CSSProperties } from 'react';
 import type { PremiumFields } from '@zaa4eem/shared';
 import '@/styles/premium.css';
 
-type PremiumNameProps = Pick<PremiumFields, 'isPremium' | 'nameStyle' | 'nameColor' | 'badgeEmoji'>;
+type PremiumNameProps = Pick<PremiumFields, 'isPremium' | 'nameStyle' | 'nameColor' | 'nameFont' | 'badgeEmoji'>;
+
+const FONT_CLASS: Record<string, string> = {
+  SPACE: 'pfont-space',
+  SERIF: 'pfont-serif',
+  PIXEL: 'pfont-pixel',
+};
 
 function hexToRgba(hex: string, alpha: number): string {
   const clean = hex.replace('#', '');
@@ -29,16 +35,20 @@ export function PremiumName({
     </span>
   );
 
+  // Font choice is independent of the animated/colored nameStyle — a
+  // Premium user can pick a font with no color effect at all, or vice versa.
+  const fontClass = premium?.isPremium && premium.nameFont ? FONT_CLASS[premium.nameFont] : '';
+
   if (!premium?.isPremium || !premium.nameStyle) {
     return (
       <span style={style}>
-        {name}
+        <span className={fontClass}>{name}</span>
         {badge}
       </span>
     );
   }
 
-  const className =
+  const styleClassName =
     premium.nameStyle === 'FLOW' ? 'pname-flow' : premium.nameStyle === 'HOLO' ? 'pname-holo' : 'pname-glow';
 
   const glowVars: CSSProperties | undefined =
@@ -51,7 +61,7 @@ export function PremiumName({
 
   return (
     <span style={{ ...style, ...glowVars }}>
-      <span className={className}>{name}</span>
+      <span className={`${styleClassName} ${fontClass}`.trim()}>{name}</span>
       {badge}
     </span>
   );

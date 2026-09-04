@@ -13,12 +13,23 @@ const RING_STYLE_LABEL: Record<string, string> = {
   NONE: 'Нет',
   SPIN: 'Вращение',
   PULSE: 'Пульсация',
+  GLOW: 'Свечение',
+  RAINBOW: 'Радуга',
+  VENOM: 'Веном',
+};
+
+const NAME_FONT_LABEL: Record<string, string> = {
+  NONE: 'Обычный',
+  SPACE: 'Техно',
+  SERIF: 'Элегантный',
+  PIXEL: 'Ретро',
 };
 
 export type PremiumStyleValue = {
   nameStyle: string; // 'NONE' | 'FLOW' | 'HOLO' | 'GLOW'
   nameColor: string;
-  ringStyle: string; // 'NONE' | 'SPIN' | 'PULSE'
+  ringStyle: string; // 'NONE' | 'SPIN' | 'PULSE' | 'GLOW' | 'RAINBOW' | 'VENOM'
+  nameFont: string; // 'NONE' | 'SPACE' | 'SERIF' | 'PIXEL'
   badgeEmoji: string | null;
 };
 
@@ -39,13 +50,14 @@ export function PremiumStyleFields({
   value: PremiumStyleValue;
   onChange: (next: PremiumStyleValue) => void;
 }) {
-  const { nameStyle, nameColor, ringStyle, badgeEmoji } = value;
+  const { nameStyle, nameColor, ringStyle, nameFont, badgeEmoji } = value;
 
   const previewUser = {
     isPremium: true,
     nameStyle: nameStyle === 'NONE' ? null : (nameStyle as 'FLOW' | 'HOLO' | 'GLOW'),
     nameColor: nameStyle === 'GLOW' ? nameColor : null,
-    ringStyle: ringStyle === 'NONE' ? null : (ringStyle as 'SPIN' | 'PULSE'),
+    ringStyle: ringStyle === 'NONE' ? null : (ringStyle as 'SPIN' | 'PULSE' | 'GLOW' | 'RAINBOW' | 'VENOM'),
+    nameFont: nameFont === 'NONE' ? null : (nameFont as 'SPACE' | 'SERIF' | 'PIXEL'),
     badgeEmoji,
   };
 
@@ -92,6 +104,21 @@ export function PremiumStyleFields({
             onChange={(e) => onChange({ ...value, ringStyle: e.target.value })}
           >
             {Object.entries(RING_STYLE_LABEL).map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--z-fs-xs)' }}>
+          Шрифт ника
+          <select
+            className="z-input"
+            value={nameFont}
+            onChange={(e) => onChange({ ...value, nameFont: e.target.value })}
+          >
+            {Object.entries(NAME_FONT_LABEL).map(([v, label]) => (
               <option key={v} value={v}>
                 {label}
               </option>

@@ -51,15 +51,13 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
 }
 
 /**
- * Renders the card and hands it to the OS share sheet where supported
- * (works in Telegram's in-app browser on most platforms); falls back to
- * downloading the image and copying the share text to the clipboard.
+ * Hands a rendered card to the OS share sheet where supported (works in
+ * Telegram's in-app browser on most platforms); falls back to downloading
+ * the image and copying the share text to the clipboard.
  */
-export async function shareScoreCard(gameTitle: string, score: number): Promise<'shared' | 'downloaded'> {
-  const canvas = renderScoreCard(gameTitle, score);
+async function shareCanvas(canvas: HTMLCanvasElement, filename: string, text: string): Promise<'shared' | 'downloaded'> {
   const blob = await canvasToBlob(canvas);
-  const text = `Набрал ${score} очков в «${gameTitle}» на ZAA4EEM — обгони! ${SITE_URL}`;
-  const file = new File([blob], 'zaa4eem-score.png', { type: 'image/png' });
+  const file = new File([blob], filename, { type: 'image/png' });
 
   if (navigator.canShare?.({ files: [file] })) {
     try {
@@ -74,7 +72,7 @@ export async function shareScoreCard(gameTitle: string, score: number): Promise<
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'zaa4eem-score.png';
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
   try {
@@ -83,4 +81,98 @@ export async function shareScoreCard(gameTitle: string, score: number): Promise<
     // Clipboard access can be denied — the downloaded image is still useful on its own.
   }
   return 'downloaded';
+}
+
+export async function shareScoreCard(gameTitle: string, score: number): Promise<'shared' | 'downloaded'> {
+  const canvas = renderScoreCard(gameTitle, score);
+  const text = `Набрал ${score} очков в «${gameTitle}» на ZAA4EEM — обгони! ${SITE_URL}`;
+  return shareCanvas(canvas, 'zaa4eem-score.png', text);
+}
+
+export interface ProfileCardData {
+  displayName: string;
+  memberNumber: number;
+  ideasAcceptedCount: number;
+  gamesPlayedCount: number;
+  bestScore: number | null;
+}
+
+/**
+ * Renders a "визитка" profile card — no avatar photo (drawing a
+ * cross-origin image onto canvas without CORS headers on the uploads host
+ * would taint the canvas and break toBlob/toDataURL), just initials on a
+ * colored circle, matching the app's own no-avatar fallback look.
+ */
+function renderProfileCard(data: ProfileCardData): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 800;
+  const ctx = canvas.getContext('2d')!;
+
+  const bgGradient = ctx.createLinearGradient(0, 0, 800, 800);
+  bgGradient.addColorStop(0, '#122016');
+  bgGradient.addColorStop(0.6, '#0b0e0d');
+  ctx.fillStyle = bgGradient;
+  ctx.fillRect(0, 0, 800, 800);
+
+  ctx.beginPath();
+  ctx.arc(400, 220, 90, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(74, 222, 128, 0.14)';
+  ctx.fill();
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '900 76px Inter, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(data.displayName.charAt(0).toUpperCase(), 400, 224);
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.fillStyle = '#f4f7f5';
+  ctx.font = '800 46px Inter, sans-serif';
+  ctx.fillText(data.displayName, 400, 370);
+
+  ctx.fillStyle = '#5b6b65';
+  ctx.font = '600 24px Inter, sans-serif';
+  ctx.fillText(`#${String(data.memberNumber).padStart(4, '0')}`, 400, 408);
+
+  const stats: [string, string][] = [
+    [String(data.ideasAcceptedCount), 'идей принято'],
+    [String(data.gamesPlayedCount), 'игр сыграно'],
+    [data.bestScore !== null ? String(data.bestScore) : '—', 'рекорд'],
+  ];
+  const colXs = [180, 400, 620];
+  stats.forEach(([value, label], i) => {
+    ctx.fillStyle = '#4ade80';
+    ctx.font = '900 48px Inter, sans-serif';
+    ctx.fillText(value, colXs[i], 500);
+    ctx.fillStyle = '#8fa39a';
+    ctx.font = '500 20px Inter, sans-serif';
+    ctx.fillText(label, colXs[i], 532);
+  });
+
+  ctx.strokeStyle = '#232b28';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(60, 660);
+  ctx.lineTo(740, 660);
+  ctx.stroke();
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#5b6b65';
+  ctx.font = '600 22px Inter, sans-serif';
+  ctx.fillText('Профиль на', 60, 720);
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '900 28px Inter, sans-serif';
+  ctx.fillText('ZAA4EEM', 230, 722);
+
+  return canvas;
+}
+
+export async function shareProfileCard(data: ProfileCardData, profileUrl: string): Promise<'shared' | 'downloaded'> {
+  const canvas = renderProfileCard(data);
+  const text = `Профиль ${data.displayName} на ZAA4EEM: ${profileUrl}`;
+  return shareCanvas(canvas, 'zaa4eem-profile.png', text);
 }

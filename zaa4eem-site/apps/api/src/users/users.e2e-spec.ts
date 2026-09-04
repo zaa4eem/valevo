@@ -65,7 +65,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     await request(app.getHttpServer())
       .patch('/api/users/me/premium')
       .set('Authorization', `Bearer ${nonPremium.body.accessToken}`)
-      .send({ nameStyle: 'FLOW', nameColor: null, ringStyle: 'SPIN', badgeEmoji: '🔥' })
+      .send({ nameStyle: 'FLOW', nameColor: null, ringStyle: 'SPIN', nameFont: null, badgeEmoji: '🔥' })
       .expect(403);
 
     await request(app.getHttpServer()).patch('/api/users/me/premium').send({}).expect(401);
@@ -93,17 +93,18 @@ const canRun = Boolean(process.env.DATABASE_URL);
     const restyled = await request(app.getHttpServer())
       .patch('/api/users/me/premium')
       .set('Authorization', `Bearer ${target.body.accessToken}`)
-      .send({ nameStyle: 'HOLO', nameColor: null, ringStyle: 'PULSE', badgeEmoji: '✨' })
+      .send({ nameStyle: 'HOLO', nameColor: null, ringStyle: 'PULSE', nameFont: 'SPACE', badgeEmoji: '✨' })
       .expect(200);
     expect(restyled.body.nameStyle).toBe('HOLO');
     expect(restyled.body.ringStyle).toBe('PULSE');
+    expect(restyled.body.nameFont).toBe('SPACE');
     expect(restyled.body.badgeEmoji).toBe('✨');
 
     // Same validation as the owner's admin endpoint applies here too.
     await request(app.getHttpServer())
       .patch('/api/users/me/premium')
       .set('Authorization', `Bearer ${target.body.accessToken}`)
-      .send({ nameStyle: 'GLOW', nameColor: 'not-a-color', ringStyle: null, badgeEmoji: null })
+      .send({ nameStyle: 'GLOW', nameColor: 'not-a-color', ringStyle: null, nameFont: null, badgeEmoji: null })
       .expect(400);
   });
 

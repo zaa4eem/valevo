@@ -47,6 +47,17 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru">
+      <head>
+        {/* Premium nickname font options (PremiumStyleFields) — the base UI
+            font stays the system stack in tokens.css; these are only ever
+            applied to a Premium user's own display name. */}
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Playfair+Display:wght@700&family=Russo+One&display=swap"
+          rel="stylesheet"
+        />
+      </head>
       <body>
         {/* Applies the saved theme before first paint — without this, the page
             would always flash the dark default for a frame before React

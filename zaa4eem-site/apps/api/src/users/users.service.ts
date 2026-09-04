@@ -16,6 +16,7 @@ function serializeUserSummary(user: any) {
     nameStyle: user.nameStyle,
     nameColor: user.nameColor,
     ringStyle: user.ringStyle,
+    nameFont: user.nameFont,
     badgeEmoji: user.badgeEmoji,
     premiumUntil: user.premiumUntil?.toISOString() ?? null,
   };
@@ -174,7 +175,8 @@ export class UsersService {
     data: {
       nameStyle: 'FLOW' | 'HOLO' | 'GLOW' | null;
       nameColor: string | null;
-      ringStyle: 'SPIN' | 'PULSE' | null;
+      ringStyle: 'SPIN' | 'PULSE' | 'GLOW' | 'RAINBOW' | 'VENOM' | null;
+      nameFont: 'SPACE' | 'SERIF' | 'PIXEL' | null;
       badgeEmoji: string | null;
     },
   ) {
@@ -313,6 +315,7 @@ export class UsersService {
       nameStyle: user.nameStyle,
       nameColor: user.nameColor,
       ringStyle: user.ringStyle,
+      nameFont: user.nameFont,
       badgeEmoji: user.badgeEmoji,
       premiumUntil: user.premiumUntil?.toISOString() ?? null,
       referralCode: user.referralCode,

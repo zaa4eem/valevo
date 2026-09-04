@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { premiumBadgeEmojiValues, premiumFieldsSchema, premiumNameStyleValues, premiumRingStyleValues } from './users';
+import {
+  premiumBadgeEmojiValues,
+  premiumFieldsSchema,
+  premiumNameFontValues,
+  premiumNameStyleValues,
+  premiumRingStyleValues,
+} from './users';
 
 export const moderationActionSchema = z.object({
   reason: z.string().min(1).max(500),
@@ -73,6 +79,7 @@ export const setPremiumSchema = z.object({
     .nullable()
     .optional(),
   ringStyle: z.enum(premiumRingStyleValues).nullable().optional(),
+  nameFont: z.enum(premiumNameFontValues).nullable().optional(),
   badgeEmoji: z.enum(premiumBadgeEmojiValues).nullable().optional(),
   // null/omitted = "Навсегда" (no expiry) — only meaningful when isPremium is true.
   durationMonths: z

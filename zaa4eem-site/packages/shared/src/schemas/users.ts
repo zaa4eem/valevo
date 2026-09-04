@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
 export const premiumNameStyleValues = ['FLOW', 'HOLO', 'GLOW'] as const;
-export const premiumRingStyleValues = ['SPIN', 'PULSE'] as const;
+export const premiumRingStyleValues = ['SPIN', 'PULSE', 'GLOW', 'RAINBOW', 'VENOM'] as const;
+/** Curated set — not arbitrary font upload — so the CSS bundle stays bounded. */
+export const premiumNameFontValues = ['SPACE', 'SERIF', 'PIXEL'] as const;
 /** Fixed emoji set the owner picks from when granting Premium — not free text. */
 export const premiumBadgeEmojiValues = ['👑', '💎', '🔥', '⭐', '✨', '🚀'] as const;
 
@@ -11,6 +13,7 @@ export const premiumFieldsSchema = z.object({
   nameStyle: z.enum(premiumNameStyleValues).nullable(),
   nameColor: z.string().nullable(),
   ringStyle: z.enum(premiumRingStyleValues).nullable(),
+  nameFont: z.enum(premiumNameFontValues).nullable(),
   badgeEmoji: z.string().nullable(),
   // null while isPremium is true means granted forever (owner "Навсегда", or
   // an old grant from before Premium had a term) — a date means it lazily
@@ -30,6 +33,7 @@ export const updatePremiumStyleSchema = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/, 'Цвет должен быть в формате #RRGGBB')
     .nullable(),
   ringStyle: z.enum(premiumRingStyleValues).nullable(),
+  nameFont: z.enum(premiumNameFontValues).nullable(),
   badgeEmoji: z.enum(premiumBadgeEmojiValues).nullable(),
 });
 export type UpdatePremiumStyleInput = z.infer<typeof updatePremiumStyleSchema>;

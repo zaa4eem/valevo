@@ -109,6 +109,7 @@ function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved
     nameStyle: profile.nameStyle ?? 'NONE',
     nameColor: profile.nameColor ?? '#22c55e',
     ringStyle: profile.ringStyle ?? 'NONE',
+    nameFont: profile.nameFont ?? 'NONE',
     badgeEmoji: profile.badgeEmoji,
   });
   const [saving, setSaving] = useState(false);
@@ -124,6 +125,7 @@ function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved
         nameStyle: style.nameStyle === 'NONE' ? null : style.nameStyle,
         nameColor: style.nameStyle === 'GLOW' ? style.nameColor : null,
         ringStyle: style.ringStyle === 'NONE' ? null : style.ringStyle,
+        nameFont: style.nameFont === 'NONE' ? null : style.nameFont,
         badgeEmoji: style.badgeEmoji,
       });
       onSaved(updated);
@@ -215,11 +217,35 @@ export default function SettingsPage() {
     }
   }
 
+  async function uploadAvatar(blob: Blob, filename: string) {
+    setAvatarError(null);
+    setAvatarUploading(true);
+    try {
+      const form = new FormData();
+      form.append('avatar', blob, filename);
+      const updated = await api.upload<PublicProfile>('/users/me/avatar', form);
+      setProfile(updated);
+    } catch (err) {
+      setAvatarError(err instanceof ApiError ? err.message : 'Не удалось загрузить аватар');
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
   function onAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) {
       setAvatarError(null);
-      setAvatarFile(file);
+      // GIFs skip the cropper entirely — cropping renders to a <canvas>,
+      // which captures a single static frame and would silently kill the
+      // animation. Uploaded as-is instead; the backend already accepts
+      // image/gif (see avatar-storage.ts) and every avatar is just an <img>
+      // tag, which animates a GIF natively with no extra rendering code.
+      if (file.type === 'image/gif') {
+        uploadAvatar(file, file.name);
+      } else {
+        setAvatarFile(file);
+      }
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
@@ -230,18 +256,7 @@ export default function SettingsPage() {
 
   async function onCropped(blob: Blob) {
     setAvatarFile(null);
-    setAvatarError(null);
-    setAvatarUploading(true);
-    try {
-      const form = new FormData();
-      form.append('avatar', blob, 'avatar.jpg');
-      const updated = await api.upload<PublicProfile>('/users/me/avatar', form);
-      setProfile(updated);
-    } catch (err) {
-      setAvatarError(err instanceof ApiError ? err.message : 'Не удалось загрузить аватар');
-    } finally {
-      setAvatarUploading(false);
-    }
+    await uploadAvatar(blob, 'avatar.jpg');
   }
 
   return (

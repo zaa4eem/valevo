@@ -27,6 +27,7 @@ export async function ensurePremiumFresh(prisma: PrismaService, user: User): Pro
       nameStyle: null,
       nameColor: null,
       ringStyle: null,
+      nameFont: null,
       badgeEmoji: null,
       premiumUntil: null,
     },

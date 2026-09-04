@@ -92,6 +92,7 @@ export class AdminService {
       nameStyle: u.nameStyle,
       nameColor: u.nameColor,
       ringStyle: u.ringStyle,
+      nameFont: u.nameFont,
       badgeEmoji: u.badgeEmoji,
       premiumUntil: u.premiumUntil?.toISOString() ?? null,
     }));
@@ -205,6 +206,7 @@ export class AdminService {
           nameStyle: input.nameStyle ?? null,
           nameColor: input.nameColor ?? null,
           ringStyle: input.ringStyle ?? null,
+          nameFont: input.nameFont ?? null,
           badgeEmoji: input.badgeEmoji ?? null,
           premiumUntil: input.durationMonths ? addMonths(new Date(), input.durationMonths) : null,
         }
@@ -213,6 +215,7 @@ export class AdminService {
           nameStyle: null,
           nameColor: null,
           ringStyle: null,
+          nameFont: null,
           badgeEmoji: null,
           premiumUntil: null,
         };

@@ -109,6 +109,12 @@
 
 .ring-pulse {
   position: relative;
+  /* Without this, the ::before's z-index: -1 below is compared against the
+     nearest ancestor stacking context instead of staying local to this
+     wrapper — depending on the caller's surrounding markup, that can put
+     it entirely behind an opaque ancestor background instead of just
+     behind the avatar sitting next to it. */
+  isolation: isolate;
   align-self: flex-start;
   flex-shrink: 0;
 }
@@ -121,6 +127,91 @@
   animation: zp-ring-pulse 2.2s ease-in-out infinite;
   pointer-events: none;
   z-index: -1;
+}
+
+/* Static, calmer alternative to the animated rings above — a fixed soft halo. */
+.ring-glow {
+  position: relative;
+  isolation: isolate;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.ring-glow::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--z-accent-soft) 0%, transparent 70%);
+  box-shadow: 0 0 12px 2px var(--z-accent-soft);
+  pointer-events: none;
+  z-index: -1;
+}
+
+@keyframes zp-ring-rainbow {
+  to { transform: rotate(360deg); }
+}
+
+.ring-rainbow {
+  position: relative;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.ring-rainbow::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  padding: 3px;
+  background: conic-gradient(from 0deg, #4ade80, #60a5fa, #f472b6, #fbbf24, #4ade80);
+  -webkit-mask:
+    radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  mask:
+    radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
+  animation: zp-ring-rainbow 4s linear infinite;
+  pointer-events: none;
+}
+
+/* Not a ring at all — a jagged symbiote-style aura poking out from behind
+   the (still circular) avatar, drawn with clip-path rather than an image
+   asset. z-index: -1 keeps it behind the avatar so only the spikes show. */
+@keyframes zp-venom-writhe {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.05) rotate(3deg); }
+}
+
+.ring-venom {
+  position: relative;
+  isolation: isolate;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.ring-venom::before {
+  content: '';
+  position: absolute;
+  inset: -22%;
+  z-index: -1;
+  background: radial-gradient(circle at 35% 30%, #4c1d95 0%, #0b0e0d 55%, #000 100%);
+  clip-path: polygon(
+    50% 0%, 58% 14%, 72% 6%, 74% 22%, 90% 18%, 84% 34%, 100% 38%,
+    88% 50%, 100% 62%, 84% 66%, 90% 82%, 74% 78%, 72% 94%, 58% 86%,
+    50% 100%, 42% 86%, 28% 94%, 26% 78%, 10% 82%, 16% 66%, 0% 62%,
+    12% 50%, 0% 38%, 16% 34%, 10% 18%, 26% 22%, 28% 6%, 42% 14%
+  );
+  filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.55));
+  animation: zp-venom-writhe 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.pfont-space {
+  font-family: 'Space Grotesk', var(--z-font-sans);
+  font-weight: 700;
+}
+.pfont-serif {
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+}
+.pfont-pixel {
+  font-family: 'Russo One', var(--z-font-sans);
 }
 
 @keyframes zp-emoji-bounce {
@@ -138,6 +229,8 @@
   .pname-holo,
   .ring-spin::before,
   .ring-pulse::before,
+  .ring-rainbow::before,
+  .ring-venom::before,
   .pemoji {
     animation: none;
   }
