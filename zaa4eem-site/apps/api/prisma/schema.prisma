@@ -94,6 +94,23 @@ model User {
   coinsEarnedToday  Int       @default(0)
   coinsEarnedDay    DateTime?
 
+  // Referrals: every user gets a permanent random code (never the guessable
+  // memberNumber) for their personal invite link. invitedById is set only
+  // once, at the invitee's first-ever registration (bot /start ref_CODE or
+  // web /r/CODE) — never reassigned retroactively. usedTrialPremium caps the
+  // one-time 24h Premium taste (first successful referral, or the Shop's
+  // standalone "try free" button — whichever happens first) to once ever.
+  // premiumUntil is the other half of that: null + isPremium means granted
+  // forever (owner grant, or admin picks "Навсегда"), a date means it lazily
+  // expires next time ensurePremiumFresh() sees this row (ClickerService's
+  // ensureFreshDay is the same lazy-check pattern, applied here to Premium).
+  referralCode      String    @unique
+  invitedById       String?
+  invitedBy         User?     @relation("Referrals", fields: [invitedById], references: [id])
+  referrals         User[]    @relation("Referrals")
+  premiumUntil      DateTime?
+  usedTrialPremium  Boolean   @default(false)
+
   posts             Post[]
   ideas             Idea[]
   votes             Vote[]
@@ -103,11 +120,26 @@ model User {
   refreshTokens     RefreshToken[]
   passwordResetTokens PasswordResetToken[]
   telegramLinkCodes TelegramLinkCode[]
+  pendingReferrals  PendingReferral[]
   moderationActions ModerationLogEntry[] @relation("ModerationActor")
   following         Follow[]             @relation("Follower")
   followers         Follow[]             @relation("Following")
 
   @@index([role])
+  @@index([invitedById])
+}
+
+// Bridges the gap between "someone clicked a Telegram referral deep-link"
+// and "that Telegram identity actually became an account" — /start fires
+// (and the referral must be captured) before any User row for that
+// telegramId exists yet. Consumed and deleted the moment that first
+// Mini App login creates the account; a code silently expiring unused
+// (never opens the Mini App) never needs cleanup beyond FK cascade.
+model PendingReferral {
+  telegramId BigInt   @id
+  referrerId String
+  referrer   User     @relation(fields: [referrerId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
 }
 
 model Follow {

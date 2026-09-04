@@ -3,6 +3,15 @@ import { hashPassword } from '../src/auth/password.util';
 
 const prisma = new PrismaClient();
 
+// Mirrors UsersService's generateUniqueReferralCode — duplicated rather than
+// imported since this script runs standalone (no Nest DI container) and
+// only ever creates the one owner row, so a uniqueness retry loop is
+// unnecessary overkill here.
+function randomReferralCode(): string {
+  const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  return Array.from({ length: 7 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+}
+
 async function main() {
   const ownerTelegramId = process.env.OWNER_TELEGRAM_ID
     ? BigInt(process.env.OWNER_TELEGRAM_ID)
@@ -28,6 +37,7 @@ async function main() {
         telegramId: ownerTelegramId,
         email: ownerEmail,
         passwordHash,
+        referralCode: randomReferralCode(),
       },
     });
     console.log(`Created owner user: ${owner.id}`);

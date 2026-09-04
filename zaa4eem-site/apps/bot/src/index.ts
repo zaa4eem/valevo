@@ -26,6 +26,21 @@ bot.api
   });
 
 bot.command('start', async (ctx) => {
+  // Personal referral links look like t.me/<bot>?start=ref_CODE — Telegram
+  // passes everything after "start=" as this match. The referred account
+  // doesn't exist yet at this point, so the API just stashes a pending
+  // referral keyed by this Telegram id (see PendingReferral) rather than
+  // attributing anything now.
+  const payload = ctx.match?.trim();
+  if (payload?.startsWith('ref_') && ctx.from) {
+    const code = payload.slice(4);
+    fetch(`${apiInternalUrl}/api/auth/referral/pending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ code, telegramId: ctx.from.id }),
+    }).catch((err) => console.error('Failed to register pending referral:', err));
+  }
+
   const keyboard = new InlineKeyboard().webApp('Открыть ZAA4EEM 🟢', webOrigin);
   await ctx.reply(
     'ZAA4EEM — идеи и мини-игры.\n\nПредлагай идеи, играй в мини-игры, следи за лентой — всё в одном месте.',

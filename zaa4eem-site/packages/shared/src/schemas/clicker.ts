@@ -20,6 +20,10 @@ export const clickerStateSchema = z.object({
   dailyCap: z.number().int().positive(),
   nextUpgradeCost: z.number().int().positive(),
   isPremium: z.boolean(),
+  premiumUntil: z.string().nullable(),
+  usedTrialPremium: z.boolean(),
+  referralCode: z.string(),
+  referralCount: z.number().int().nonnegative(),
 });
 export type ClickerState = z.infer<typeof clickerStateSchema>;
 

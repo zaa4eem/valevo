@@ -12,6 +12,10 @@ export const premiumFieldsSchema = z.object({
   nameColor: z.string().nullable(),
   ringStyle: z.enum(premiumRingStyleValues).nullable(),
   badgeEmoji: z.string().nullable(),
+  // null while isPremium is true means granted forever (owner "Навсегда", or
+  // an old grant from before Premium had a term) — a date means it lazily
+  // expires the next time PremiumUtil.ensurePremiumFresh sees this row.
+  premiumUntil: z.string().nullable(),
 });
 export type PremiumFields = z.infer<typeof premiumFieldsSchema>;
 
@@ -53,6 +57,9 @@ export const publicProfileSchema = z
     followerCount: z.number().int().nonnegative(),
     followingCount: z.number().int().nonnegative(),
     viewerIsFollowing: z.boolean().optional(),
+    // Public by design — an invite code is meant to be shared, not a secret.
+    referralCode: z.string(),
+    usedTrialPremium: z.boolean(),
     stats: z.object({
       ideasSubmittedCount: z.number().int().nonnegative(),
       ideasAcceptedCount: z.number().int().nonnegative(),

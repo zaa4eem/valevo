@@ -73,8 +73,20 @@ export class AuthService {
         displayName,
         avatarUrl: tgUser.photo_url,
       });
+      await this.users.attributeReferralFromPending(user.id, telegramId);
     }
     return user;
+  }
+
+  /** Registered by the bot on /start ref_CODE — see PendingReferral for why this can't wait for a real account to exist yet. */
+  async registerPendingReferral(code: string, telegramId: bigint): Promise<void> {
+    const referrer = await this.users.findByReferralCode(code);
+    if (!referrer) return;
+    // First-touch attribution only applies to brand-new signups — someone
+    // who already has an account can't be "invited" retroactively.
+    const alreadyLinked = await this.users.findByTelegramId(telegramId);
+    if (alreadyLinked) return;
+    await this.users.upsertPendingReferral(telegramId, referrer.id);
   }
 
   async loginWithGoogle(credential: string) {
@@ -162,6 +174,11 @@ export class AuthService {
       passwordHash,
       displayName: input.displayName,
     });
+
+    if (input.referralCode) {
+      const referrer = await this.users.findByReferralCode(input.referralCode);
+      if (referrer) await this.users.attributeReferral(user.id, referrer);
+    }
 
     return this.issueSession(user.id, user.role);
   }

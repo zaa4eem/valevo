@@ -15,4 +15,11 @@ export class ShopController {
     await this.clicker.buyPremium(user.id);
     return { ok: true };
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('trial')
+  async buyTrial(@CurrentUser() user: RequestUser) {
+    return this.clicker.buyTrial(user.id);
+  }
 }

@@ -141,7 +141,9 @@ function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved
         👑 Premium
       </h2>
       <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: -8, marginBottom: 16 }}>
-        Тебе выдан Premium — выбери, как это будет выглядеть.
+        {profile.premiumUntil
+          ? `Активен до ${new Date(profile.premiumUntil).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })} — выбери, как это будет выглядеть.`
+          : 'Активен навсегда — выбери, как это будет выглядеть.'}
       </p>
       <PremiumStyleFields displayName={profile.displayName} avatarUrl={profile.avatarUrl} value={style} onChange={setStyle} />
       {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 12 }}>{error}</div>}

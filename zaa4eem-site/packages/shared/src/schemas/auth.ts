@@ -28,8 +28,17 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, 'Пароль должен быть не короче 8 символов'),
   displayName: z.string().min(2).max(60),
+  // From /r/CODE — attributed only at this first registration, never retroactively.
+  referralCode: z.string().optional(),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
+
+/** Sent by the bot on /start ref_CODE — before the inviting Telegram identity has an account yet, so this can't go through the normal registerSchema flow. */
+export const pendingReferralSchema = z.object({
+  code: z.string().min(1),
+  telegramId: z.union([z.string(), z.number()]),
+});
+export type PendingReferralInput = z.infer<typeof pendingReferralSchema>;
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -75,6 +84,8 @@ export const authResponseSchema = z.object({
       role: z.enum(['OWNER', 'SUBSCRIBER']),
       displayName: z.string(),
       avatarUrl: z.string().nullable(),
+      referralCode: z.string(),
+      usedTrialPremium: z.boolean(),
     })
     .merge(premiumFieldsSchema),
 });

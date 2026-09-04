@@ -31,6 +31,16 @@ function LoginForm() {
   const [oauthBusy, setOauthBusy] = useState(false);
   const handledRedirect = useRef(false);
 
+  // Set by /r/[code] before redirecting here — a referral link should land
+  // straight on the register form, not login.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('zaa4eem_referral_code')) setMode('register');
+    } catch {
+      // Private-browsing / storage-denied — the code just won't pre-fill the mode.
+    }
+  }, []);
+
   const onTelegramAuth = useCallback(
     async (data: Record<string, string | number>) => {
       setError(null);
@@ -97,7 +107,18 @@ function LoginForm() {
       if (mode === 'login') {
         await login({ email, password });
       } else {
-        await register({ email, password, displayName });
+        let referralCode: string | undefined;
+        try {
+          referralCode = sessionStorage.getItem('zaa4eem_referral_code') ?? undefined;
+        } catch {
+          // ignore — registration still works without it
+        }
+        await register({ email, password, displayName, referralCode });
+        try {
+          sessionStorage.removeItem('zaa4eem_referral_code');
+        } catch {
+          // nothing to clean up if storage was never accessible
+        }
       }
       router.push('/');
     } catch (err) {

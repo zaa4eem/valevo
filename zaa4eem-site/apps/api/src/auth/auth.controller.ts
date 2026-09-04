@@ -17,6 +17,7 @@ import {
   forgotPasswordSchema,
   googleAuthSchema,
   loginSchema,
+  pendingReferralSchema,
   registerSchema,
   resetPasswordSchema,
   telegramAuthSchema,
@@ -145,6 +146,16 @@ export class AuthController {
   async consumeTelegramLinkCode(@Body() body: unknown) {
     const input = consumeTelegramLinkCodeSchema.parse(body);
     return this.auth.consumeTelegramLinkCode(input.code, BigInt(input.telegramId), input.telegramUsername);
+  }
+
+  // Called by apps/bot on /start ref_CODE, never a browser — see BotAuthGuard.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('referral/pending')
+  @UseGuards(BotAuthGuard)
+  async registerPendingReferral(@Body() body: unknown) {
+    const input = pendingReferralSchema.parse(body);
+    await this.auth.registerPendingReferral(input.code, BigInt(input.telegramId));
   }
 
   @Throttle({ default: { limit: 3, ttl: 60_000 } })

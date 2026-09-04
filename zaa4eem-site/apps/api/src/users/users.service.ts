@@ -1,8 +1,9 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { IdeaStatus } from '@zaa4eem/shared';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
+import { ensurePremiumFresh, grantTrialPremiumIfUnused } from '../common/premium.util';
 
 function serializeUserSummary(user: any) {
   return {
@@ -16,8 +17,12 @@ function serializeUserSummary(user: any) {
     nameColor: user.nameColor,
     ringStyle: user.ringStyle,
     badgeEmoji: user.badgeEmoji,
+    premiumUntil: user.premiumUntil?.toISOString() ?? null,
   };
 }
+
+const REFERRAL_CODE_ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const REFERRAL_CODE_LENGTH = 7;
 
 @Injectable()
 export class UsersService {
@@ -42,36 +47,91 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { googleId } });
   }
 
-  createFromTelegram(input: { telegramId: bigint; telegramUsername?: string; displayName: string; avatarUrl?: string }) {
+  /** Random, not derived from memberNumber — a sequential/guessable code would leak the user count and invite enumeration. */
+  private async generateUniqueReferralCode(): Promise<string> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = Array.from(
+        { length: REFERRAL_CODE_LENGTH },
+        () => REFERRAL_CODE_ALPHABET[Math.floor(Math.random() * REFERRAL_CODE_ALPHABET.length)],
+      ).join('');
+      const existing = await this.prisma.user.findUnique({ where: { referralCode: code } });
+      if (!existing) return code;
+    }
+    throw new Error('Could not generate a unique referral code after 5 attempts');
+  }
+
+  async createFromTelegram(input: { telegramId: bigint; telegramUsername?: string; displayName: string; avatarUrl?: string }) {
     return this.prisma.user.create({
       data: {
         telegramId: input.telegramId,
         telegramUsername: input.telegramUsername,
         displayName: input.displayName,
         avatarUrl: input.avatarUrl,
+        referralCode: await this.generateUniqueReferralCode(),
       },
     });
   }
 
-  createFromGoogle(input: { googleId: string; email?: string; displayName: string; avatarUrl?: string }) {
+  async createFromGoogle(input: { googleId: string; email?: string; displayName: string; avatarUrl?: string }) {
     return this.prisma.user.create({
       data: {
         googleId: input.googleId,
         email: input.email,
         displayName: input.displayName,
         avatarUrl: input.avatarUrl,
+        referralCode: await this.generateUniqueReferralCode(),
       },
     });
   }
 
-  createWithPassword(input: { email: string; passwordHash: string; displayName: string }) {
+  async createWithPassword(input: { email: string; passwordHash: string; displayName: string }) {
     return this.prisma.user.create({
       data: {
         email: input.email,
         passwordHash: input.passwordHash,
         displayName: input.displayName,
+        referralCode: await this.generateUniqueReferralCode(),
       },
     });
+  }
+
+  findByReferralCode(code: string) {
+    return this.prisma.user.findUnique({ where: { referralCode: code.toUpperCase() } });
+  }
+
+  /** Bot's /start ref_CODE fires before the inviting Telegram identity has an account yet — stash it so the referral can be attributed once that account actually gets created. */
+  async upsertPendingReferral(telegramId: bigint, referrerId: string) {
+    await this.prisma.pendingReferral.upsert({
+      where: { telegramId },
+      create: { telegramId, referrerId },
+      update: { referrerId, createdAt: new Date() },
+    });
+  }
+
+  /**
+   * First-touch referral attribution — called once, right after a brand-new
+   * account is created, never reassigned later. If this is the referrer's
+   * first-ever successful referral, they get the one-time 24h Premium trial.
+   */
+  async attributeReferral(newUserId: string, referrer: User) {
+    if (newUserId === referrer.id) return;
+    await this.prisma.user.update({ where: { id: newUserId }, data: { invitedById: referrer.id } });
+
+    const referralCount = await this.prisma.user.count({ where: { invitedById: referrer.id } });
+    if (referralCount === 1) {
+      await grantTrialPremiumIfUnused(this.prisma, this.notify, referrer.id);
+    }
+  }
+
+  /** Telegram-path counterpart to attributeReferral — resolves a pending referral left by /start ref_CODE for a telegramId that just became a real account. */
+  async attributeReferralFromPending(newUserId: string, telegramId: bigint) {
+    const pending = await this.prisma.pendingReferral.findUnique({ where: { telegramId } });
+    if (!pending) return;
+    await this.prisma.pendingReferral.delete({ where: { telegramId } }).catch(() => undefined);
+
+    const referrer = await this.prisma.user.findUnique({ where: { id: pending.referrerId } });
+    if (!referrer) return;
+    await this.attributeReferral(newUserId, referrer);
   }
 
   linkTelegram(userId: string, telegramId: bigint, telegramUsername?: string) {
@@ -118,8 +178,10 @@ export class UsersService {
       badgeEmoji: string | null;
     },
   ) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
-    if (!user?.isPremium) {
+    const raw = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!raw) throw new NotFoundException('Пользователь не найден');
+    const user = await ensurePremiumFresh(this.prisma, raw);
+    if (!user.isPremium) {
       throw new ForbiddenException('Эта функция доступна только Premium-пользователям');
     }
     return this.prisma.user.update({ where: { id: userId }, data });
@@ -194,8 +256,9 @@ export class UsersService {
 
   /** Public profile + derived stats (FR-004). */
   async getPublicProfile(userId: string, viewerId?: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return null;
+    const raw = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!raw) return null;
+    const user = await ensurePremiumFresh(this.prisma, raw);
 
     const [ideasSubmittedCount, ideasAcceptedCount, scores, followerCount, followingCount, viewerFollow] =
       await Promise.all([
@@ -251,6 +314,9 @@ export class UsersService {
       nameColor: user.nameColor,
       ringStyle: user.ringStyle,
       badgeEmoji: user.badgeEmoji,
+      premiumUntil: user.premiumUntil?.toISOString() ?? null,
+      referralCode: user.referralCode,
+      usedTrialPremium: user.usedTrialPremium,
       stats: {
         ideasSubmittedCount,
         ideasAcceptedCount,

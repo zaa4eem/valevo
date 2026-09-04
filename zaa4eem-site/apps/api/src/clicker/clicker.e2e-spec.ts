@@ -154,12 +154,17 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .expect(201);
 
     const board = await request(app.getHttpServer()).get('/api/clicker/leaderboard').expect(200);
-    const entry = board.body.find((e: any) => e.userId === userId);
-    expect(entry).toBeDefined();
-    expect(entry.value).toBe(33);
+    expect(Array.isArray(board.body)).toBe(true);
+    expect(board.body[0]).toMatchObject({ rank: 1, userId: expect.any(String), value: expect.any(Number) });
+
+    // The dev DB accumulates far more than 20 zCoin holders across a long
+    // test history, so a fresh 33-coin account isn't guaranteed a top-20
+    // spot — verify it actually earned the coins directly instead.
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(row.zCoins).toBe(33);
   });
 
-  it('sells Premium for PREMIUM_SHOP_PRICE, rejecting insufficient funds and a repeat purchase', async () => {
+  it('sells one month of Premium for PREMIUM_SHOP_PRICE, rejecting insufficient funds', async () => {
     const { token, userId } = await registerUser();
 
     await request(app.getHttpServer())
@@ -182,11 +187,15 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .expect(200);
     expect(state.body.isPremium).toBe(true);
     expect(state.body.zCoins).toBe(0);
+    expect(state.body.premiumUntil).toEqual(expect.any(String));
 
+    // A repeat purchase stacks another month rather than being rejected —
+    // see referrals.e2e-spec.ts for the full stacking + "already permanent"
+    // coverage of this behavior.
     await prisma.user.update({ where: { id: userId }, data: { zCoins: PREMIUM_SHOP_PRICE } });
     await request(app.getHttpServer())
       .post('/api/shop/premium')
       .set('Authorization', `Bearer ${token}`)
-      .expect(409);
+      .expect(201);
   });
 });

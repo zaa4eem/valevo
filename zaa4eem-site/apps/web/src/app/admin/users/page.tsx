@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { AdminUserListItem } from '@zaa4eem/shared';
-import { formatMemberNumber } from '@zaa4eem/shared';
+import { formatMemberNumber, premiumDurationMonthsValues } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
@@ -30,6 +30,7 @@ function PremiumEditor({
     ringStyle: user.ringStyle ?? 'NONE',
     badgeEmoji: user.badgeEmoji,
   });
+  const [duration, setDuration] = useState<number | null>(3);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +44,7 @@ function PremiumEditor({
         nameColor: style.nameStyle === 'GLOW' ? style.nameColor : null,
         ringStyle: style.ringStyle === 'NONE' ? null : style.ringStyle,
         badgeEmoji: style.badgeEmoji,
+        durationMonths: duration,
       });
       onSaved();
     } catch {
@@ -74,6 +76,49 @@ function PremiumEditor({
       }}
     >
       <PremiumStyleFields displayName={user.displayName} avatarUrl={user.avatarUrl} value={style} onChange={setStyle} />
+
+      <div>
+        <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-muted)', marginBottom: 6 }}>Срок Premium</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {premiumDurationMonthsValues.map((months) => (
+            <button
+              key={months}
+              type="button"
+              className="z-pop-on-active"
+              onClick={() => setDuration(months)}
+              style={{
+                fontSize: 'var(--z-fs-xs)',
+                fontWeight: 700,
+                padding: '6px 10px',
+                borderRadius: 'var(--z-radius-sm)',
+                border: `1px solid ${duration === months ? 'var(--z-accent)' : 'var(--z-border)'}`,
+                background: duration === months ? 'var(--z-accent)' : 'transparent',
+                color: duration === months ? 'var(--z-accent-text-on)' : 'var(--z-text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {months} мес
+            </button>
+          ))}
+          <button
+            type="button"
+            className="z-pop-on-active"
+            onClick={() => setDuration(null)}
+            style={{
+              fontSize: 'var(--z-fs-xs)',
+              fontWeight: 700,
+              padding: '6px 10px',
+              borderRadius: 'var(--z-radius-sm)',
+              border: `1px solid ${duration === null ? 'var(--z-accent)' : 'var(--z-border)'}`,
+              background: duration === null ? 'var(--z-accent)' : 'transparent',
+              color: duration === null ? 'var(--z-accent-text-on)' : 'var(--z-text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            Навсегда
+          </button>
+        </div>
+      </div>
 
       {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
 
@@ -191,9 +236,16 @@ export default function AdminUsersPage() {
                 </td>
                 <td style={{ padding: '10px' }}>
                   {u.isPremium ? (
-                    <span className="z-badge" style={{ background: 'var(--z-accent-soft)', color: 'var(--z-accent)' }}>
-                      ✨ Premium
-                    </span>
+                    <div>
+                      <span className="z-badge" style={{ background: 'var(--z-accent-soft)', color: 'var(--z-accent)' }}>
+                        ✨ Premium
+                      </span>
+                      <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', marginTop: 4 }}>
+                        {u.premiumUntil
+                          ? `до ${new Date(u.premiumUntil).toLocaleDateString('ru-RU')}`
+                          : 'навсегда'}
+                      </div>
+                    </div>
                   ) : (
                     <span style={{ color: 'var(--z-text-faint)' }}>—</span>
                   )}

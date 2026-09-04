@@ -61,6 +61,8 @@ export const adminUserListItemSchema = z
   .merge(premiumFieldsSchema);
 export type AdminUserListItem = z.infer<typeof adminUserListItemSchema>;
 
+export const premiumDurationMonthsValues = [1, 3, 6, 9, 12] as const;
+
 /** Owner-only Premium grant/config — never self-service, hence no "self" variant of this schema. */
 export const setPremiumSchema = z.object({
   isPremium: z.boolean(),
@@ -72,5 +74,10 @@ export const setPremiumSchema = z.object({
     .optional(),
   ringStyle: z.enum(premiumRingStyleValues).nullable().optional(),
   badgeEmoji: z.enum(premiumBadgeEmojiValues).nullable().optional(),
+  // null/omitted = "Навсегда" (no expiry) — only meaningful when isPremium is true.
+  durationMonths: z
+    .union([z.literal(1), z.literal(3), z.literal(6), z.literal(9), z.literal(12)])
+    .nullable()
+    .optional(),
 });
 export type SetPremiumInput = z.infer<typeof setPremiumSchema>;

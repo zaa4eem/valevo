@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { IdeaStatus, ModerationState, SetPremiumInput } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from '../auth/token.service';
+import { addMonths } from '../common/premium.util';
 
 @Injectable()
 export class AdminService {
@@ -92,6 +93,7 @@ export class AdminService {
       nameColor: u.nameColor,
       ringStyle: u.ringStyle,
       badgeEmoji: u.badgeEmoji,
+      premiumUntil: u.premiumUntil?.toISOString() ?? null,
     }));
   }
 
@@ -195,7 +197,7 @@ export class AdminService {
     await this.logAction(actorId, 'USER', userId, 'activate');
   }
 
-  /** Cosmetic-only, owner-granted — never self-service (no equivalent user-facing endpoint exists). */
+  /** Cosmetic-only, owner-granted — never self-service (no equivalent user-facing endpoint exists). durationMonths null/omitted grants forever ("Навсегда"); a number sets a term the user's Premium lazily expires from (see premium.util.ts). */
   async setPremium(userId: string, actorId: string, input: SetPremiumInput) {
     const data = input.isPremium
       ? {
@@ -204,8 +206,16 @@ export class AdminService {
           nameColor: input.nameColor ?? null,
           ringStyle: input.ringStyle ?? null,
           badgeEmoji: input.badgeEmoji ?? null,
+          premiumUntil: input.durationMonths ? addMonths(new Date(), input.durationMonths) : null,
         }
-      : { isPremium: false, nameStyle: null, nameColor: null, ringStyle: null, badgeEmoji: null };
+      : {
+          isPremium: false,
+          nameStyle: null,
+          nameColor: null,
+          ringStyle: null,
+          badgeEmoji: null,
+          premiumUntil: null,
+        };
 
     await this.prisma.user.update({ where: { id: userId }, data });
     await this.logAction(actorId, 'USER', userId, input.isPremium ? 'premium:granted' : 'premium:revoked');
