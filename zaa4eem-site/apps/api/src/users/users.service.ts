@@ -218,6 +218,8 @@ export class UsersService {
       avatarUrl: user.avatarUrl,
       bio: user.bio,
       statusText: user.statusText,
+      hasTelegram: user.telegramId !== null,
+      telegramUsername: user.telegramUsername,
       createdAt: user.createdAt.toISOString(),
       followerCount,
       followingCount,

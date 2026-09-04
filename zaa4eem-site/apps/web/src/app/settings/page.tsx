@@ -1,11 +1,107 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { updateProfileSchema, formatMemberNumber, type PublicProfile } from '@zaa4eem/shared';
+import {
+  updateProfileSchema,
+  formatMemberNumber,
+  type PublicProfile,
+  type TelegramLinkCodeResponse,
+} from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
+
+function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; onLinked: (p: PublicProfile) => void }) {
+  const [code, setCode] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // While a code is showing, poll /users/me so linking (done from the bot,
+  // not this tab) reflects here without the user having to refresh — stops
+  // itself once linked or once the code's own 10-minute window has passed.
+  useEffect(() => {
+    if (!code || !expiresAt) return;
+    const interval = setInterval(async () => {
+      if (Date.now() > expiresAt) {
+        clearInterval(interval);
+        return;
+      }
+      try {
+        const fresh = await api.get<PublicProfile>('/users/me');
+        if (fresh.hasTelegram) {
+          clearInterval(interval);
+          onLinked(fresh);
+        }
+      } catch {
+        // A transient failure here just means we try again next tick.
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [code, expiresAt, onLinked]);
+
+  async function generateCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.post<TelegramLinkCodeResponse>('/auth/link/telegram/code');
+      setCode(res.code);
+      setExpiresAt(Date.now() + res.expiresInMinutes * 60_000);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось создать код');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card hover className="z-animate-in" style={{ marginTop: 20 }}>
+      <h2 style={{ marginTop: 0, fontSize: 'var(--z-fs-lg)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        ✈️ Telegram
+      </h2>
+      {profile.hasTelegram ? (
+        <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', margin: 0 }}>
+          Привязан{profile.telegramUsername ? <> — <strong>@{profile.telegramUsername}</strong></> : ''}. Один и
+          тот же аккаунт открывается и на сайте, и в мини-приложении.
+        </p>
+      ) : (
+        <>
+          <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: -8, marginBottom: 16 }}>
+            Привяжи Telegram, чтобы заходить в один и тот же аккаунт и с сайта, и из мини-приложения.
+          </p>
+          {code ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div
+                style={{
+                  fontSize: 'var(--z-fs-2xl)',
+                  fontWeight: 800,
+                  letterSpacing: '0.15em',
+                  color: 'var(--z-accent)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {code}
+              </div>
+              <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', margin: 0 }}>
+                Отправь боту{' '}
+                <a href="https://t.me/zaa4eem_bot" target="_blank" rel="noreferrer">
+                  @zaa4eem_bot
+                </a>{' '}
+                команду <code style={{ color: 'var(--z-text)' }}>/link {code}</code> в течение 10 минут.
+              </p>
+            </div>
+          ) : (
+            <button className="z-btn-accent z-pop-on-active" disabled={busy} onClick={generateCode}>
+              {busy ? 'Создание кода…' : 'Привязать Telegram'}
+            </button>
+          )}
+          {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 10 }}>{error}</div>}
+        </>
+      )}
+    </Card>
+  );
+}
 
 function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved: (p: PublicProfile) => void }) {
   const [style, setStyle] = useState<PremiumStyleValue>({
@@ -217,6 +313,8 @@ export default function SettingsPage() {
           </button>
         </form>
       </Card>
+
+      <TelegramLinkSettings profile={profile} onLinked={setProfile} />
 
       {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
     </div>

@@ -42,6 +42,20 @@ export const resetPasswordSchema = z.object({
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+export const telegramLinkCodeResponseSchema = z.object({
+  code: z.string(),
+  expiresInMinutes: z.number().int().positive(),
+});
+export type TelegramLinkCodeResponse = z.infer<typeof telegramLinkCodeResponseSchema>;
+
+/** Sent by the bot (never a browser) — see BotAuthGuard, not a user-facing form. */
+export const consumeTelegramLinkCodeSchema = z.object({
+  code: z.string().regex(/^\d{6}$/, 'Код должен состоять из 6 цифр'),
+  telegramId: z.union([z.string(), z.number()]),
+  telegramUsername: z.string().optional(),
+});
+export type ConsumeTelegramLinkCodeInput = z.infer<typeof consumeTelegramLinkCodeSchema>;
+
 export const authResponseSchema = z.object({
   accessToken: z.string(),
   // The actual endpoints (register/login/refresh, and GET /users/me which

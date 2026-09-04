@@ -88,6 +88,32 @@ export class AuthService {
     return this.users.getPublicProfile(userId);
   }
 
+  /** Settings → "Привязать Telegram" — one account everywhere, browser side. */
+  async issueTelegramLinkCode(userId: string): Promise<{ code: string; expiresInMinutes: number }> {
+    const code = await this.tokens.issueTelegramLinkCode(userId);
+    return { code, expiresInMinutes: 10 };
+  }
+
+  /**
+   * Redeemed by the bot on /link <code> — see BotAuthGuard for why this
+   * doesn't need initData (a Telegram chat command has none) or a user JWT
+   * (the bot isn't logged in as anyone; the code IS the credential).
+   */
+  async consumeTelegramLinkCode(code: string, telegramId: bigint, telegramUsername?: string) {
+    const userId = await this.tokens.consumeTelegramLinkCode(code);
+    if (!userId) {
+      throw new UnauthorizedException('Код недействителен или истёк — сгенерируй новый в настройках');
+    }
+
+    const existing = await this.users.findByTelegramId(telegramId);
+    if (existing && existing.id !== userId) {
+      throw new ConflictException('Этот Telegram-аккаунт уже привязан к другому пользователю');
+    }
+
+    await this.users.linkTelegram(userId, telegramId, telegramUsername);
+    return this.users.getPublicProfile(userId);
+  }
+
   async register(input: RegisterInput) {
     const existing = await this.users.findByEmail(input.email);
     if (existing) {

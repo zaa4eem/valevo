@@ -47,6 +47,8 @@ export const publicProfileSchema = z
     avatarUrl: z.string().nullable(),
     bio: z.string().nullable(),
     statusText: z.string().nullable(),
+    hasTelegram: z.boolean(),
+    telegramUsername: z.string().nullable(),
     createdAt: z.string(),
     followerCount: z.number().int().nonnegative(),
     followingCount: z.number().int().nonnegative(),

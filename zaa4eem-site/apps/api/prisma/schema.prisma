@@ -90,6 +90,7 @@ model User {
   comments          Comment[]
   refreshTokens     RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  telegramLinkCodes TelegramLinkCode[]
   moderationActions ModerationLogEntry[] @relation("ModerationActor")
   following         Follow[]             @relation("Follower")
   followers         Follow[]             @relation("Following")
@@ -126,6 +127,23 @@ model PasswordResetToken {
   userId    String
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// One-account-everywhere: a short-lived 6-digit code a logged-in browser
+// session generates (Settings → "Привязать Telegram"), then redeems by
+// sending /link <code> to the bot — links the bot's telegramId to this
+// user without needing initData (only available inside the Mini App
+// WebView, not from a Telegram chat command).
+model TelegramLinkCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
   expiresAt DateTime
   usedAt    DateTime?
   createdAt DateTime  @default(now())

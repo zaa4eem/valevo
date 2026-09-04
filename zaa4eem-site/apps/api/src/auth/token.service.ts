@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes, randomInt, createHash } from 'crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -12,6 +12,7 @@ export interface AccessTokenPayload {
 const REFRESH_TOKEN_TTL_DAYS = 30;
 const ACCESS_TOKEN_TTL = '15m';
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const LINK_CODE_TTL_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class TokenService {
@@ -99,6 +100,47 @@ export class TokenService {
     if (!record) return null;
 
     await this.prisma.passwordResetToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    });
+    return record.userId;
+  }
+
+  /**
+   * Issues a 6-digit code a logged-in browser session shows in Settings, to
+   * be redeemed from a Telegram chat (/link <code> — see AuthService.
+   * consumeTelegramLinkCode) where there's no initData to verify a Mini App
+   * session with. Any earlier unused code for this user is invalidated
+   * first, so only the most recently generated one ever works.
+   */
+  async issueTelegramLinkCode(userId: string): Promise<string> {
+    await this.prisma.telegramLinkCode.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    // randomInt (CSPRNG), not Math.random — this code is a bearer credential,
+    // even if a short-lived, single-use, 6-digit one.
+    const raw = String(randomInt(100000, 1000000));
+    const codeHash = this.hashRefreshToken(raw);
+    const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS);
+
+    await this.prisma.telegramLinkCode.create({
+      data: { userId, codeHash, expiresAt },
+    });
+
+    return raw;
+  }
+
+  /** Marks a link code used and returns its owner's id, or null if it's unknown, expired, or already used. */
+  async consumeTelegramLinkCode(raw: string): Promise<string | null> {
+    const codeHash = this.hashRefreshToken(raw);
+    const record = await this.prisma.telegramLinkCode.findFirst({
+      where: { codeHash, usedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (!record) return null;
+
+    await this.prisma.telegramLinkCode.update({
       where: { id: record.id },
       data: { usedAt: new Date() },
     });

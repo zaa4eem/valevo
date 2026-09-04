@@ -13,6 +13,7 @@ import {
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import {
+  consumeTelegramLinkCodeSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -22,6 +23,7 @@ import {
 } from '@zaa4eem/shared';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
+import { BotAuthGuard } from './bot-auth.guard';
 import { CurrentUser, RequestUser } from './current-user.decorator';
 
 const REFRESH_COOKIE = 'zaa4eem_refresh';
@@ -114,6 +116,26 @@ export class AuthController {
   async linkTelegram(@CurrentUser() user: RequestUser, @Body() body: unknown) {
     const input = telegramAuthSchema.parse(body);
     return this.auth.linkTelegram(user.id, input);
+  }
+
+  // One account everywhere, browser side: Settings shows this code, the
+  // user sends it to the bot as /link <code>, which redeems it below.
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('link/telegram/code')
+  @UseGuards(JwtAuthGuard)
+  async createTelegramLinkCode(@CurrentUser() user: RequestUser) {
+    return this.auth.issueTelegramLinkCode(user.id);
+  }
+
+  // Called by apps/bot, never a browser — see BotAuthGuard. A 6-digit code
+  // over a bot-facing endpoint is a brute-force surface, so this is rate
+  // limited independently of (and much tighter than) the code-issuing one.
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Post('link/telegram/consume')
+  @UseGuards(BotAuthGuard)
+  async consumeTelegramLinkCode(@Body() body: unknown) {
+    const input = consumeTelegramLinkCodeSchema.parse(body);
+    return this.auth.consumeTelegramLinkCode(input.code, BigInt(input.telegramId), input.telegramUsername);
   }
 
   @Throttle({ default: { limit: 3, ttl: 60_000 } })
