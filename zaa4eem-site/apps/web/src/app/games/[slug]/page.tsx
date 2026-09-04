@@ -10,6 +10,7 @@ import { Leaderboard } from '@/components/Leaderboard';
 import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
 import { ZClicker } from '@/components/games/z-clicker/ZClicker';
+import { shareScoreCard } from '@/lib/share-card';
 
 const GAME_ICONS: Record<string, string> = {
   'neon-snake': '🐍',
@@ -24,6 +25,8 @@ export default function GameDetailPage() {
   const [error, setError] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [lastScore, setLastScore] = useState<number | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   const isClicker = params.slug === 'z-clicker';
 
@@ -56,6 +59,7 @@ export default function GameDetailPage() {
   }, [isClicker, loadLeaderboard]);
 
   async function onGameOver(score: number) {
+    setLastScore(score);
     if (!user) {
       setSavedMessage('Войдите, чтобы сохранить результат в таблицу лидеров.');
       return;
@@ -63,6 +67,16 @@ export default function GameDetailPage() {
     await api.post(`/games/${params.slug}/scores`, { value: score });
     setSavedMessage(`Результат ${score} сохранён!`);
     loadLeaderboard();
+  }
+
+  async function onShare() {
+    if (lastScore === null || !game) return;
+    setSharing(true);
+    try {
+      await shareScoreCard(game.title, lastScore);
+    } finally {
+      setSharing(false);
+    }
   }
 
   if (error) return <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить игру.</p>;
@@ -130,7 +144,14 @@ export default function GameDetailPage() {
           )}
         </Card>
         {savedMessage && (
-          <p style={{ marginTop: 12, color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>{savedMessage}</p>
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <p style={{ margin: 0, color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>{savedMessage}</p>
+            {lastScore !== null && (
+              <button onClick={onShare} disabled={sharing} className="z-btn-ghost z-pop-on-active">
+                {sharing ? '…' : '📤 Поделиться'}
+              </button>
+            )}
+          </div>
         )}
       </div>
       <div className="z-animate-in" style={{ animationDelay: '100ms' }}>
