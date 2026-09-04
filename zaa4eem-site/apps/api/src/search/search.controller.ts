@@ -12,7 +12,7 @@ export class SearchController {
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   get(@Query() query: unknown, @Req() req: Request & { user?: RequestUser }) {
-    const { q } = searchQuerySchema.parse(query);
-    return this.search.search(q, req.user?.role === 'OWNER');
+    const { q, type } = searchQuerySchema.parse(query);
+    return this.search.search(q, type, req.user?.role === 'OWNER');
   }
 }

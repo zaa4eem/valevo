@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import type { SearchResults } from '@zaa4eem/shared';
-import { formatMemberNumber } from '@zaa4eem/shared';
+import { formatMemberNumber, searchTypeValues, type SearchQuery } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
@@ -28,8 +28,18 @@ const sectionTitleStyle: CSSProperties = {
   margin: '0 0 10px',
 };
 
+type SectionFilter = SearchQuery['type'];
+
+const FILTER_LABELS: Record<SectionFilter, string> = {
+  all: 'Всё',
+  users: 'Профили',
+  posts: 'Посты',
+  ideas: 'Идеи',
+};
+
 export default function SearchPage() {
   const [query, setQuery] = useState('');
+  const [type, setType] = useState<SectionFilter>('all');
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -46,13 +56,13 @@ export default function SearchPage() {
     setError(false);
     const timeout = setTimeout(() => {
       api
-        .get<SearchResults>(`/search?q=${encodeURIComponent(trimmed)}`)
+        .get<SearchResults>(`/search?q=${encodeURIComponent(trimmed)}&type=${type}`)
         .then(setResults)
         .catch(() => setError(true))
         .finally(() => setLoading(false));
     }, 300);
     return () => clearTimeout(timeout);
-  }, [query]);
+  }, [query, type]);
 
   const trimmedQuery = query.trim();
   const totalCount = results ? results.users.length + results.posts.length + results.ideas.length : 0;
@@ -66,8 +76,31 @@ export default function SearchPage() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         autoFocus
-        style={{ marginBottom: 20, width: '100%' }}
+        style={{ marginBottom: 14, width: '100%' }}
       />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+        {searchTypeValues.map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setType(value)}
+            className="z-pop-on-active"
+            style={{
+              fontSize: 'var(--z-fs-sm)',
+              fontWeight: 700,
+              padding: '6px 14px',
+              borderRadius: 999,
+              border: `1px solid ${type === value ? 'var(--z-accent)' : 'var(--z-border)'}`,
+              background: type === value ? 'var(--z-accent-soft)' : 'transparent',
+              color: type === value ? 'var(--z-accent)' : 'var(--z-text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            {FILTER_LABELS[value]}
+          </button>
+        ))}
+      </div>
 
       {trimmedQuery.length > 0 && trimmedQuery.length < 2 && (
         <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-sm)' }}>Введите ещё хотя бы один символ.</p>
