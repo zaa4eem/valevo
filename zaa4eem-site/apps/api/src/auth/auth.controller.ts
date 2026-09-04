@@ -3,6 +3,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
   Req,
   Res,
@@ -34,6 +35,8 @@ const REFRESH_COOKIE_OPTIONS = {
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly auth: AuthService) {}
 
   @Post('telegram')
@@ -70,14 +73,31 @@ export class AuthController {
     return { accessToken, user };
   }
 
+  // Temporary diagnostic logging (owner report: browser tab refresh logs
+  // people out on the live deploy but not reproducible against localhost —
+  // almost certainly the cross-subdomain cookie, but there's no way to see
+  // *why* it's failing without eyes on the actual request) — remove once
+  // the real cause is confirmed and fixed.
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('refresh')
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const raw = req.cookies?.[REFRESH_COOKIE];
-    if (!raw) throw new UnauthorizedException('Сессия истекла, войдите заново');
-    const { accessToken, refreshToken } = await this.auth.refresh(raw);
-    res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
-    return { accessToken };
+    const origin = req.headers.origin ?? 'none';
+    const cookieHeaderPresent = Boolean(req.headers.cookie);
+    if (!raw) {
+      this.logger.warn(
+        `refresh: no ${REFRESH_COOKIE} cookie (Origin=${origin}, Cookie header present=${cookieHeaderPresent}, all cookie names=${Object.keys(req.cookies ?? {}).join(',') || 'none'})`,
+      );
+      throw new UnauthorizedException('Сессия истекла, войдите заново');
+    }
+    try {
+      const { accessToken, refreshToken } = await this.auth.refresh(raw);
+      res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
+      return { accessToken };
+    } catch (err) {
+      this.logger.warn(`refresh: rejected (Origin=${origin}) — ${err instanceof Error ? err.message : err}`);
+      throw err;
+    }
   }
 
   @Post('logout')

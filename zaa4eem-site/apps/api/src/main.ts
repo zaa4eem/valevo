@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import * as path from 'path';
@@ -9,6 +9,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false });
+  const logger = new Logger('CORS');
 
   // Uploaded avatars live outside the `api` prefix (they're static files, not
   // API responses) — served at /uploads/avatars/<file>, matching the URL
@@ -19,7 +20,24 @@ async function bootstrap() {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  app.enableCors({ origin: webOrigins, credentials: true });
+  logger.log(`Allowed origins: ${webOrigins.join(', ')}`);
+  app.enableCors({
+    // A callback instead of the plain array lets a rejected origin be
+    // logged — otherwise a WEB_ORIGIN misconfiguration (missing scheme,
+    // trailing slash, wrong host) silently drops CORS headers, and a
+    // credentialed cross-origin request failing that way looks identical
+    // to a refresh-token problem from the browser's side (the cookie never
+    // gets stored in the first place, so every subsequent refresh 401s).
+    origin: (origin, callback) => {
+      if (!origin || webOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        logger.warn(`Rejected Origin "${origin}" — not in allowed list [${webOrigins.join(', ')}]`);
+        callback(null, false);
+      }
+    },
+    credentials: true,
+  });
 
   app.use(cookieParser());
   // Bare /health (not /api/health) so Docker's HEALTHCHECK and an external
