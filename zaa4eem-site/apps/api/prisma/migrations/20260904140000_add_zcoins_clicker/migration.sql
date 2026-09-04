@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN     "zCoins" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "clickPower" INTEGER NOT NULL DEFAULT 1,
+ADD COLUMN     "coinsEarnedToday" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "coinsEarnedDay" TIMESTAMP(3);

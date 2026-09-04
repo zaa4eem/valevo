@@ -44,6 +44,20 @@ async function main() {
     },
   });
   console.log(`Game ready: ${neonSnake.title} (${neonSnake.slug})`);
+
+  const zClicker = await prisma.game.upsert({
+    where: { slug: 'z-clicker' },
+    update: {},
+    create: {
+      slug: 'z-clicker',
+      title: 'Z-Кликер',
+      description: 'Кликай и копи Z-коины — потрать их на апгрейды или на Premium в магазине.',
+      // Not a score-based game — this is unused by the clicker's own zCoins
+      // leaderboard, just required by the shared Game row shape.
+      maxPlausibleScore: 1_000_000,
+    },
+  });
+  console.log(`Game ready: ${zClicker.title} (${zClicker.slug})`);
 }
 
 main()

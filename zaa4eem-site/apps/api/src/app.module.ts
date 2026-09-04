@@ -13,6 +13,7 @@ import { IdeasModule } from './ideas/ideas.module';
 import { GamesModule } from './games/games.module';
 import { AdminModule } from './admin/admin.module';
 import { SearchModule } from './search/search.module';
+import { ClickerModule } from './clicker/clicker.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { SearchModule } from './search/search.module';
     GamesModule,
     AdminModule,
     SearchModule,
+    ClickerModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

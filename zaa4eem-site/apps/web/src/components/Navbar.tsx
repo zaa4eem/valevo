@@ -10,6 +10,7 @@ const links = [
   { href: '/', label: 'Лента' },
   { href: '/ideas', label: 'Идеи' },
   { href: '/games', label: 'Игры' },
+  { href: '/shop', label: '🛒 Магазин' },
   { href: '/leaderboard', label: 'Лидеры' },
   { href: '/search', label: '🔍 Поиск' },
 ];

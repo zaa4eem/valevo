@@ -9,9 +9,11 @@ import { Card } from '@/components/Card';
 import { Leaderboard } from '@/components/Leaderboard';
 import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
+import { ZClicker } from '@/components/games/z-clicker/ZClicker';
 
 const GAME_ICONS: Record<string, string> = {
   'neon-snake': '🐍',
+  'z-clicker': '🪙',
 };
 const DEFAULT_GAME_ICON = '🎮';
 
@@ -23,20 +25,35 @@ export default function GameDetailPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
+  const isClicker = params.slug === 'z-clicker';
+
   const loadLeaderboard = useCallback(async () => {
     try {
-      const data = await api.get<LeaderboardEntry[]>(`/games/${params.slug}/leaderboard`);
+      // The clicker isn't score-based (there's no single "round" to submit a
+      // value for) — it has its own zCoins leaderboard instead.
+      const data = await api.get<LeaderboardEntry[]>(
+        isClicker ? '/clicker/leaderboard' : `/games/${params.slug}/leaderboard`,
+      );
       setLeaderboard(data);
     } catch {
       // Non-fatal: the game itself can still be shown/played without a leaderboard.
     }
-  }, [params.slug]);
+  }, [params.slug, isClicker]);
 
   useEffect(() => {
     setError(false);
     api.get<Game>(`/games/${params.slug}`).then(setGame, () => setError(true));
     loadLeaderboard();
   }, [params.slug, loadLeaderboard]);
+
+  // The clicker leaderboard shifts continuously while playing, unlike a
+  // score-based game's (which only changes on a "game over" event) — poll it
+  // while this page is open instead of leaving it stale until a reload.
+  useEffect(() => {
+    if (!isClicker) return;
+    const interval = setInterval(loadLeaderboard, 5000);
+    return () => clearInterval(interval);
+  }, [isClicker, loadLeaderboard]);
 
   async function onGameOver(score: number) {
     if (!user) {
@@ -98,6 +115,14 @@ export default function GameDetailPage() {
         <Card className="z-animate-in" style={{ animationDelay: '60ms' }}>
           {game.slug === 'neon-snake' ? (
             <NeonSnake onGameOver={onGameOver} />
+          ) : isClicker ? (
+            user ? (
+              <ZClicker />
+            ) : (
+              <p style={{ color: 'var(--z-text-muted)', margin: 0, textAlign: 'center', padding: '24px 0' }}>
+                Войдите, чтобы копить Z-коины.
+              </p>
+            )
           ) : (
             <p style={{ color: 'var(--z-text-muted)', margin: 0, textAlign: 'center', padding: '24px 0' }}>
               Игра скоро появится. 🛠️

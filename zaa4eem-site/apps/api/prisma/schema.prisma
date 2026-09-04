@@ -74,7 +74,10 @@ model User {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  // Premium cosmetics — owner-granted only, never self-service. nameColor is
+  // Premium cosmetics — granted either by the owner (admin panel) or
+  // self-service via the Z-Coin shop (ShopService.buyPremium). Either path
+  // just flips isPremium; the style fields below are always the user's own
+  // choice afterwards (see /settings' PremiumStyleFields). nameColor is
   // only meaningful when nameStyle is GLOW; FLOW/HOLO compute their colors
   // from the viewer's theme instead (see the frontend's premium styles).
   isPremium         Boolean           @default(false)
@@ -82,6 +85,14 @@ model User {
   nameColor         String?
   ringStyle         PremiumRingStyle?
   badgeEmoji        String?
+
+  // Z-Coin clicker economy (ClickerService). No offline/idle production —
+  // coinsEarnedToday + coinsEarnedDay enforce a per-UTC-day earn cap on
+  // manual clicks only; clickPower is raised by repeatable upgrades.
+  zCoins            Int       @default(0)
+  clickPower        Int       @default(1)
+  coinsEarnedToday  Int       @default(0)
+  coinsEarnedDay    DateTime?
 
   posts             Post[]
   ideas             Idea[]
