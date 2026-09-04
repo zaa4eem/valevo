@@ -12,6 +12,9 @@ project's non-negotiables (RF legal compliance, one-codebase Telegram
 parity, design system, etc.) are in
 [`.specify/memory/constitution.md`](.specify/memory/constitution.md).
 
+Build numbering (`MAJOR.FEATURES.BUILD`) and the current count are in
+[`VERSIONING.md`](VERSIONING.md).
+
 ## Stack
 
 TypeScript end-to-end: **Next.js** (`apps/web` — website + admin dashboard
