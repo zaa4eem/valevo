@@ -68,6 +68,7 @@ model User {
   statusText        String?
   telegramId        BigInt?    @unique
   telegramUsername  String?
+  googleId          String?    @unique
   email             String?    @unique
   passwordHash      String?
   createdAt         DateTime   @default(now())

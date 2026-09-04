@@ -15,6 +15,7 @@ import { Throttle } from '@nestjs/throttler';
 import {
   consumeTelegramLinkCodeSchema,
   forgotPasswordSchema,
+  googleAuthSchema,
   loginSchema,
   registerSchema,
   resetPasswordSchema,
@@ -53,6 +54,14 @@ export class AuthController {
   async telegramWidget(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
     const input = telegramWidgetAuthSchema.parse(body);
     const { accessToken, refreshToken, user } = await this.auth.loginWithTelegramWidget(input);
+    res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
+    return { accessToken, user };
+  }
+
+  @Post('google')
+  async google(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+    const input = googleAuthSchema.parse(body);
+    const { accessToken, refreshToken, user } = await this.auth.loginWithGoogle(input.credential);
     res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
     return { accessToken, user };
   }

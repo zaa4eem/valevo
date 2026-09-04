@@ -6,6 +6,7 @@ import { AppModule } from '../app.module';
 import { HttpExceptionFilter } from '../common/http-exception.filter';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from './token.service';
+import { GoogleAuthService } from './google-auth.service';
 
 const canRun = Boolean(process.env.DATABASE_URL);
 
@@ -227,5 +228,117 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .set('Authorization', botAuth)
       .send({ code: issueB.body.code, telegramId })
       .expect(409);
+  });
+});
+
+(canRun ? describe : describe.skip)('Google sign-in (e2e)', () => {
+  let app: INestApplication;
+  let verifyIdToken: jest.Mock;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(GoogleAuthService)
+      .useValue({ verifyIdToken: jest.fn() })
+      .compile();
+    app = moduleRef.createNestApplication();
+    app.use(cookieParser());
+    app.setGlobalPrefix('api');
+    app.useGlobalFilters(new HttpExceptionFilter());
+    await app.init();
+    verifyIdToken = (moduleRef.get(GoogleAuthService) as unknown as { verifyIdToken: jest.Mock }).verifyIdToken;
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    verifyIdToken.mockReset();
+  });
+
+  function googlePayload(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      googleId: `g-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      email: undefined,
+      emailVerified: false,
+      displayName: 'Google User',
+      avatarUrl: 'https://example.com/avatar.png',
+      ...overrides,
+    };
+  }
+
+  it('creates a new account on first sign-in', async () => {
+    verifyIdToken.mockResolvedValueOnce(googlePayload({ displayName: 'Fresh Googler' }));
+
+    const res = await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'fake-jwt' })
+      .expect(201);
+
+    expect(res.body.accessToken).toBeDefined();
+    expect(res.body.user.displayName).toBe('Fresh Googler');
+  });
+
+  it('signs into the same account on a repeat sign-in with the same googleId', async () => {
+    const payload = googlePayload({ displayName: 'Repeat Googler' });
+    verifyIdToken.mockResolvedValueOnce(payload);
+    const first = await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'fake-jwt-1' })
+      .expect(201);
+
+    verifyIdToken.mockResolvedValueOnce(payload);
+    const second = await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'fake-jwt-2' })
+      .expect(201);
+
+    expect(second.body.user.id).toBe(first.body.user.id);
+  });
+
+  it('links to an existing account by verified email instead of creating a duplicate', async () => {
+    const email = `google-link-${Date.now()}@test.dev`;
+    const registered = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Original Account' });
+
+    verifyIdToken.mockResolvedValueOnce(
+      googlePayload({ email, emailVerified: true, displayName: 'Ignored Google Name' }),
+    );
+    const googleLogin = await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'fake-jwt' })
+      .expect(201);
+
+    expect(googleLogin.body.user.id).toBe(registered.body.user.id);
+    expect(googleLogin.body.user.displayName).toBe('Original Account');
+  });
+
+  it('does not link when the email is unverified, even if it matches an existing account', async () => {
+    const email = `google-unverified-${Date.now()}@test.dev`;
+    const registered = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Real Owner' });
+
+    verifyIdToken.mockResolvedValueOnce(googlePayload({ email, emailVerified: false }));
+    const googleLogin = await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'fake-jwt' })
+      .expect(201);
+
+    expect(googleLogin.body.user.id).not.toBe(registered.body.user.id);
+  });
+
+  it('rejects when Google token verification fails', async () => {
+    verifyIdToken.mockRejectedValueOnce(new Error('Токен просрочен'));
+
+    await request(app.getHttpServer())
+      .post('/api/auth/google')
+      .send({ credential: 'garbage' })
+      .expect(401);
+  });
+
+  it('rejects a request with no credential', async () => {
+    await request(app.getHttpServer()).post('/api/auth/google').send({}).expect(400);
   });
 });

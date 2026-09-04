@@ -38,11 +38,26 @@ export class UsersService {
     return this.prisma.user.findUnique({ where: { email } });
   }
 
+  findByGoogleId(googleId: string) {
+    return this.prisma.user.findUnique({ where: { googleId } });
+  }
+
   createFromTelegram(input: { telegramId: bigint; telegramUsername?: string; displayName: string; avatarUrl?: string }) {
     return this.prisma.user.create({
       data: {
         telegramId: input.telegramId,
         telegramUsername: input.telegramUsername,
+        displayName: input.displayName,
+        avatarUrl: input.avatarUrl,
+      },
+    });
+  }
+
+  createFromGoogle(input: { googleId: string; email?: string; displayName: string; avatarUrl?: string }) {
+    return this.prisma.user.create({
+      data: {
+        googleId: input.googleId,
+        email: input.email,
         displayName: input.displayName,
         avatarUrl: input.avatarUrl,
       },
@@ -63,6 +78,13 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id: userId },
       data: { telegramId, telegramUsername },
+    });
+  }
+
+  linkGoogle(userId: string, googleId: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { googleId },
     });
   }
 

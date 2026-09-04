@@ -18,6 +18,12 @@ export const telegramWidgetAuthSchema = z.object({
 });
 export type TelegramWidgetAuthInput = z.infer<typeof telegramWidgetAuthSchema>;
 
+/** The signed ID token JWT handed back by Google Identity Services — verified server-side, never trusted as-is. */
+export const googleAuthSchema = z.object({
+  credential: z.string().min(1, 'Отсутствуют данные авторизации Google'),
+});
+export type GoogleAuthInput = z.infer<typeof googleAuthSchema>;
+
 export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8, 'Пароль должен быть не короче 8 символов'),

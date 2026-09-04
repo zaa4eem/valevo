@@ -8,6 +8,7 @@ import {
   verifyTelegramInitData,
   verifyTelegramLoginWidget,
 } from './telegram-verify';
+import { GoogleAuthService, GoogleUserPayload } from './google-auth.service';
 import { EmailService } from '../common/email.service';
 import type { RegisterInput, LoginInput, TelegramAuthInput } from '@zaa4eem/shared';
 
@@ -18,6 +19,7 @@ export class AuthService {
     private readonly tokens: TokenService,
     private readonly config: ConfigService,
     private readonly email: EmailService,
+    private readonly google: GoogleAuthService,
   ) {}
 
   private botToken(): string {
@@ -73,6 +75,40 @@ export class AuthService {
       });
     }
     return user;
+  }
+
+  async loginWithGoogle(credential: string) {
+    let payload: GoogleUserPayload;
+    try {
+      payload = await this.google.verifyIdToken(credential);
+    } catch (err) {
+      throw new UnauthorizedException(
+        err instanceof Error ? err.message : 'Не удалось подтвердить вход через Google',
+      );
+    }
+    const user = await this.findOrCreateFromGoogle(payload);
+    return this.issueSession(user.id, user.role);
+  }
+
+  private async findOrCreateFromGoogle(payload: GoogleUserPayload) {
+    const existingByGoogleId = await this.users.findByGoogleId(payload.googleId);
+    if (existingByGoogleId) return existingByGoogleId;
+
+    // Only trust the email for account-linking if Google itself verified it —
+    // an unverified email is just a claim, not proof of ownership.
+    if (payload.emailVerified && payload.email) {
+      const existingByEmail = await this.users.findByEmail(payload.email);
+      if (existingByEmail) {
+        return this.users.linkGoogle(existingByEmail.id, payload.googleId);
+      }
+    }
+
+    return this.users.createFromGoogle({
+      googleId: payload.googleId,
+      email: payload.emailVerified ? payload.email : undefined,
+      displayName: payload.displayName || payload.email || 'zaa4eem user',
+      avatarUrl: payload.avatarUrl,
+    });
   }
 
   async linkTelegram(userId: string, input: TelegramAuthInput) {
