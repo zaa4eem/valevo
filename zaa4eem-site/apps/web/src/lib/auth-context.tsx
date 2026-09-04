@@ -107,22 +107,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function bootstrap() {
       setTelegramAuthError(null);
 
-      // window.Telegram.WebApp existing at all (even with initData still
-      // empty) is the real "are we inside Telegram" signal — checking
-      // initData alone raced against Telegram populating it.
+      // window.Telegram.WebApp existing is NOT proof we're inside Telegram —
+      // the SDK script (loaded on every page, see layout.tsx) defines that
+      // object on any plain browser tab too, just with an always-empty
+      // initData as its default state. The old assumption here (object
+      // present = show the Telegram-only error/retry UI if initData never
+      // shows up) meant a normal email+password visitor got a scary
+      // "Telegram didn't pass login data" banner on every single page
+      // refresh instead of a quiet cookie-based session restore. Only
+      // commit to "we're in Telegram" once initData actually arrives.
       if (getTelegramWebApp()) {
-        setIsTelegram(true);
         const initData = await waitForInitData();
         if (cancelled) return;
 
         if (!initData) {
-          setTelegramAuthError(
-            'Telegram не передал данные для входа. Попробуй закрыть и снова открыть мини-приложение.',
-          );
-          setLoading(false);
+          await refresh();
+          if (!cancelled) setLoading(false);
           return;
         }
 
+        setIsTelegram(true);
         try {
           let res: AuthResponse;
           try {
