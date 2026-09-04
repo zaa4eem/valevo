@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { premiumFieldsSchema } from './users';
 
 /** Owner-only — crediting someone's real-world (outside-the-app) idea that shipped as a feature. */
 export const createIdeaCreditSchema = z.object({
@@ -11,11 +12,17 @@ export const ideaCreditSchema = z.object({
   id: z.string().uuid(),
   description: z.string(),
   createdAt: z.string(),
-  user: z.object({
-    id: z.string().uuid(),
-    displayName: z.string(),
-    avatarUrl: z.string().nullable(),
-  }),
+  // Merges Premium fields so the Hall of Fame (and the admin list) can
+  // render the credited user's real ring/name-style/font, not a plain
+  // initials circle — a Premium user's look should show up everywhere
+  // their name and avatar appear, this list included.
+  user: z
+    .object({
+      id: z.string().uuid(),
+      displayName: z.string(),
+      avatarUrl: z.string().nullable(),
+    })
+    .merge(premiumFieldsSchema),
 });
 export type IdeaCredit = z.infer<typeof ideaCreditSchema>;
 

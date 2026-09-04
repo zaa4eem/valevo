@@ -391,7 +391,8 @@ img {
 /* Responsive: mobile is the primary surface given the Telegram audience. */
 .z-navbar-links {
   display: flex;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .z-game-layout {
@@ -471,7 +472,9 @@ img {
     font-size: var(--z-fs-2xl);
   }
 
-  /* Bottom tab bar — the primary way to move between sections on mobile. */
+  /* Bottom tab bar — the primary way to move between sections on mobile.
+     More tabs than fit a phone width scroll horizontally instead of being
+     squeezed unreadably thin. */
   .z-bottom-nav {
     display: flex;
     position: fixed;
@@ -483,10 +486,12 @@ img {
     backdrop-filter: blur(8px);
     border-top: 1px solid var(--z-border);
     padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+    overflow-x: auto;
   }
 
   .z-bottom-nav-item {
-    flex: 1;
+    flex: 0 0 auto;
+    min-width: 64px;
     display: flex;
     flex-direction: column;
     align-items: center;

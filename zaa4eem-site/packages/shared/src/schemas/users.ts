@@ -46,6 +46,19 @@ export const updateProfileSchema = z.object({
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
+/**
+ * Sent alongside a GIF avatar upload (multipart form fields, hence
+ * z.coerce) so the backend can crop+resize it with gifsicle — frame by
+ * frame, unlike a <canvas> draw which would only capture one frame and
+ * kill the animation. Pixel coordinates in the ORIGINAL uploaded image.
+ */
+export const avatarGifCropSchema = z.object({
+  cropX: z.coerce.number().min(0),
+  cropY: z.coerce.number().min(0),
+  cropSize: z.coerce.number().positive(),
+});
+export type AvatarGifCropInput = z.infer<typeof avatarGifCropSchema>;
+
 export const publicProfileSchema = z
   .object({
     id: z.string().uuid(),

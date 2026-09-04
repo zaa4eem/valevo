@@ -17,13 +17,19 @@ import {
 import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import { updatePremiumStyleSchema, updateProfileSchema, userListQuerySchema } from '@zaa4eem/shared';
+import {
+  avatarGifCropSchema,
+  updatePremiumStyleSchema,
+  updateProfileSchema,
+  userListQuerySchema,
+} from '@zaa4eem/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { avatarUploadOptions } from './avatar-storage';
+import { cropGifInPlace } from './gif-crop.util';
 
 @Controller('users')
 export class UsersController {
@@ -71,8 +77,22 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @Post('me/avatar')
   @UseInterceptors(FileInterceptor('avatar', avatarUploadOptions))
-  async uploadAvatar(@CurrentUser() user: RequestUser, @UploadedFile() file?: Express.Multer.File) {
+  async uploadAvatar(
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() body?: unknown,
+  ) {
     if (!file) throw new BadRequestException('Файл не загружен');
+    if (file.mimetype === 'image/gif') {
+      // A GIF can't go through the JPEG/PNG/WEBP path's <canvas> crop — that
+      // would capture a single static frame and kill the animation. The
+      // cropper instead sends the crop rectangle alongside the untouched
+      // file, and gifsicle re-crops every frame of the GIF itself.
+      const crop = avatarGifCropSchema.safeParse(body);
+      if (crop.success) {
+        await cropGifInPlace(file.path, { x: crop.data.cropX, y: crop.data.cropY, size: crop.data.cropSize });
+      }
+    }
     const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
     const avatarUrl = `${origin}/uploads/avatars/${file.filename}`;
     await this.users.updateProfile(user.id, { avatarUrl });

@@ -217,12 +217,20 @@ export default function SettingsPage() {
     }
   }
 
-  async function uploadAvatar(blob: Blob, filename: string) {
+  async function uploadAvatar(blob: Blob, filename: string, gifCrop?: { x: number; y: number; size: number }) {
     setAvatarError(null);
     setAvatarUploading(true);
     try {
       const form = new FormData();
       form.append('avatar', blob, filename);
+      if (gifCrop) {
+        // GIFs aren't baked into a fresh file client-side (see AvatarCropper) —
+        // the crop rectangle rides along so the backend can re-crop every
+        // frame with gifsicle instead of losing the animation to a canvas.
+        form.append('cropX', String(gifCrop.x));
+        form.append('cropY', String(gifCrop.y));
+        form.append('cropSize', String(gifCrop.size));
+      }
       const updated = await api.upload<PublicProfile>('/users/me/avatar', form);
       setProfile(updated);
     } catch (err) {
@@ -236,16 +244,7 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (file) {
       setAvatarError(null);
-      // GIFs skip the cropper entirely — cropping renders to a <canvas>,
-      // which captures a single static frame and would silently kill the
-      // animation. Uploaded as-is instead; the backend already accepts
-      // image/gif (see avatar-storage.ts) and every avatar is just an <img>
-      // tag, which animates a GIF natively with no extra rendering code.
-      if (file.type === 'image/gif') {
-        uploadAvatar(file, file.name);
-      } else {
-        setAvatarFile(file);
-      }
+      setAvatarFile(file);
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
@@ -257,6 +256,11 @@ export default function SettingsPage() {
   async function onCropped(blob: Blob) {
     setAvatarFile(null);
     await uploadAvatar(blob, 'avatar.jpg');
+  }
+
+  async function onCroppedGif(file: File, crop: { x: number; y: number; size: number }) {
+    setAvatarFile(null);
+    await uploadAvatar(file, file.name, crop);
   }
 
   return (
@@ -348,7 +352,9 @@ export default function SettingsPage() {
 
       {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
 
-      {avatarFile && <AvatarCropper file={avatarFile} onCancel={onCropCancel} onCropped={onCropped} />}
+      {avatarFile && (
+        <AvatarCropper file={avatarFile} onCancel={onCropCancel} onCropped={onCropped} onCroppedGif={onCroppedGif} />
+      )}
     </div>
   );
 }

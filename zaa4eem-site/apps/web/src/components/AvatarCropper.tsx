@@ -24,11 +24,22 @@ export function AvatarCropper({
   file,
   onCancel,
   onCropped,
+  onCroppedGif,
 }: {
   file: File;
   onCancel: () => void;
   onCropped: (blob: Blob) => void;
+  /**
+   * GIFs can't go through the canvas path below — drawImage only captures
+   * the currently-displayed frame and would silently kill the animation.
+   * Instead we hand back the crop rectangle (in the original image's own
+   * pixel coordinates) and the untouched file; the backend re-crops every
+   * frame with gifsicle. The pan/zoom UI itself needs no special-casing —
+   * a plain <img> animates a GIF natively even while being dragged/scaled.
+   */
+  onCroppedGif: (file: File, crop: { x: number; y: number; size: number }) => void;
 }) {
+  const isGif = file.type === 'image/gif';
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
   const [natural, setNatural] = useState<Size | null>(null);
@@ -92,13 +103,21 @@ export function AvatarCropper({
     if (!imgRef.current || !natural) return;
     setBusy(true);
     try {
+      const sSize = VIEWPORT / scale;
+      const sourceX = -pos.x / scale;
+      const sourceY = -pos.y / scale;
+
+      if (isGif) {
+        onCroppedGif(file, { x: sourceX, y: sourceY, size: sSize });
+        return;
+      }
+
       const canvas = document.createElement('canvas');
       canvas.width = OUTPUT;
       canvas.height = OUTPUT;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      const sSize = VIEWPORT / scale;
-      ctx.drawImage(imgRef.current, -pos.x / scale, -pos.y / scale, sSize, sSize, 0, 0, OUTPUT, OUTPUT);
+      ctx.drawImage(imgRef.current, sourceX, sourceY, sSize, sSize, 0, 0, OUTPUT, OUTPUT);
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
       if (blob) onCropped(blob);
     } finally {
@@ -124,7 +143,9 @@ export function AvatarCropper({
         style={{ width: 'min(360px, 100%)', display: 'flex', flexDirection: 'column', gap: 16 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 style={{ margin: 0, fontSize: 'var(--z-fs-lg)' }}>Обрезать аватар</h3>
+        <h3 style={{ margin: 0, fontSize: 'var(--z-fs-lg)' }}>
+          {isGif ? 'Обрезать GIF-аватар' : 'Обрезать аватар'}
+        </h3>
 
         <div
           style={{

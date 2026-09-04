@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IdeaCredit, SearchResults } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { Card } from '@/components/Card';
+import { PremiumAvatar } from '@/components/PremiumAvatar';
+import { PremiumName } from '@/components/PremiumName';
 
 type UserOption = SearchResults['users'][number];
 
@@ -158,9 +160,19 @@ export default function AdminIdeaCreditsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {credits.map((credit) => (
             <Card key={credit.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div>
-                <b>{credit.user.displayName}</b>
-                <span style={{ color: 'var(--z-text-muted)' }}> — {credit.description}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <PremiumAvatar
+                  name={credit.user.displayName}
+                  avatarUrl={credit.user.avatarUrl}
+                  size={28}
+                  premium={credit.user}
+                />
+                <div style={{ minWidth: 0 }}>
+                  <b>
+                    <PremiumName name={credit.user.displayName} premium={credit.user} />
+                  </b>
+                  <span style={{ color: 'var(--z-text-muted)' }}> — {credit.description}</span>
+                </div>
               </div>
               <button className="z-btn-ghost z-pop-on-active" onClick={() => remove(credit.id)}>
                 Удалить

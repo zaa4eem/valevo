@@ -26,7 +26,10 @@ FROM node:20-slim AS runtime
 WORKDIR /repo
 ENV NODE_ENV=production
 
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
+# gifsicle: crops/resizes uploaded animated GIF avatars frame-by-frame
+# (preserving animation) — a <canvas> draw would only capture one frame.
+RUN apt-get update -y && apt-get install -y openssl gifsicle && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json

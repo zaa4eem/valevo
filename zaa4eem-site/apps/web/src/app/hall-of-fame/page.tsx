@@ -7,6 +7,8 @@ import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonCard } from '@/components/Skeleton';
+import { PremiumAvatar } from '@/components/PremiumAvatar';
+import { PremiumName } from '@/components/PremiumName';
 
 export default function HallOfFamePage() {
   const [credits, setCredits] = useState<IdeaCredit[] | null>(null);
@@ -36,25 +38,17 @@ export default function HallOfFamePage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {credits.map((credit) => (
             <Card key={credit.id} hover className="z-animate-in" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: '50%',
-                  background: 'var(--z-accent-soft)',
-                  color: 'var(--z-accent)',
-                  display: 'grid',
-                  placeItems: 'center',
-                  fontWeight: 800,
-                  fontSize: 'var(--z-fs-sm)',
-                  flexShrink: 0,
-                }}
-              >
-                {credit.user.displayName.charAt(0).toUpperCase()}
-              </div>
+              <Link href={`/u/${credit.user.id}`} style={{ flexShrink: 0 }}>
+                <PremiumAvatar
+                  name={credit.user.displayName}
+                  avatarUrl={credit.user.avatarUrl}
+                  size={36}
+                  premium={credit.user}
+                />
+              </Link>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <Link href={`/u/${credit.user.id}`} style={{ fontWeight: 700 }}>
-                  {credit.user.displayName}
+                  <PremiumName name={credit.user.displayName} premium={credit.user} />
                 </Link>
                 <p style={{ margin: '4px 0 0', fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
                   {credit.description}
