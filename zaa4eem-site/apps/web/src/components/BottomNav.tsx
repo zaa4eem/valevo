@@ -8,10 +8,8 @@ const tabs = [
   { href: '/ideas', label: 'Идеи', icon: '💡' },
   { href: '/search', label: 'Поиск', icon: '🔍' },
   { href: '/games', label: 'Игры', icon: '🎮' },
-  { href: '/games/z-clicker', label: 'Кликер', icon: '🪙' },
   { href: '/shop', label: 'Магазин', icon: '🛒' },
   { href: '/leaderboard', label: 'Лидеры', icon: '🏆' },
-  { href: '/hall-of-fame', label: 'Зал славы', icon: '💡' },
 ];
 
 /** Mobile-only (see .z-bottom-nav's media query) — replaces the crowded

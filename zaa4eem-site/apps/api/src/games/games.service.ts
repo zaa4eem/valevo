@@ -1,10 +1,31 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { ScoreReviewState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { KNOWN_GAMES } from './known-games';
 
 @Injectable()
-export class GamesService {
+export class GamesService implements OnModuleInit {
+  private readonly logger = new Logger(GamesService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Self-heals a deployment whose database predates a game being added to
+   * KNOWN_GAMES (or whose seed script simply never got re-run after a
+   * feature update) — without this, a new game's page 404s forever with
+   * "Не удалось загрузить игру" until someone remembers to run
+   * `prisma:seed` by hand. Runs on every boot; upsert is a no-op once the
+   * row already exists, so this is safe to repeat indefinitely.
+   */
+  async onModuleInit() {
+    for (const game of KNOWN_GAMES) {
+      await this.prisma.game
+        .upsert({ where: { slug: game.slug }, update: {}, create: game })
+        .catch((err) => {
+          this.logger.warn(`Could not ensure game "${game.slug}" exists: ${err instanceof Error ? err.message : err}`);
+        });
+    }
+  }
 
   async listActive() {
     const games = await this.prisma.game.findMany({

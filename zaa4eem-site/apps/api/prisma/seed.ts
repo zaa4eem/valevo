@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/auth/password.util';
+import { KNOWN_GAMES } from '../src/games/known-games';
 
 const prisma = new PrismaClient();
 
@@ -43,31 +44,13 @@ async function main() {
     console.log(`Created owner user: ${owner.id}`);
   }
 
-  const neonSnake = await prisma.game.upsert({
-    where: { slug: 'neon-snake' },
-    update: {},
-    create: {
-      slug: 'neon-snake',
-      title: 'Neon Snake',
-      description: 'Classic snake, zaa4eem style — chase the green, avoid yourself.',
-      maxPlausibleScore: 500,
-    },
-  });
-  console.log(`Game ready: ${neonSnake.title} (${neonSnake.slug})`);
-
-  const zClicker = await prisma.game.upsert({
-    where: { slug: 'z-clicker' },
-    update: {},
-    create: {
-      slug: 'z-clicker',
-      title: 'Z-Кликер',
-      description: 'Кликай и копи Z-коины — потрать их на апгрейды или на Premium в магазине.',
-      // Not a score-based game — this is unused by the clicker's own zCoins
-      // leaderboard, just required by the shared Game row shape.
-      maxPlausibleScore: 1_000_000,
-    },
-  });
-  console.log(`Game ready: ${zClicker.title} (${zClicker.slug})`);
+  // Also self-healed on every API boot (GamesService.onModuleInit) — kept
+  // here too so a fresh deploy has its games ready before the API's first
+  // start, without waiting on that first boot to finish.
+  for (const game of KNOWN_GAMES) {
+    const ready = await prisma.game.upsert({ where: { slug: game.slug }, update: {}, create: game });
+    console.log(`Game ready: ${ready.title} (${ready.slug})`);
+  }
 }
 
 main()

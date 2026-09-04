@@ -340,6 +340,23 @@ img {
   background: rgba(251, 113, 133, 0.22);
 }
 
+/* Navbar Z-Кликер balance — same pill language as .z-badge, sized for the navbar. */
+.z-navbar-zcoins {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--z-fs-sm);
+  font-weight: 700;
+  color: var(--z-accent);
+  background: var(--z-accent-soft);
+  border-radius: 999px;
+  padding: 5px 11px;
+  white-space: nowrap;
+}
+.z-navbar-zcoins:hover {
+  background: var(--z-surface-hover);
+}
+
 .z-card {
   background: var(--z-surface);
   border: 1px solid var(--z-border);
@@ -402,14 +419,10 @@ img {
   align-items: start;
 }
 
-/* Two mutually-exclusive navbar layouts, swapped by the media query below:
-   desktop gets the full inline links + name/settings/admin/logout row;
-   mobile collapses to BottomNav (tabs) + a single avatar menu — the crowded
-   single-row layout was unreadable/truncated on phone-width screens. */
-.z-navbar-mobile-only {
-  display: none;
-}
-
+/* Section tabs (Лента/Идеи/...) and the search icon are desktop-only — on
+   mobile BottomNav's fixed tab bar covers the same ground instead. The
+   account cluster (Z-coins balance, profile menu) has no desktop/mobile
+   split — it's the same on every breakpoint. */
 .z-bottom-nav {
   display: none;
 }
@@ -446,10 +459,6 @@ img {
     display: none !important;
   }
 
-  .z-navbar-mobile-only {
-    display: block;
-  }
-
   .z-game-layout {
     grid-template-columns: 1fr;
   }
@@ -472,9 +481,7 @@ img {
     font-size: var(--z-fs-2xl);
   }
 
-  /* Bottom tab bar — the primary way to move between sections on mobile.
-     More tabs than fit a phone width scroll horizontally instead of being
-     squeezed unreadably thin. */
+  /* Bottom tab bar — the primary way to move between sections on mobile. */
   .z-bottom-nav {
     display: flex;
     position: fixed;
@@ -486,12 +493,10 @@ img {
     backdrop-filter: blur(8px);
     border-top: 1px solid var(--z-border);
     padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
-    overflow-x: auto;
   }
 
   .z-bottom-nav-item {
-    flex: 0 0 auto;
-    min-width: 64px;
+    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -516,13 +521,5 @@ img {
 @media (max-width: 420px) {
   .z-navbar-links {
     gap: 10px;
-  }
-
-  .z-navbar-user {
-    gap: 8px !important;
-  }
-
-  .z-navbar-user a {
-    max-width: 56px !important;
   }
 }

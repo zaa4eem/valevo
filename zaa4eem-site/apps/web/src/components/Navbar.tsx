@@ -8,15 +8,15 @@ import { useAuth } from '@/lib/auth-context';
 import { PremiumAvatar } from './PremiumAvatar';
 import { PremiumName } from './PremiumName';
 
+// The clicker is one of the games listed under /games, not a top-level tab —
+// and Зал славы lives in the profile menu below, one click away, instead of
+// crowding this always-visible row.
 const links = [
   { href: '/', label: 'Лента' },
   { href: '/ideas', label: 'Идеи' },
   { href: '/games', label: 'Игры' },
-  { href: '/games/z-clicker', label: '🪙 Кликер' },
-  { href: '/shop', label: '🛒 Магазин' },
+  { href: '/shop', label: 'Магазин' },
   { href: '/leaderboard', label: 'Лидеры' },
-  { href: '/hall-of-fame', label: '💡 Зал славы' },
-  { href: '/search', label: '🔍 Поиск' },
 ];
 
 /** Polls the Z-Кликер balance so it's visible from anywhere on the site, not just on the clicker's own page — refreshed periodically since it changes outside of any single-page state (clicking, Shop purchases). */
@@ -51,33 +51,17 @@ function useZCoinsBalance(enabled: boolean) {
 function ZCoinsBadge({ zCoins }: { zCoins: number | null }) {
   if (zCoins === null) return null;
   return (
-    <Link
-      href="/games/z-clicker"
-      className="z-pop-on-active"
-      title="Z-Кликер"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        fontSize: 'var(--z-fs-sm)',
-        fontWeight: 700,
-        color: 'var(--z-accent)',
-        background: 'var(--z-accent-soft)',
-        borderRadius: 999,
-        padding: '4px 10px',
-        whiteSpace: 'nowrap',
-      }}
-    >
+    <Link href="/games/z-clicker" className="z-navbar-zcoins z-pop-on-active" title="Z-Кликер">
       🪙 {zCoins}
     </Link>
   );
 }
 
+/** The one profile control, identical on desktop and mobile: avatar → a dropdown with everything account-related, so nothing account-related needs its own slot in the always-visible bar. */
 function UserMenu() {
   const { user, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const zCoins = useZCoinsBalance(Boolean(user));
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -90,57 +74,57 @@ function UserMenu() {
   if (!user) return null;
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <ZCoinsBadge zCoins={zCoins} />
-      <div ref={ref} style={{ position: 'relative' }}>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          className="z-pop-on-active"
-          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}
-          aria-label="Меню профиля"
-        >
-          <PremiumAvatar name={user.displayName} avatarUrl={user.avatarUrl} size={36} premium={user} />
-        </button>
-        {open && (
-          <div className="z-navbar-menu z-animate-fade">
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--z-border)', fontWeight: 700 }}>
-              <PremiumName name={user.displayName} premium={user} />
-            </div>
-            <Link href={`/u/${user.id}`} className="z-navbar-menu-item" onClick={() => setOpen(false)}>
-              👤 Профиль
-            </Link>
-            <Link href="/settings" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
-              ⚙️ Настройки
-            </Link>
-            {user.role === 'OWNER' && (
-              <Link
-                href="/admin"
-                className="z-navbar-menu-item"
-                style={{ color: 'var(--z-accent)' }}
-                onClick={() => setOpen(false)}
-              >
-                🛠️ Admin
-              </Link>
-            )}
-            <button
-              onClick={() => {
-                setOpen(false);
-                logout();
-              }}
-              className="z-navbar-menu-item"
-              style={{ color: 'var(--z-danger)', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              🚪 Выйти
-            </button>
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="z-pop-on-active"
+        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex' }}
+        aria-label="Меню профиля"
+      >
+        <PremiumAvatar name={user.displayName} avatarUrl={user.avatarUrl} size={36} premium={user} />
+      </button>
+      {open && (
+        <div className="z-navbar-menu z-animate-fade">
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--z-border)', fontWeight: 700 }}>
+            <PremiumName name={user.displayName} premium={user} />
           </div>
-        )}
-      </div>
+          <Link href={`/u/${user.id}`} className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            👤 Профиль
+          </Link>
+          <Link href="/settings" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            ⚙️ Настройки
+          </Link>
+          <Link href="/hall-of-fame" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            💡 Зал славы
+          </Link>
+          {user.role === 'OWNER' && (
+            <Link
+              href="/admin"
+              className="z-navbar-menu-item"
+              style={{ color: 'var(--z-accent)' }}
+              onClick={() => setOpen(false)}
+            >
+              🛠️ Admin
+            </Link>
+          )}
+          <button
+            onClick={() => {
+              setOpen(false);
+              logout();
+            }}
+            className="z-navbar-menu-item"
+            style={{ color: 'var(--z-danger)', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            🚪 Выйти
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 export function Navbar() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const zCoins = useZCoinsBalance(Boolean(user));
 
   return (
@@ -162,8 +146,7 @@ export function Navbar() {
           ZAA<span className="z-accent-text">4</span>EEM
         </Link>
 
-        {/* Desktop: full inline nav + name/settings/admin/logout. Hidden on
-            mobile — replaced by BottomNav (tabs) + the avatar menu below. */}
+        {/* Section tabs — desktop only. Mobile gets the same set as BottomNav's fixed tab bar instead. */}
         <nav className="z-navbar-links z-navbar-desktop-only" style={{ minWidth: 0 }}>
           {links.map((link) => (
             <Link
@@ -175,44 +158,24 @@ export function Navbar() {
             </Link>
           ))}
         </nav>
-        <div className="z-navbar-desktop-only" style={{ flexShrink: 0 }}>
-          {user ? (
-            <div className="z-navbar-user" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <ZCoinsBadge zCoins={zCoins} />
-              <Link
-                href={`/u/${user.id}`}
-                style={{
-                  fontSize: 'var(--z-fs-sm)',
-                  maxWidth: 96,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                <PremiumName name={user.displayName} premium={user} />
-              </Link>
-              <Link href="/settings" className="z-btn-ghost z-pop-on-active" title="Настройки профиля" aria-label="Настройки профиля" style={{ padding: '6px 10px' }}>
-                ⚙️
-              </Link>
-              {user.role === 'OWNER' && (
-                <Link href="/admin" style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-accent)' }}>
-                  Admin
-                </Link>
-              )}
-              <button onClick={logout} className="z-btn-ghost">
-                Выйти
-              </button>
-            </div>
-          ) : (
-            <Link href="/login" className="z-btn-accent">
-              Войти
-            </Link>
-          )}
-        </div>
 
-        {/* Mobile: just the avatar → dropdown menu (or a login button). */}
-        <div className="z-navbar-mobile-only" style={{ flexShrink: 0 }}>
-          {user ? <UserMenu /> : (
+        {/* Account cluster — one visual group, same on every breakpoint: search (desktop; mobile has it as a bottom tab), Z-coins balance, profile menu. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+          <Link
+            href="/search"
+            className="z-btn-ghost z-pop-on-active z-navbar-desktop-only"
+            title="Поиск"
+            aria-label="Поиск"
+            style={{ padding: '6px 10px' }}
+          >
+            🔍
+          </Link>
+          {user ? (
+            <>
+              <ZCoinsBadge zCoins={zCoins} />
+              <UserMenu />
+            </>
+          ) : (
             <Link href="/login" className="z-btn-accent">
               Войти
             </Link>
