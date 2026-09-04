@@ -2,9 +2,20 @@ import type { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramNotifyService } from './telegram-notify.service';
 
+/**
+ * Adds calendar months, clamped to the target month's real length instead
+ * of overflowing into the month after (JS Date's native setMonth rolls
+ * Jan 31 + 1 month into Mar 3, silently skipping February) — otherwise a
+ * Premium purchase/grant made on the 29th–31st would land 1-3 days later
+ * than intended, and the drift compounds across repeated extensions.
+ */
 export function addMonths(date: Date, months: number): Date {
+  const day = date.getUTCDate();
   const result = new Date(date);
-  result.setMonth(result.getMonth() + months);
+  result.setUTCMonth(result.getUTCMonth() + months);
+  if (result.getUTCDate() !== day) {
+    result.setUTCDate(0);
+  }
   return result;
 }
 
@@ -53,8 +64,14 @@ export async function grantTrialPremiumIfUnused(
   const user = await ensurePremiumFresh(prisma, raw);
   if (user.usedTrialPremium || user.isPremium) return false;
 
-  const updated = await prisma.user.update({
-    where: { id: userId },
+  // Guarded by usedTrialPremium/isPremium in the WHERE, not just the check
+  // above — two near-simultaneous callers (a referral landing right as the
+  // user hits the Shop's free-trial button) would otherwise both read
+  // "unused" and both grant it. Only the update that actually flips the
+  // flag (count === 1) proceeds; the loser gets false, same as if it had
+  // lost the check above.
+  const result = await prisma.user.updateMany({
+    where: { id: userId, usedTrialPremium: false, isPremium: false },
     data: {
       isPremium: true,
       premiumUntil: new Date(Date.now() + TRIAL_DURATION_MS),
@@ -64,6 +81,9 @@ export async function grantTrialPremiumIfUnused(
       ringStyle: 'PULSE',
     },
   });
+  if (result.count === 0) return false;
+
+  const updated = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
   if (updated.telegramId) {
     notify
       .notify(updated.telegramId, '👑 Тебе включили Premium на 24 часа — загляни в Настройки, чтобы увидеть эффект!')

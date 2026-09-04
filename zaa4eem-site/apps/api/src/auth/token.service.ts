@@ -48,17 +48,40 @@ export class TokenService {
     return raw;
   }
 
+  /**
+   * Rotates a refresh token: revokes it and issues a fresh one. The revoke
+   * is an atomic compare-and-swap (updateMany guarded on revokedAt: null,
+   * checked via the result count) rather than a plain read-then-write —
+   * two near-simultaneous calls with the same raw token could otherwise
+   * both pass a `findFirst` check before either commits, each minting its
+   * own valid replacement from the one original (session forking).
+   *
+   * Reusing an already-rotated token (count === 0 but the hash exists,
+   * just revoked) is the textbook signature of a stolen refresh token —
+   * the legitimate owner already has a newer one, so whoever presents the
+   * old one next is either that owner using a stale copy or an attacker
+   * replaying a captured one. Either way, revoke every session for that
+   * user: the genuine owner just needs to log in again, which is a much
+   * smaller cost than leaving a stolen token's lineage alive.
+   */
   async rotateRefreshToken(raw: string): Promise<{ userId: string; newRaw: string } | null> {
     const tokenHash = this.hashRefreshToken(raw);
-    const record = await this.prisma.refreshToken.findFirst({
+    const result = await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
-    });
-    if (!record) return null;
-
-    await this.prisma.refreshToken.update({
-      where: { id: record.id },
       data: { revokedAt: new Date() },
     });
+
+    if (result.count === 0) {
+      const replayed = await this.prisma.refreshToken.findFirst({
+        where: { tokenHash, revokedAt: { not: null } },
+      });
+      if (replayed) {
+        await this.revokeAllForUser(replayed.userId);
+      }
+      return null;
+    }
+
+    const record = await this.prisma.refreshToken.findFirstOrThrow({ where: { tokenHash } });
     const newRaw = await this.issueRefreshToken(record.userId);
     return { userId: record.userId, newRaw };
   }

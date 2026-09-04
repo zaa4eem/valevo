@@ -15,6 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import * as fs from 'fs';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
@@ -31,6 +32,7 @@ import { OwnerGuard } from '../auth/owner.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { postImageUploadOptions } from './post-image-storage';
+import { matchesImageSignature } from '../common/image-signature';
 
 @Controller('posts')
 export class PostsController {
@@ -65,8 +67,12 @@ export class PostsController {
   @UseGuards(JwtAuthGuard)
   @Post('me/image')
   @UseInterceptors(FileInterceptor('image', postImageUploadOptions))
-  uploadImage(@UploadedFile() file?: Express.Multer.File) {
+  async uploadImage(@UploadedFile() file?: Express.Multer.File) {
     if (!file) throw new BadRequestException('Файл не загружен');
+    if (!(await matchesImageSignature(file.path, file.mimetype))) {
+      await fs.promises.rm(file.path, { force: true });
+      throw new BadRequestException('Файл повреждён или не является изображением заявленного типа');
+    }
     const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
     return { imageUrl: `${origin}/uploads/post-images/${file.filename}` };
   }

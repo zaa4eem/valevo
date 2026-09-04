@@ -251,6 +251,27 @@ const canRun = Boolean(process.env.DATABASE_URL);
     expect(row.nameStyle).toBe('GLOW');
   });
 
+  it('grants the free trial exactly once even when requests race concurrently', async () => {
+    const player = await register('Shop Trial Race');
+
+    // A stale read-then-write would let several of these read
+    // "usedTrialPremium: false" before any of them commits, each granting
+    // the trial (and each firing its own Telegram notification).
+    const results = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app.getHttpServer())
+          .post('/api/shop/trial')
+          .set('Authorization', `Bearer ${player.token}`)
+          .expect(201),
+      ),
+    );
+    const granted = results.filter((res) => res.body.granted === true);
+    expect(granted).toHaveLength(1);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: player.user.id } });
+    expect(row.usedTrialPremium).toBe(true);
+  });
+
   it('Premium style self-service is gated by fresh Premium status, not a stale flag', async () => {
     const player = await register('Style Gate');
     await prisma.user.update({

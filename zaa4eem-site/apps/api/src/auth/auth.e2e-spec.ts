@@ -18,6 +18,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
     app.use(cookieParser());
     app.setGlobalPrefix('api');
     app.useGlobalFilters(new HttpExceptionFilter());
@@ -87,6 +88,75 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .post('/api/auth/reset-password')
       .send({ token: 'not-a-real-token', password: 'whatever123' })
       .expect(401);
+  });
+
+  function refreshCookieFrom(res: request.Response): string {
+    const raw = res.headers['set-cookie'];
+    const list: string[] = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const cookie = list.find((c) => c.startsWith('zaa4eem_refresh='));
+    if (!cookie) throw new Error('No zaa4eem_refresh cookie in response');
+    return cookie.split(';')[0];
+  }
+
+  it('rotates the refresh cookie on use, and the old one stops working', async () => {
+    const email = `refresh-${Date.now()}@test.dev`;
+    const register = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Refresh Me' });
+    const firstCookie = refreshCookieFrom(register);
+
+    const refreshed = await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', firstCookie)
+      .expect(201);
+    expect(refreshed.body.accessToken).toEqual(expect.any(String));
+    const secondCookie = refreshCookieFrom(refreshed);
+    expect(secondCookie).not.toBe(firstCookie);
+
+    // The new cookie works on its own...
+    await request(app.getHttpServer()).post('/api/auth/refresh').set('Cookie', secondCookie).expect(201);
+
+    // ...but replaying the rotated-away original is treated as a possible
+    // stolen token and revokes the whole account's sessions, this one
+    // (now-rotated-again) included — see the dedicated replay-detection
+    // test below for that behavior specifically.
+    await request(app.getHttpServer()).post('/api/auth/refresh').set('Cookie', firstCookie).expect(401);
+  });
+
+  it('replaying an already-rotated refresh token revokes every other active session for that user', async () => {
+    const email = `refresh-replay-${Date.now()}@test.dev`;
+    const register = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Replay Me' });
+    const sessionACookie = refreshCookieFrom(register);
+
+    // A second, independent login — simulates the user's other device/tab.
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email, password: 'password123' })
+      .expect(201);
+    const sessionBCookie = refreshCookieFrom(login);
+
+    // Rotate session A normally once (as the legitimate flow would).
+    const refreshedA = await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', sessionACookie)
+      .expect(201);
+    const sessionACookieRotated = refreshCookieFrom(refreshedA);
+
+    // Now replay the STALE, already-rotated session A cookie — e.g. a
+    // stolen copy used after the legitimate client already moved on.
+    await request(app.getHttpServer()).post('/api/auth/refresh').set('Cookie', sessionACookie).expect(401);
+
+    // Session A's real successor and session B (an entirely different,
+    // never-misused session) must both be dead now too — the whole
+    // account's sessions get revoked on a detected replay, not just the
+    // one bad token.
+    await request(app.getHttpServer())
+      .post('/api/auth/refresh')
+      .set('Cookie', sessionACookieRotated)
+      .expect(401);
+    await request(app.getHttpServer()).post('/api/auth/refresh').set('Cookie', sessionBCookie).expect(401);
   });
 });
 

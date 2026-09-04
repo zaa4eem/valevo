@@ -43,9 +43,13 @@ ENV NODE_ENV=production
 # server logs "Ready". Force binding to all interfaces explicitly.
 ENV HOSTNAME=0.0.0.0
 
-COPY --from=build /repo/apps/web/.next/standalone ./
-COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
-COPY --from=build /repo/apps/web/public ./apps/web/public
+COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
+COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
+
+# Nothing here writes at runtime — safe to run as the image's built-in
+# unprivileged `node` user instead of root.
+USER node
 
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]

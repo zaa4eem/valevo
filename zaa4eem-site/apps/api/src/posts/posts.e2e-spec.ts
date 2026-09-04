@@ -48,6 +48,32 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .expect(403);
   });
 
+  it('allows only one post through when several race concurrently within the cooldown', async () => {
+    const email = `race-${Date.now()}@test.dev`;
+    const register = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Racer' });
+
+    // A stale read-then-write would let several of these read "no recent
+    // post" before any of them commits, publishing more than one within
+    // the same 12h window.
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        request(app.getHttpServer())
+          .post('/api/posts')
+          .set('Authorization', `Bearer ${register.body.accessToken}`)
+          .send({ body: `race attempt ${i}`, publish: true })
+          .then((res) => res.status),
+      ),
+    );
+
+    expect(results.filter((status) => status === 201)).toHaveLength(1);
+    expect(results.filter((status) => status === 403)).toHaveLength(4);
+
+    const count = await prisma.post.count({ where: { author: { email } } });
+    expect(count).toBe(1);
+  });
+
   it('owner can publish repeatedly without the 12h cooldown', async () => {
     const email = `owner-${Date.now()}@test.dev`;
     await request(app.getHttpServer())
@@ -257,6 +283,26 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .post('/api/posts/me/image')
       .set('Authorization', `Bearer ${author.body.accessToken}`)
       .attach('image', Buffer.from('not an image'), { filename: 'note.txt', contentType: 'text/plain' })
+      .expect(400);
+  });
+
+  it('rejects a file whose real bytes do not match its claimed image Content-Type', async () => {
+    const email = `spoofed-${Date.now()}@test.dev`;
+    const author = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email, password: 'password123', displayName: 'Spoofer' });
+
+    // multer's fileFilter only ever sees the client-supplied Content-Type
+    // header — a plain-text body wearing an "image/png" label passes that
+    // check, so the real fix has to inspect the bytes that actually landed
+    // on disk.
+    await request(app.getHttpServer())
+      .post('/api/posts/me/image')
+      .set('Authorization', `Bearer ${author.body.accessToken}`)
+      .attach('image', Buffer.from('not actually a png, just a label'), {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      })
       .expect(400);
   });
 

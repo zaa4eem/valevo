@@ -11,7 +11,10 @@ cd valevo/zaa4eem-site
 ./infra/backup.sh
 ```
 
-Writes `infra/backups/zaa4eem-<timestamp>.sql.gz`.
+Writes `infra/backups/zaa4eem-<timestamp>.sql.gz` (owner-only permissions —
+a dump contains every user's password hash and email). Set
+`BACKUP_ENCRYPTION_PASSPHRASE` in `infra/.env` to also encrypt it at rest —
+see below.
 
 ## Automate it with cron
 
@@ -44,6 +47,15 @@ gunzip -c infra/backups/zaa4eem-<timestamp>.sql.gz | \
   docker compose -f infra/docker-compose.yml --env-file infra/.env exec -T postgres \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 ```
+
+If the dump is encrypted (`.sql.gz.gpg`), decrypt it first:
+
+```bash
+gpg --batch --pinentry-mode loopback --passphrase "$BACKUP_ENCRYPTION_PASSPHRASE" \
+  --decrypt infra/backups/zaa4eem-<timestamp>.sql.gz.gpg > infra/backups/zaa4eem-<timestamp>.sql.gz
+```
+
+then restore that file as above.
 
 This restores into the **existing** database — it doesn't drop anything
 first, so restoring into a database that already has data will produce

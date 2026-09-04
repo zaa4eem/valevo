@@ -53,8 +53,12 @@ export default function PublicProfilePage() {
   async function moderateUser(action: 'mute' | 'ban') {
     const reason = window.prompt(`Причина (${action === 'mute' ? 'мут' : 'бан'}):`);
     if (!reason) return;
-    await api.post(`/admin/users/${params.id}/${action}`, { reason });
-    setModActionMessage(action === 'mute' ? 'Пользователь замьючен.' : 'Пользователь забанен.');
+    try {
+      await api.post(`/admin/users/${params.id}/${action}`, { reason });
+      setModActionMessage(action === 'mute' ? 'Пользователь замьючен.' : 'Пользователь забанен.');
+    } catch {
+      setModActionMessage('Не удалось выполнить действие — попробуйте ещё раз.');
+    }
   }
 
   async function toggleFollow() {

@@ -64,9 +64,13 @@ export default function GameDetailPage() {
       setSavedMessage('Войдите, чтобы сохранить результат в таблицу лидеров.');
       return;
     }
-    await api.post(`/games/${params.slug}/scores`, { value: score });
-    setSavedMessage(`Результат ${score} сохранён!`);
-    loadLeaderboard();
+    try {
+      await api.post(`/games/${params.slug}/scores`, { value: score });
+      setSavedMessage(`Результат ${score} сохранён!`);
+      loadLeaderboard();
+    } catch {
+      setSavedMessage('Не удалось сохранить результат — попробуйте ещё раз.');
+    }
   }
 
   async function onShare() {

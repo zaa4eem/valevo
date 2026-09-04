@@ -15,6 +15,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import * as fs from 'fs';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -28,6 +29,7 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
 import { UsersService } from './users.service';
 import { ModerationService } from '../moderation/moderation.service';
+import { matchesImageSignature } from '../common/image-signature';
 import { avatarUploadOptions } from './avatar-storage';
 import { cropGifInPlace } from './gif-crop.util';
 
@@ -83,6 +85,10 @@ export class UsersController {
     @Body() body?: unknown,
   ) {
     if (!file) throw new BadRequestException('Файл не загружен');
+    if (!(await matchesImageSignature(file.path, file.mimetype))) {
+      await fs.promises.rm(file.path, { force: true });
+      throw new BadRequestException('Файл повреждён или не является изображением заявленного типа');
+    }
     if (file.mimetype === 'image/gif') {
       // A GIF can't go through the JPEG/PNG/WEBP path's <canvas> crop — that
       // would capture a single static frame and kill the animation. The

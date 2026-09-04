@@ -68,35 +68,71 @@ export class ClickerService {
     return this.toState(user, referralCount);
   }
 
-  /** count = how many taps this batch represents; each tap is worth clickPower coins, capped by what's left of today's budget. */
+  /**
+   * count = how many taps this batch represents; each tap is worth
+   * clickPower coins, capped by what's left of today's budget.
+   *
+   * The cap is enforced with an optimistic-concurrency retry (guard the
+   * write on the exact coinsEarnedToday snapshot we computed `awarded`
+   * from, via updateMany + count check) rather than a plain read-then-write
+   * — two concurrent batches reading the same "remaining" snapshot could
+   * otherwise both be awarded up to it, blowing past CLICKER_DAILY_CAP.
+   */
   async click(userId: string, count: number): Promise<ClickResult> {
-    const user = await this.ensureFreshDay(userId);
-    const remaining = Math.max(0, CLICKER_DAILY_CAP - user.coinsEarnedToday);
+    let user = await this.ensureFreshDay(userId);
     const requested = count * user.clickPower;
-    const awarded = Math.min(requested, remaining);
-    const capped = awarded < requested;
 
-    const updated = awarded > 0
-      ? await this.prisma.user.update({
-          where: { id: userId },
-          data: { zCoins: { increment: awarded }, coinsEarnedToday: { increment: awarded } },
-        })
-      : user;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const remaining = Math.max(0, CLICKER_DAILY_CAP - user.coinsEarnedToday);
+      const awarded = Math.min(requested, remaining);
+      const capped = awarded < requested;
+      if (awarded === 0) {
+        return { ...this.toState(user), awarded: 0, capped };
+      }
 
-    return { ...this.toState(updated), awarded, capped };
+      const result = await this.prisma.user.updateMany({
+        where: { id: userId, coinsEarnedToday: user.coinsEarnedToday },
+        data: { zCoins: { increment: awarded }, coinsEarnedToday: { increment: awarded } },
+      });
+      if (result.count === 1) {
+        const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+        return { ...this.toState(updated), awarded, capped };
+      }
+      // Another request updated coinsEarnedToday between our read and
+      // write — re-read the real current value and recompute against it.
+      user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    }
+    throw new ConflictException('Слишком много одновременных запросов — попробуйте ещё раз');
   }
 
+  /**
+   * Same optimistic-concurrency pattern as click() — the cost is computed
+   * from clickPower, so the write is guarded on the exact clickPower we
+   * priced it against (plus a balance floor), and retried against a fresh
+   * read on conflict. Otherwise several concurrent upgrade calls would all
+   * price themselves off the same stale (cheapest) clickPower and all
+   * succeed at that price instead of the correct escalating cost.
+   */
   async upgrade(userId: string): Promise<ClickerState> {
-    const user = await this.ensureFreshDay(userId);
-    const cost = clickerUpgradeCost(user.clickPower);
-    if (user.zCoins < cost) {
-      throw new BadRequestException(`Не хватает Z-коинов — нужно ${cost}`);
+    let user = await this.ensureFreshDay(userId);
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const cost = clickerUpgradeCost(user.clickPower);
+      if (user.zCoins < cost) {
+        throw new BadRequestException(`Не хватает Z-коинов — нужно ${cost}`);
+      }
+
+      const result = await this.prisma.user.updateMany({
+        where: { id: userId, clickPower: user.clickPower, zCoins: { gte: cost } },
+        data: { zCoins: { decrement: cost }, clickPower: { increment: 1 } },
+      });
+      if (result.count === 1) {
+        const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+        return this.toState(updated);
+      }
+      user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     }
-    const updated = await this.prisma.user.update({
-      where: { id: userId },
-      data: { zCoins: { decrement: cost }, clickPower: { increment: 1 } },
-    });
-    return this.toState(updated);
+    throw new ConflictException('Слишком много одновременных запросов — попробуйте ещё раз');
   }
 
   async leaderboard(limit = 20) {
@@ -120,31 +156,46 @@ export class ClickerService {
    * rather than overwriting, so buying early never wastes remaining time.
    * Blocked only when Premium is already permanent ("Навсегда" owner
    * grant), since extending a grant with no end date makes no sense.
+   *
+   * The write is guarded on the exact premiumUntil we computed `base`
+   * from (plus a balance floor) and retried on conflict — two
+   * near-simultaneous purchases (e.g. a double-tapped "Купить" button)
+   * would otherwise both charge zCoins but both extend from the same
+   * stale premiumUntil, so the user pays twice but only one month of
+   * Premium is actually added.
    */
   async buyPremium(userId: string) {
-    const raw = await this.prisma.user.findUnique({ where: { id: userId } });
+    let raw = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!raw) throw new NotFoundException('Пользователь не найден');
-    const user = await ensurePremiumFresh(this.prisma, raw);
 
-    if (user.isPremium && user.premiumUntil === null) {
-      throw new ConflictException('У вас уже есть Premium навсегда');
-    }
-    if (user.zCoins < PREMIUM_SHOP_PRICE) {
-      throw new BadRequestException(`Не хватает Z-коинов — нужно ${PREMIUM_SHOP_PRICE}`);
-    }
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const user = await ensurePremiumFresh(this.prisma, raw);
 
-    const base = user.isPremium && user.premiumUntil ? user.premiumUntil : new Date();
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        zCoins: { decrement: PREMIUM_SHOP_PRICE },
-        isPremium: true,
-        premiumUntil: addMonths(base, PREMIUM_PURCHASE_MONTHS),
-      },
-    });
-    await this.prisma.moderationLogEntry.create({
-      data: { actorId: userId, targetType: 'USER', targetId: userId, action: 'premium:purchased' },
-    });
+      if (user.isPremium && user.premiumUntil === null) {
+        throw new ConflictException('У вас уже есть Premium навсегда');
+      }
+      if (user.zCoins < PREMIUM_SHOP_PRICE) {
+        throw new BadRequestException(`Не хватает Z-коинов — нужно ${PREMIUM_SHOP_PRICE}`);
+      }
+
+      const base = user.isPremium && user.premiumUntil ? user.premiumUntil : new Date();
+      const result = await this.prisma.user.updateMany({
+        where: { id: userId, premiumUntil: user.premiumUntil, zCoins: { gte: PREMIUM_SHOP_PRICE } },
+        data: {
+          zCoins: { decrement: PREMIUM_SHOP_PRICE },
+          isPremium: true,
+          premiumUntil: addMonths(base, PREMIUM_PURCHASE_MONTHS),
+        },
+      });
+      if (result.count === 1) {
+        await this.prisma.moderationLogEntry.create({
+          data: { actorId: userId, targetType: 'USER', targetId: userId, action: 'premium:purchased' },
+        });
+        return;
+      }
+      raw = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    }
+    throw new ConflictException('Слишком много одновременных запросов — попробуйте ещё раз');
   }
 
   /** The Shop's standalone "попробовать бесплатно" button — same one-time 24h trial a first referral grants, whichever the user reaches first. */

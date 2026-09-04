@@ -11,6 +11,16 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false });
   const logger = new Logger('CORS');
 
+  // Exactly one reverse proxy (nginx-proxy) sits in front of this API in
+  // every real deployment (infra/docker-compose.yml) — without this,
+  // Express's req.ip resolves to nginx-proxy's own address for every
+  // request, so @nestjs/throttler's default IP-based rate limiting (e.g.
+  // 5/min on /auth/login) is shared across ALL real visitors instead of
+  // isolated per client. `1` trusts exactly one hop back from the socket,
+  // taking nginx's own appended X-Forwarded-For entry as the real client —
+  // not an attacker-supplied one further left in the header.
+  app.set('trust proxy', 1);
+
   // Uploaded avatars live outside the `api` prefix (they're static files, not
   // API responses) — served at /uploads/avatars/<file>, matching the URL
   // avatar-storage.ts + UsersController build and store on the User row.

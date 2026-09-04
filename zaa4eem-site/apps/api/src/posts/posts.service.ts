@@ -132,43 +132,52 @@ export class PostsService {
     isOwner: boolean,
     imageUrl?: string,
   ) {
-    if (!isOwner) {
-      const last = await this.prisma.post.findFirst({
-        where: { authorId },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (last) {
-        const elapsed = Date.now() - last.createdAt.getTime();
-        if (elapsed < POST_COOLDOWN_MS) {
-          const minutesLeft = Math.ceil((POST_COOLDOWN_MS - elapsed) / 60_000);
-          throw new ForbiddenException(
-            `Следующий пост можно опубликовать через ${minutesLeft} мин.`,
-          );
+    return this.prisma.$transaction(async (tx) => {
+      if (!isOwner) {
+        // A Postgres advisory lock keyed on the author, held for the rest of
+        // this transaction — without it, two concurrent create() calls from
+        // the same author could both read "no recent post" before either
+        // commits, bypassing the cooldown entirely. The second caller blocks
+        // here until the first's transaction finishes, then sees its post.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${authorId}))`;
+
+        const last = await tx.post.findFirst({
+          where: { authorId },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (last) {
+          const elapsed = Date.now() - last.createdAt.getTime();
+          if (elapsed < POST_COOLDOWN_MS) {
+            const minutesLeft = Math.ceil((POST_COOLDOWN_MS - elapsed) / 60_000);
+            throw new ForbiddenException(
+              `Следующий пост можно опубликовать через ${minutesLeft} мин.`,
+            );
+          }
         }
       }
-    }
 
-    // The banned-words classifier (this.moderation.classify) only ever reads
-    // the caption text — it cannot inspect image content at all. So a post
-    // with an image is *always* forced into PENDING_REVIEW for a human
-    // (owner) review, regardless of how clean the caption is, rather than
-    // trusting a text-only filter to vouch for a picture it never looked at.
-    // This is a hard legal/moderation requirement (152-FZ/436-FZ content
-    // review), not a heuristic — don't let a CLEAN caption override it.
-    const moderationState = imageUrl ? ModerationState.PENDING_REVIEW : this.moderation.classify(body);
-    const post = await this.prisma.post.create({
-      data: {
-        authorId,
-        body,
-        imageUrl,
-        moderationState,
-        // Non-owners always publish immediately — the draft/schedule workflow
-        // (publish: false) stays an owner-only tool.
-        publishedAt: isOwner ? (publish ? new Date() : null) : new Date(),
-      },
-      include: { author: true, _count: { select: { likes: true, comments: true } } },
+      // The banned-words classifier (this.moderation.classify) only ever reads
+      // the caption text — it cannot inspect image content at all. So a post
+      // with an image is *always* forced into PENDING_REVIEW for a human
+      // (owner) review, regardless of how clean the caption is, rather than
+      // trusting a text-only filter to vouch for a picture it never looked at.
+      // This is a hard legal/moderation requirement (152-FZ/436-FZ content
+      // review), not a heuristic — don't let a CLEAN caption override it.
+      const moderationState = imageUrl ? ModerationState.PENDING_REVIEW : this.moderation.classify(body);
+      const post = await tx.post.create({
+        data: {
+          authorId,
+          body,
+          imageUrl,
+          moderationState,
+          // Non-owners always publish immediately — the draft/schedule workflow
+          // (publish: false) stays an owner-only tool.
+          publishedAt: isOwner ? (publish ? new Date() : null) : new Date(),
+        },
+        include: { author: true, _count: { select: { likes: true, comments: true } } },
+      });
+      return serializePost(post, authorId);
     });
-    return serializePost(post, authorId);
   }
 
   async update(id: string, data: { body?: string; publish?: boolean }) {

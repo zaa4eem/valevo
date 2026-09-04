@@ -5,6 +5,7 @@ import request from 'supertest';
 import { CLICKER_DAILY_CAP, PREMIUM_SHOP_PRICE, clickerUpgradeCost } from '@zaa4eem/shared';
 import { AppModule } from '../app.module';
 import { HttpExceptionFilter } from '../common/http-exception.filter';
+import { addMonths } from '../common/premium.util';
 import { PrismaService } from '../prisma/prisma.service';
 
 const canRun = Boolean(process.env.DATABASE_URL);
@@ -120,6 +121,64 @@ const canRun = Boolean(process.env.DATABASE_URL);
     expect(overCap.body.zCoins).toBe(CLICKER_DAILY_CAP);
   });
 
+  it('never exceeds the daily cap even when clicks race concurrently', async () => {
+    const { token, userId } = await registerUser();
+    // Leave exactly 40 coins of headroom under the cap.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { coinsEarnedToday: CLICKER_DAILY_CAP - 40, coinsEarnedDay: new Date(new Date().toISOString().slice(0, 10)) },
+    });
+
+    // 8 concurrent batches each demanding 40 (way more than the 40 total
+    // headroom) — a stale read-then-write would let several of these read
+    // the same "40 remaining" snapshot and each get awarded up to it,
+    // blowing past the cap. Atomically guarded, only 40 total can land.
+    const results = await Promise.all(
+      Array.from({ length: 8 }, () =>
+        request(app.getHttpServer())
+          .post('/api/clicker/click')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ count: 40 })
+          .expect(201),
+      ),
+    );
+
+    const totalAwarded = results.reduce((sum, res) => sum + res.body.awarded, 0);
+    expect(totalAwarded).toBe(40);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(row.coinsEarnedToday).toBe(CLICKER_DAILY_CAP);
+    expect(row.coinsEarnedToday).toBeLessThanOrEqual(CLICKER_DAILY_CAP);
+  });
+
+  it('charges only one upgrade when purchases race concurrently, never going negative', async () => {
+    const { token, userId } = await registerUser();
+    const cost = clickerUpgradeCost(1);
+    await prisma.user.update({ where: { id: userId }, data: { zCoins: cost } });
+
+    // Exactly enough Z for ONE upgrade — a stale read-then-write would let
+    // several concurrent requests all price themselves off the same
+    // clickPower and all succeed at that price, driving zCoins negative.
+    const settled = await Promise.all(
+      Array.from({ length: 5 }, () =>
+        request(app.getHttpServer())
+          .post('/api/clicker/upgrade')
+          .set('Authorization', `Bearer ${token}`)
+          .then((res) => res.status),
+      ),
+    );
+
+    const successes = settled.filter((status) => status === 201);
+    const rejections = settled.filter((status) => status === 400);
+    expect(successes).toHaveLength(1);
+    expect(rejections).toHaveLength(4);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(row.clickPower).toBe(2);
+    expect(row.zCoins).toBe(0);
+    expect(row.zCoins).toBeGreaterThanOrEqual(0);
+  });
+
   it('lets a user buy a click-power upgrade once they can afford it, and rejects it otherwise', async () => {
     const { token } = await registerUser();
 
@@ -197,5 +256,30 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .post('/api/shop/premium')
       .set('Authorization', `Bearer ${token}`)
       .expect(201);
+  });
+
+  it('stacks both months when two purchases race concurrently, instead of only the last write landing', async () => {
+    const { token, userId } = await registerUser();
+    const testStart = new Date();
+    await prisma.user.update({ where: { id: userId }, data: { zCoins: PREMIUM_SHOP_PRICE * 2 } });
+
+    // A stale read-then-write would have both concurrent purchases compute
+    // premiumUntil from the same "not yet Premium" snapshot — both charge
+    // zCoins, but only 1 month (not 2) ends up applied.
+    const results = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app.getHttpServer())
+          .post('/api/shop/premium')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(201),
+      ),
+    );
+    expect(results).toHaveLength(2);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(row.zCoins).toBe(0);
+    const expected = addMonths(addMonths(testStart, 1), 1);
+    expect(row.premiumUntil).not.toBeNull();
+    expect(Math.abs(row.premiumUntil!.getTime() - expected.getTime())).toBeLessThan(10_000);
   });
 });

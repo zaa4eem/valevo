@@ -2,21 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ConfigService } from '@nestjs/config';
 import { Strategy, ExtractJwt } from 'passport-jwt';
-import type { Request } from 'express';
 import { AccessTokenPayload } from './token.service';
-
-function extractFromCookie(req: Request): string | null {
-  return (req as any)?.cookies?.zaa4eem_session ?? null;
-}
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService) {
     super({
-      jwtFromRequest: ExtractJwt.fromExtractors([
-        ExtractJwt.fromAuthHeaderAsBearerToken(),
-        extractFromCookie,
-      ]),
+      // The access token only ever travels as a Bearer header — never a
+      // cookie, deliberately (a cookie-based access token would need its
+      // own CSRF protection; the refresh token is the one cookie this app
+      // uses, and it's a separate, narrowly-scoped, httpOnly flow).
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: config.getOrThrow<string>('JWT_ACCESS_SECRET'),
     });

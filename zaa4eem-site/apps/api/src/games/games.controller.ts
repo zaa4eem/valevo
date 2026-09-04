@@ -19,8 +19,14 @@ export class GamesController {
     return this.games.getBySlug(slug);
   }
 
+  // A submitted score is entirely client-reported (no server-side session/
+  // replay validation ties it to an actual playthrough) — the maxPlausibleScore
+  // review queue catches egregious values, but this endpoint has no real
+  // anti-cheat for a moderately-plausible fake score. Tightened from 20/min
+  // to 6/min as a cheap partial mitigation (slows down automated spam of
+  // fake submissions); a real fix needs server-validated game sessions.
   @UseGuards(JwtAuthGuard)
-  @Throttle({ default: { limit: 20, ttl: 60_000 } })
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
   @Post('games/:slug/scores')
   submitScore(
     @Param('slug') slug: string,

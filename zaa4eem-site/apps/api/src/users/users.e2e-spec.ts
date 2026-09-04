@@ -181,4 +181,33 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .expect(200);
     expect(following.body.items.map((u: any) => u.id)).toContain(target.user.id);
   });
+
+  it('accepts a real image but rejects one whose bytes do not match its claimed Content-Type', async () => {
+    const register = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `avatarspoof-${Date.now()}@test.dev`, password: 'password123', displayName: 'Avatar Test' });
+    const token = register.body.accessToken as string;
+
+    const ok = await request(app.getHttpServer())
+      .post('/api/users/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('avatar', Buffer.from(TINY_PNG_BASE64, 'base64'), { filename: 'photo.png', contentType: 'image/png' })
+      .expect(201);
+    expect(ok.body.avatarUrl).toEqual(expect.stringContaining('/uploads/avatars/'));
+
+    // multer's fileFilter only sees the client-supplied Content-Type header
+    // — a plain-text body wearing an "image/png" label passes that check,
+    // so the real fix has to inspect the bytes that actually landed on disk.
+    await request(app.getHttpServer())
+      .post('/api/users/me/avatar')
+      .set('Authorization', `Bearer ${token}`)
+      .attach('avatar', Buffer.from('not actually a png, just a label'), {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      })
+      .expect(400);
+  });
 });
+
+const TINY_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';

@@ -16,10 +16,11 @@ import { SearchModule } from './search/search.module';
 import { ClickerModule } from './clicker/clicker.module';
 import { DigestModule } from './digest/digest.module';
 import { IdeaCreditsModule } from './idea-credits/idea-credits.module';
+import { validateEnv } from './config-validate';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     ThrottlerModule.forRoot([
       {
         ttl: 60_000,

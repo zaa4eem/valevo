@@ -19,7 +19,10 @@ COPY package.json package-lock.json* ./
 COPY apps/bot/package.json apps/bot/package.json
 RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 
-COPY --from=build /repo/apps/bot/dist apps/bot/dist
+COPY --from=build --chown=node:node /repo/apps/bot/dist apps/bot/dist
 
 WORKDIR /repo/apps/bot
+# Nothing here writes at runtime — safe to run as the image's built-in
+# unprivileged `node` user instead of root.
+USER node
 CMD ["node", "dist/index.js"]

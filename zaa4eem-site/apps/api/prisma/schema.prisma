@@ -138,6 +138,8 @@ model User {
 
   @@index([role])
   @@index([invitedById])
+  // Serves the Z-Кликер leaderboard's `where: zCoins > 0, orderBy: zCoins desc`.
+  @@index([zCoins])
 }
 
 // The owner manually crediting someone's real-world (outside-the-app) idea
@@ -177,6 +179,9 @@ model Follow {
 
   @@unique([followerId, followingId])
   @@index([followingId])
+  // Cover getFollowers'/getFollowing's (createdAt desc, id desc) cursor sort.
+  @@index([followingId, createdAt, id])
+  @@index([followerId, createdAt, id])
 }
 
 model RefreshToken {
@@ -282,6 +287,10 @@ model Idea {
   @@index([status])
   @@index([moderationState])
   @@index([voteCount])
+  // Cover the ideas board's "top"/"new" tabs — filter by moderationState,
+  // sort by voteCount or createdAt.
+  @@index([moderationState, voteCount])
+  @@index([moderationState, createdAt])
 }
 
 model Vote {
@@ -320,6 +329,9 @@ model Score {
 
   @@index([gameId, userId])
   @@index([gameId, value])
+  // Cover leaderboard/profile/digest queries filtering by reviewState.
+  @@index([gameId, reviewState, value])
+  @@index([userId, reviewState])
 }
 
 model ModerationLogEntry {
@@ -333,4 +345,5 @@ model ModerationLogEntry {
   createdAt  DateTime             @default(now())
 
   @@index([targetType, targetId])
+  @@index([createdAt])
 }

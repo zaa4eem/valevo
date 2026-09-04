@@ -9,7 +9,10 @@ export const createPostSchema = z.object({
   publish: z.boolean().default(true),
   // Set only after a prior upload to POST /posts/me/image — the image itself
   // never travels through this JSON endpoint, just its resulting URL.
-  imageUrl: z.string().url().optional(),
+  // Restricted to http(s): z.string().url() alone accepts any URL scheme
+  // (javascript:, data:, ...), and nothing else here re-checks that this
+  // was actually a URL we issued.
+  imageUrl: z.string().url().refine((v) => /^https?:\/\//i.test(v), 'URL должен начинаться с http:// или https://').optional(),
 });
 export type CreatePostInput = z.infer<typeof createPostSchema>;
 

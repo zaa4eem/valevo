@@ -40,7 +40,15 @@ export type UpdatePremiumStyleInput = z.infer<typeof updatePremiumStyleSchema>;
 
 export const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(60).optional(),
-  avatarUrl: z.string().url().nullable().optional(),
+  // Restricted to http(s): z.string().url() alone accepts any URL scheme
+  // (javascript:, data:, ...), and nothing else here re-checks that this
+  // was actually a URL POST /users/me/avatar issued.
+  avatarUrl: z
+    .string()
+    .url()
+    .refine((v) => /^https?:\/\//i.test(v), 'URL должен начинаться с http:// или https://')
+    .nullable()
+    .optional(),
   bio: z.string().max(500).nullable().optional(),
   statusText: z.string().max(80).nullable().optional(),
 });
