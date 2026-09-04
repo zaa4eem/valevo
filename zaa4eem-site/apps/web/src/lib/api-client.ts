@@ -19,6 +19,18 @@ export function getAccessToken(): string | null {
   return null;
 }
 
+// The access token is short-lived (15 min) by design — auth-context registers
+// a handler here (avoiding a direct import, which would create a cycle) that
+// calls POST /auth/refresh and reports whether it got a new token. Every
+// caller of apiFetch/apiUpload then silently recovers from an expired token
+// instead of surfacing it as "you got logged out" after sitting on a page
+// for a while.
+type UnauthorizedHandler = () => Promise<boolean>;
+let onUnauthorized: UnauthorizedHandler | null = null;
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  onUnauthorized = handler;
+}
+
 export class ApiError extends Error {
   constructor(
     public statusCode: number,
@@ -33,7 +45,12 @@ interface RequestOptions {
   body?: unknown;
 }
 
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+// /auth/refresh itself must never trigger the retry dance below — a 401 from
+// it means the session is genuinely gone, and recursing into onUnauthorized
+// (which calls refresh again) would loop forever.
+const REFRESH_PATH = '/auth/refresh';
+
+export async function apiFetch<T>(path: string, options: RequestOptions = {}, isRetry = false): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`${API_BASE}${path}`, {
     method: options.method ?? 'GET',
@@ -45,6 +62,11 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
+  if (res.status === 401 && !isRetry && path !== REFRESH_PATH && onUnauthorized) {
+    const refreshed = await onUnauthorized();
+    if (refreshed) return apiFetch<T>(path, options, true);
+  }
+
   if (res.status === 204) return undefined as T;
 
   const data = await res.json().catch(() => undefined);
@@ -55,7 +77,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 }
 
 /** For multipart uploads — the browser sets its own Content-Type (with boundary), so it must not be set manually. */
-export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+export async function apiUpload<T>(path: string, form: FormData, isRetry = false): Promise<T> {
   const token = getAccessToken();
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -63,6 +85,11 @@ export async function apiUpload<T>(path: string, form: FormData): Promise<T> {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     body: form,
   });
+
+  if (res.status === 401 && !isRetry && onUnauthorized) {
+    const refreshed = await onUnauthorized();
+    if (refreshed) return apiUpload<T>(path, form, true);
+  }
 
   const data = await res.json().catch(() => undefined);
   if (!res.ok) {
