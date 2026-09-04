@@ -3,28 +3,16 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { AdminUserListItem } from '@zaa4eem/shared';
-import { formatMemberNumber, premiumBadgeEmojiValues } from '@zaa4eem/shared';
+import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
-import { PremiumName } from '@/components/PremiumName';
+import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
+import { PremiumName } from '@/components/PremiumName';
 
 const STATUS_LABEL: Record<AdminUserListItem['status'], string> = {
   ACTIVE: 'Активен',
   MUTED: 'В муте',
   BANNED: 'Забанен',
-};
-
-const NAME_STYLE_LABEL: Record<string, string> = {
-  NONE: 'Без эффекта',
-  FLOW: 'Переливающийся',
-  HOLO: 'Голографический',
-  GLOW: 'Свечение',
-};
-
-const RING_STYLE_LABEL: Record<string, string> = {
-  NONE: 'Нет',
-  SPIN: 'Вращение',
-  PULSE: 'Пульсация',
 };
 
 function PremiumEditor({
@@ -36,20 +24,14 @@ function PremiumEditor({
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  const [nameStyle, setNameStyle] = useState<string>(user.nameStyle ?? 'NONE');
-  const [nameColor, setNameColor] = useState(user.nameColor ?? '#22c55e');
-  const [ringStyle, setRingStyle] = useState<string>(user.ringStyle ?? 'NONE');
-  const [badgeEmoji, setBadgeEmoji] = useState<string | null>(user.badgeEmoji);
+  const [style, setStyle] = useState<PremiumStyleValue>({
+    nameStyle: user.nameStyle ?? 'NONE',
+    nameColor: user.nameColor ?? '#22c55e',
+    ringStyle: user.ringStyle ?? 'NONE',
+    badgeEmoji: user.badgeEmoji,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const previewUser = {
-    isPremium: true,
-    nameStyle: nameStyle === 'NONE' ? null : (nameStyle as 'FLOW' | 'HOLO' | 'GLOW'),
-    nameColor: nameStyle === 'GLOW' ? nameColor : null,
-    ringStyle: ringStyle === 'NONE' ? null : (ringStyle as 'SPIN' | 'PULSE'),
-    badgeEmoji,
-  };
 
   async function save() {
     setSaving(true);
@@ -57,10 +39,10 @@ function PremiumEditor({
     try {
       await api.patch(`/admin/users/${user.id}/premium`, {
         isPremium: true,
-        nameStyle: nameStyle === 'NONE' ? null : nameStyle,
-        nameColor: nameStyle === 'GLOW' ? nameColor : null,
-        ringStyle: ringStyle === 'NONE' ? null : ringStyle,
-        badgeEmoji,
+        nameStyle: style.nameStyle === 'NONE' ? null : style.nameStyle,
+        nameColor: style.nameStyle === 'GLOW' ? style.nameColor : null,
+        ringStyle: style.ringStyle === 'NONE' ? null : style.ringStyle,
+        badgeEmoji: style.badgeEmoji,
       });
       onSaved();
     } catch {
@@ -91,89 +73,7 @@ function PremiumEditor({
         gap: 12,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <PremiumAvatar name={user.displayName} avatarUrl={user.avatarUrl} size={36} premium={previewUser} />
-        <PremiumName name={user.displayName} premium={previewUser} style={{ fontSize: 'var(--z-fs-md)' }} />
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--z-fs-xs)' }}>
-          Эффект ника
-          <select className="z-input" value={nameStyle} onChange={(e) => setNameStyle(e.target.value)}>
-            {Object.entries(NAME_STYLE_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {nameStyle === 'GLOW' && (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--z-fs-xs)' }}>
-            Цвет свечения
-            <input
-              type="color"
-              value={nameColor}
-              onChange={(e) => setNameColor(e.target.value)}
-              style={{ width: 60, height: 36, padding: 2, border: '1px solid var(--z-border)', borderRadius: 'var(--z-radius-sm)' }}
-            />
-          </label>
-        )}
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--z-fs-xs)' }}>
-          Рамка аватара
-          <select className="z-input" value={ringStyle} onChange={(e) => setRingStyle(e.target.value)}>
-            {Object.entries(RING_STYLE_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 'var(--z-fs-xs)' }}>
-          Эмодзи-значок
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button
-              type="button"
-              className="z-pop-on-active"
-              onClick={() => setBadgeEmoji(null)}
-              title="Без значка"
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 'var(--z-radius-sm)',
-                border: `1px solid ${badgeEmoji === null ? 'var(--z-accent)' : 'var(--z-border)'}`,
-                background: 'transparent',
-                cursor: 'pointer',
-                fontSize: 'var(--z-fs-xs)',
-                color: 'var(--z-text-faint)',
-              }}
-            >
-              ✕
-            </button>
-            {premiumBadgeEmojiValues.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                className="z-pop-on-active"
-                onClick={() => setBadgeEmoji(emoji)}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 'var(--z-radius-sm)',
-                  border: `1px solid ${badgeEmoji === emoji ? 'var(--z-accent)' : 'var(--z-border)'}`,
-                  background: badgeEmoji === emoji ? 'var(--z-accent-soft)' : 'transparent',
-                  cursor: 'pointer',
-                  fontSize: 16,
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <PremiumStyleFields displayName={user.displayName} avatarUrl={user.avatarUrl} value={style} onChange={setStyle} />
 
       {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
 

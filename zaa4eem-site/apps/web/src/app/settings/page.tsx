@@ -5,6 +5,61 @@ import { updateProfileSchema, formatMemberNumber, type PublicProfile } from '@za
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
+import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
+
+function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved: (p: PublicProfile) => void }) {
+  const [style, setStyle] = useState<PremiumStyleValue>({
+    nameStyle: profile.nameStyle ?? 'NONE',
+    nameColor: profile.nameColor ?? '#22c55e',
+    ringStyle: profile.ringStyle ?? 'NONE',
+    badgeEmoji: profile.badgeEmoji,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const updated = await api.patch<PublicProfile>('/users/me/premium', {
+        nameStyle: style.nameStyle === 'NONE' ? null : style.nameStyle,
+        nameColor: style.nameStyle === 'GLOW' ? style.nameColor : null,
+        ringStyle: style.ringStyle === 'NONE' ? null : style.ringStyle,
+        badgeEmoji: style.badgeEmoji,
+      });
+      onSaved(updated);
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось сохранить');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card hover className="z-animate-in" style={{ marginTop: 20 }}>
+      <h2 style={{ marginTop: 0, fontSize: 'var(--z-fs-lg)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        👑 Premium
+      </h2>
+      <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: -8, marginBottom: 16 }}>
+        Тебе выдан Premium — выбери, как это будет выглядеть.
+      </p>
+      <PremiumStyleFields displayName={profile.displayName} avatarUrl={profile.avatarUrl} value={style} onChange={setStyle} />
+      {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 12 }}>{error}</div>}
+      {saved && <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)', marginTop: 12 }}>Сохранено!</div>}
+      <button
+        className="z-btn-accent z-pop-on-active"
+        disabled={saving}
+        onClick={save}
+        style={{ marginTop: 14, alignSelf: 'flex-start' }}
+      >
+        {saving ? 'Сохранение…' : 'Сохранить'}
+      </button>
+    </Card>
+  );
+}
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
@@ -162,6 +217,8 @@ export default function SettingsPage() {
           </button>
         </form>
       </Card>
+
+      {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
     </div>
   );
 }

@@ -82,6 +82,27 @@ export class UsersService {
     return this.prisma.user.update({ where: { id: userId }, data });
   }
 
+  /**
+   * Self-service: a user the owner already granted Premium to picks their
+   * own look from the same fixed option set the owner uses — grant/revoke
+   * of isPremium itself stays owner-only (AdminService.setPremium).
+   */
+  async updatePremiumStyle(
+    userId: string,
+    data: {
+      nameStyle: 'FLOW' | 'HOLO' | 'GLOW' | null;
+      nameColor: string | null;
+      ringStyle: 'SPIN' | 'PULSE' | null;
+      badgeEmoji: string | null;
+    },
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { isPremium: true } });
+    if (!user?.isPremium) {
+      throw new ForbiddenException('Эта функция доступна только Premium-пользователям');
+    }
+    return this.prisma.user.update({ where: { id: userId }, data });
+  }
+
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) {
       throw new ForbiddenException('Нельзя подписаться на самого себя');

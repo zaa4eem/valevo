@@ -15,6 +15,21 @@ export const premiumFieldsSchema = z.object({
 });
 export type PremiumFields = z.infer<typeof premiumFieldsSchema>;
 
+// Self-service: a user the owner already granted Premium to picks their own
+// look from the same fixed option set the owner uses (POST /admin/.../premium).
+// Deliberately excludes isPremium — granting/revoking Premium itself stays
+// owner-only.
+export const updatePremiumStyleSchema = z.object({
+  nameStyle: z.enum(premiumNameStyleValues).nullable(),
+  nameColor: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/, 'Цвет должен быть в формате #RRGGBB')
+    .nullable(),
+  ringStyle: z.enum(premiumRingStyleValues).nullable(),
+  badgeEmoji: z.enum(premiumBadgeEmojiValues).nullable(),
+});
+export type UpdatePremiumStyleInput = z.infer<typeof updatePremiumStyleSchema>;
+
 export const updateProfileSchema = z.object({
   displayName: z.string().min(2).max(60).optional(),
   avatarUrl: z.string().url().nullable().optional(),

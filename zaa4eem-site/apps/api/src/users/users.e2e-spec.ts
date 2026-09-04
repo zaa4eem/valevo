@@ -4,11 +4,13 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../app.module';
 import { HttpExceptionFilter } from '../common/http-exception.filter';
+import { PrismaService } from '../prisma/prisma.service';
 
 const canRun = Boolean(process.env.DATABASE_URL);
 
 (canRun ? describe : describe.skip)('Users (e2e)', () => {
   let app: INestApplication;
+  let prisma: PrismaService;
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -17,6 +19,7 @@ const canRun = Boolean(process.env.DATABASE_URL);
     app.setGlobalPrefix('api');
     app.useGlobalFilters(new HttpExceptionFilter());
     await app.init();
+    prisma = app.get(PrismaService);
   });
 
   afterAll(async () => {
@@ -50,6 +53,57 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .patch('/api/users/me')
       .set('Authorization', `Bearer ${register.body.accessToken}`)
       .send({ bio: 'ты полный мудак' })
+      .expect(400);
+  });
+
+  it('lets a Premium user pick their own style, but not a non-Premium user', async () => {
+    const nonPremium = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `notprem-${Date.now()}@test.dev`, password: 'password123', displayName: 'Not Premium' });
+
+    // Not Premium yet — self-service is forbidden regardless of payload validity.
+    await request(app.getHttpServer())
+      .patch('/api/users/me/premium')
+      .set('Authorization', `Bearer ${nonPremium.body.accessToken}`)
+      .send({ nameStyle: 'FLOW', nameColor: null, ringStyle: 'SPIN', badgeEmoji: '🔥' })
+      .expect(403);
+
+    await request(app.getHttpServer()).patch('/api/users/me/premium').send({}).expect(401);
+
+    // Owner grants Premium (a blank style, same as AdminService.setPremium's default) ...
+    const ownerEmail = `premstyleowner-${Date.now()}@test.dev`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: ownerEmail, password: 'password123', displayName: 'Prem Style Owner' });
+    await prisma.user.update({ where: { email: ownerEmail }, data: { role: 'OWNER' } });
+    const ownerLogin = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ownerEmail, password: 'password123' });
+
+    const target = await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: `premstyletarget-${Date.now()}@test.dev`, password: 'password123', displayName: 'Prem Style Target' });
+    await request(app.getHttpServer())
+      .patch(`/api/admin/users/${target.body.user.id}/premium`)
+      .set('Authorization', `Bearer ${ownerLogin.body.accessToken}`)
+      .send({ isPremium: true })
+      .expect(200);
+
+    // ... now the target picks their own look, without any admin involvement.
+    const restyled = await request(app.getHttpServer())
+      .patch('/api/users/me/premium')
+      .set('Authorization', `Bearer ${target.body.accessToken}`)
+      .send({ nameStyle: 'HOLO', nameColor: null, ringStyle: 'PULSE', badgeEmoji: '✨' })
+      .expect(200);
+    expect(restyled.body.nameStyle).toBe('HOLO');
+    expect(restyled.body.ringStyle).toBe('PULSE');
+    expect(restyled.body.badgeEmoji).toBe('✨');
+
+    // Same validation as the owner's admin endpoint applies here too.
+    await request(app.getHttpServer())
+      .patch('/api/users/me/premium')
+      .set('Authorization', `Bearer ${target.body.accessToken}`)
+      .send({ nameStyle: 'GLOW', nameColor: 'not-a-color', ringStyle: null, badgeEmoji: null })
       .expect(400);
   });
 

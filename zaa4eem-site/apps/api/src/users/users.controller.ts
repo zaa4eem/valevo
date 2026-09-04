@@ -17,7 +17,7 @@ import {
 import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
-import { updateProfileSchema, userListQuerySchema } from '@zaa4eem/shared';
+import { updatePremiumStyleSchema, updateProfileSchema, userListQuerySchema } from '@zaa4eem/shared';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
@@ -56,6 +56,16 @@ export class UsersController {
 
     const updated = await this.users.updateProfile(user.id, input);
     return this.users.getPublicProfile(updated.id);
+  }
+
+  // Self-service style picker for a user the owner already granted Premium
+  // to — see PATCH /admin/users/:id/premium for the owner-only grant/revoke.
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/premium')
+  async updateMyPremiumStyle(@CurrentUser() user: RequestUser, @Body() body: unknown) {
+    const input = updatePremiumStyleSchema.parse(body);
+    await this.users.updatePremiumStyle(user.id, input);
+    return this.users.getPublicProfile(user.id);
   }
 
   @UseGuards(JwtAuthGuard)
