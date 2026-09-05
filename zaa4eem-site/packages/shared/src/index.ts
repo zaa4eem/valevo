@@ -21,3 +21,5 @@ export * from './progress/achievements';
 export * from './progress/onboarding';
 export * from './progress/referral-goals';
 export * from './progress/seasons';
+export * from './schemas/security';
+export * from './security/password-strength';

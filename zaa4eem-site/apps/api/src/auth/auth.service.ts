@@ -1,4 +1,12 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { createHash, randomBytes } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { TokenService } from './token.service';
@@ -11,6 +19,25 @@ import {
 import { GoogleAuthService, GoogleUserPayload } from './google-auth.service';
 import { EmailService } from '../common/email.service';
 import type { RegisterInput, LoginInput, TelegramAuthInput } from '@zaa4eem/shared';
+import { PrismaService } from '../prisma/prisma.service';
+import { SecurityService } from '../security/security.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { describeDevice, networkPrefix } from '../security/device.util';
+import type { DeviceContext } from './token.service';
+
+/** How long an emailed verification link stays good. Long enough to survive a mail delay and a night's sleep. */
+const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+/** A magic link is a live credential in an inbox — 15 minutes, once. */
+const MAGIC_TTL_MS = 15 * 60 * 1000;
+/** A half-finished login waiting on 2FA. Short, single-purpose, not an access token. */
+const TWO_FACTOR_TICKET_TTL = '10m';
+const TWO_FACTOR_PURPOSE = 'two-factor';
+
+/** What the controller knows about the request a login arrived on. */
+export interface RequestContext {
+  userAgent?: string | null;
+  ip?: string | null;
+}
 
 @Injectable()
 export class AuthService {
@@ -20,7 +47,29 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly email: EmailService,
     private readonly google: GoogleAuthService,
+    private readonly prisma: PrismaService,
+    private readonly security: SecurityService,
+    private readonly jwt: JwtService,
+    private readonly notifications: NotificationsService,
   ) {}
+
+  private readonly logger = new Logger(AuthService.name);
+
+  private siteUrl(): string {
+    return this.config.get<string>('MINI_APP_URL', 'http://localhost:3000').replace(/\/$/, '');
+  }
+
+  private static hash(raw: string): string {
+    return createHash('sha256').update(raw).digest('hex');
+  }
+
+  private toDevice(context?: RequestContext): DeviceContext {
+    return {
+      userAgent: context?.userAgent ?? null,
+      ipPrefix: networkPrefix(context?.ip),
+      label: describeDevice(context?.userAgent),
+    };
+  }
 
   private botToken(): string {
     return this.config.getOrThrow<string>('TELEGRAM_BOT_TOKEN');
@@ -162,7 +211,7 @@ export class AuthService {
     return this.users.getPublicProfile(userId);
   }
 
-  async register(input: RegisterInput) {
+  async register(input: RegisterInput, context?: RequestContext) {
     const existing = await this.users.findByEmail(input.email);
     if (existing) {
       throw new ConflictException('Аккаунт с такой почтой уже существует');
@@ -180,15 +229,183 @@ export class AuthService {
       if (referrer) await this.users.attributeReferral(user.id, referrer);
     }
 
-    return this.issueSession(user.id, user.role);
+    // Fire-and-forget: a mail server having a bad minute must not fail a
+    // registration the user already completed. They can resend from Settings.
+    this.sendVerificationEmail(user.id, input.email).catch((err) =>
+      this.logger.warn(`Verification email failed: ${err instanceof Error ? err.message : err}`),
+    );
+
+    return this.issueSession(user.id, user.role, context);
   }
 
-  async login(input: LoginInput) {
+  async login(input: LoginInput, context?: RequestContext) {
     const user = await this.users.findByEmail(input.email);
     if (!user || !user.passwordHash || !(await verifyPassword(input.password, user.passwordHash))) {
       throw new UnauthorizedException('Неверная почта или пароль');
     }
-    return this.issueSession(user.id, user.role);
+    // The password was right, but it is only the first factor. Everything
+    // below this line is deliberately gated on the second one.
+    if (user.totpEnabledAt) {
+      return { twoFactorRequired: true as const, ticket: this.issueTwoFactorTicket(user.id) };
+    }
+    return this.issueSession(user.id, user.role, context);
+  }
+
+  /**
+   * Second step of a 2FA login. The ticket proves the password was already
+   * accepted; it carries a purpose claim so a normal access token can never
+   * be replayed here, and vice versa.
+   */
+  async submitSecondFactor(ticket: string, code: string, context?: RequestContext) {
+    let userId: string;
+    try {
+      const payload = this.jwt.verify<{ sub: string; purpose?: string }>(ticket, {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      });
+      if (payload.purpose !== TWO_FACTOR_PURPOSE) throw new Error('wrong purpose');
+      userId = payload.sub;
+    } catch {
+      throw new UnauthorizedException('Вход просрочен — начните заново');
+    }
+
+    if (!(await this.security.verifySecondFactor(userId, code))) {
+      throw new UnauthorizedException('Код неверный');
+    }
+
+    const user = await this.users.findById(userId);
+    if (!user) throw new UnauthorizedException('Пользователь не найден');
+    return this.issueSession(user.id, user.role, context);
+  }
+
+  private issueTwoFactorTicket(userId: string): string {
+    return this.jwt.sign(
+      { sub: userId, purpose: TWO_FACTOR_PURPOSE },
+      {
+        secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
+        expiresIn: TWO_FACTOR_TICKET_TTL,
+      },
+    );
+  }
+
+  // ---- Email verification ----
+
+  /** Issues a fresh link and invalidates any earlier unused one for this address. */
+  async sendVerificationEmail(userId: string, email: string): Promise<void> {
+    const raw = randomBytes(32).toString('hex');
+    await this.prisma.emailToken.deleteMany({ where: { userId, type: 'VERIFY_EMAIL', usedAt: null } });
+    await this.prisma.emailToken.create({
+      data: {
+        userId,
+        type: 'VERIFY_EMAIL',
+        tokenHash: AuthService.hash(raw),
+        email,
+        expiresAt: new Date(Date.now() + VERIFY_TTL_MS),
+      },
+    });
+    await this.email.sendEmailVerification(email, `${this.siteUrl()}/verify-email?token=${raw}`);
+  }
+
+  async resendVerification(userId: string): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user?.email) throw new BadRequestException('К аккаунту не привязана почта');
+    if (user.emailVerifiedAt) throw new BadRequestException('Почта уже подтверждена');
+    await this.sendVerificationEmail(userId, user.email);
+  }
+
+  /**
+   * Consumes a verification link. The address is re-checked against the one
+   * the link was issued for: someone who requested a link, then changed
+   * their address, must not end up with the *new* address marked verified.
+   */
+  async verifyEmail(token: string): Promise<void> {
+    const row = await this.prisma.emailToken.findUnique({
+      where: { tokenHash: AuthService.hash(token) },
+    });
+    if (!row || row.type !== 'VERIFY_EMAIL' || row.usedAt || row.expiresAt < new Date()) {
+      throw new BadRequestException('Ссылка недействительна или устарела');
+    }
+
+    const user = await this.users.findById(row.userId);
+    if (!user || user.email !== row.email) {
+      throw new BadRequestException('Ссылка выдана для другого адреса');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.emailToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
+      this.prisma.user.update({
+        where: { id: row.userId },
+        data: { emailVerifiedAt: new Date() },
+      }),
+    ]);
+  }
+
+  // ---- Magic link ----
+
+  /**
+   * Resolves identically whether or not the address has an account — the
+   * controller says "если такая почта есть, письмо отправлено" either way,
+   * so this can't be used to enumerate who is registered.
+   */
+  async requestMagicLink(email: string): Promise<void> {
+    const user = await this.users.findByEmail(email);
+    if (!user) return;
+
+    const raw = randomBytes(32).toString('hex');
+    await this.prisma.emailToken.deleteMany({
+      where: { userId: user.id, type: 'MAGIC_LINK', usedAt: null },
+    });
+    await this.prisma.emailToken.create({
+      data: {
+        userId: user.id,
+        type: 'MAGIC_LINK',
+        tokenHash: AuthService.hash(raw),
+        email,
+        expiresAt: new Date(Date.now() + MAGIC_TTL_MS),
+      },
+    });
+    await this.email.sendMagicLink(email, `${this.siteUrl()}/magic?token=${raw}`);
+  }
+
+  async consumeMagicLink(token: string, context?: RequestContext) {
+    const hash = AuthService.hash(token);
+    // Consumed with a guarded update, so a link forwarded to two devices
+    // can only ever sign one of them in.
+    const claimed = await this.prisma.emailToken.updateMany({
+      where: { tokenHash: hash, type: 'MAGIC_LINK', usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      throw new UnauthorizedException('Ссылка для входа недействительна или уже использована');
+    }
+
+    const row = await this.prisma.emailToken.findUniqueOrThrow({ where: { tokenHash: hash } });
+    const user = await this.users.findById(row.userId);
+    if (!user) throw new UnauthorizedException('Пользователь не найден');
+
+    // Reaching the inbox is exactly the proof verification asks for, so a
+    // magic-link sign-in settles it as a side effect.
+    if (!user.emailVerifiedAt && user.email === row.email) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerifiedAt: new Date() },
+      });
+    }
+
+    if (user.totpEnabledAt) {
+      return { twoFactorRequired: true as const, ticket: this.issueTwoFactorTicket(user.id) };
+    }
+    return this.issueSession(user.id, user.role, context);
+  }
+
+  // ---- Passkey login ----
+
+  async issueSessionForUser(userId: string, context?: RequestContext) {
+    const user = await this.users.findById(userId);
+    if (!user) throw new UnauthorizedException('Пользователь не найден');
+    // Deliberately no 2FA step: a passkey already *is* two factors — the
+    // device plus whatever unlocked it. Asking for a TOTP code on top adds
+    // friction without adding security.
+    return this.issueSession(user.id, user.role, context);
   }
 
   async refresh(rawRefreshToken: string) {
@@ -201,7 +418,11 @@ export class AuthService {
       throw new UnauthorizedException('Пользователь не найден');
     }
     return {
-      accessToken: this.tokens.signAccessToken({ sub: user.id, role: user.role }),
+      accessToken: this.tokens.signAccessToken({
+        sub: user.id,
+        role: user.role,
+        sid: rotated.sessionId,
+      }),
       refreshToken: rotated.newRaw,
     };
   }
@@ -265,12 +486,67 @@ export class AuthService {
     await this.tokens.revokeAllForUser(userId, currentRawRefreshToken);
   }
 
-  private async issueSession(userId: string, role: string) {
-    const [accessToken, refreshToken, profile] = await Promise.all([
-      this.tokens.signAccessToken({ sub: userId, role }),
-      this.tokens.issueRefreshToken(userId),
+  private async issueSession(userId: string, role: string, context?: RequestContext) {
+    const device = this.toDevice(context);
+    // Read before the new row exists, so "have we seen this device" is not
+    // answered by the session we are in the middle of creating.
+    const seenBefore = await this.hasSeenDevice(userId, device);
+
+    // The session row has to exist before the access token can name it, so
+    // this one is not parallelised with the rest.
+    const { raw: refreshToken, sessionId } = await this.tokens.issueRefreshSession(userId, device);
+    const [accessToken, profile] = await Promise.all([
+      this.tokens.signAccessToken({ sub: userId, role, sid: sessionId }),
       this.users.getPublicProfile(userId),
     ]);
+
+    if (!seenBefore) {
+      this.alertNewDevice(userId, device).catch((err) =>
+        this.logger.warn(`New-device alert failed: ${err instanceof Error ? err.message : err}`),
+      );
+    }
+
     return { accessToken, refreshToken, user: profile };
+  }
+
+  /**
+   * "Have we issued a session to something like this before?" Matched on the
+   * device label rather than the raw User-Agent, because a browser bumping
+   * its minor version every fortnight would otherwise fire a "new device"
+   * alarm each time and train the user to ignore the one that matters.
+   */
+  private async hasSeenDevice(userId: string, device: DeviceContext): Promise<boolean> {
+    const previous = await this.prisma.refreshToken.count({ where: { userId } });
+    // A brand-new account's first-ever session is not a "new device" — it is
+    // the only device, and the person is looking at the screen.
+    if (previous === 0) return true;
+    if (!device.label) return true;
+
+    const match = await this.prisma.refreshToken.count({
+      where: { userId, deviceLabel: device.label },
+    });
+    return match > 0;
+  }
+
+  private async alertNewDevice(userId: string, device: DeviceContext): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user) return;
+
+    const label = device.label ?? 'Неизвестное устройство';
+    if (user.email) {
+      await this.email.sendNewDeviceAlert(user.email, label, device.ipPrefix ?? null, new Date());
+    }
+    // Telegram too where it is linked: it is the channel most people
+    // actually read within the minute, which is what this alert needs.
+    await this.notifications
+      .create({
+        userId,
+        type: 'SYSTEM',
+        body: `🔐 Новый вход: ${label}`,
+        targetType: 'SECURITY',
+        targetId: userId,
+        telegramText: `🔐 В ваш аккаунт ZAA4EEM вошли с нового устройства: ${label}. Если это не вы — смените пароль в Настройках.`,
+      })
+      .catch(() => undefined);
   }
 }

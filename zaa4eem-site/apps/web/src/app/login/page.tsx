@@ -3,11 +3,26 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import type { AuthResponse } from '@zaa4eem/shared';
 import { ApiError, api, setAccessToken } from '@/lib/api-client';
-import { useAuth } from '@/lib/auth-context';
+import { useAuth, type PendingTwoFactor } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { TelegramLoginWidget } from '@/components/TelegramLoginWidget';
 import { GoogleLoginButton } from '@/components/GoogleLoginButton';
+import { PasswordStrength } from '@/components/PasswordStrength';
+import { TwoFactorPrompt } from '@/components/TwoFactorPrompt';
+import { isCancellation, isPasskeySupported, loginWithPasskey } from '@/lib/webauthn';
+
+/**
+ * Registration is three steps rather than one long form.
+ *
+ * Not decoration: each screen asks for one thing and can answer immediately
+ * — the address gets checked for shape, the password gets a live strength
+ * meter and a breach lookup, the name is just a name. A single form with
+ * three fields and one "готово" button hides every one of those answers
+ * until after the mistake.
+ */
+type RegisterStep = 'email' | 'password' | 'name';
 
 const TELEGRAM_BOT_USERNAME = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? '';
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '';
@@ -21,8 +36,12 @@ const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== 'undefi
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, register } = useAuth();
+  const { login, register, adoptSession } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [step, setStep] = useState<RegisterStep>('email');
+  const [pending2fa, setPending2fa] = useState<PendingTwoFactor | null>(null);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const [magicSent, setMagicSent] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -40,6 +59,44 @@ function LoginForm() {
       // Private-browsing / storage-denied — the code just won't pre-fill the mode.
     }
   }, []);
+
+  useEffect(() => {
+    setPasskeySupported(isPasskeySupported());
+  }, []);
+
+  const onPasskeyLogin = useCallback(async () => {
+    setError(null);
+    setOauthBusy(true);
+    try {
+      adoptSession((await loginWithPasskey()) as AuthResponse);
+      router.push('/');
+      router.refresh();
+    } catch (err) {
+      // Cancelling the system prompt is a decision, not a failure.
+      if (!isCancellation(err)) {
+        setError(err instanceof ApiError ? err.message : 'Не удалось войти по ключу');
+      }
+    } finally {
+      setOauthBusy(false);
+    }
+  }, [adoptSession, router]);
+
+  const onMagicLink = useCallback(async () => {
+    if (!email) {
+      setError('Введите почту — на неё придёт ссылка');
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      await api.post('/auth/magic-link', { email });
+      setMagicSent(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отправить ссылку');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [email]);
 
   const onTelegramAuth = useCallback(
     async (data: Record<string, string | number>) => {
@@ -105,7 +162,13 @@ function LoginForm() {
     setSubmitting(true);
     try {
       if (mode === 'login') {
-        await login({ email, password });
+        const pending = await login({ email, password });
+        if (pending) {
+          // The password was right, but the account wants a second factor —
+          // nothing is signed in until that is answered.
+          setPending2fa(pending);
+          return;
+        }
       } else {
         let referralCode: string | undefined;
         try {
@@ -130,12 +193,59 @@ function LoginForm() {
 
   const hasOauth = Boolean(TELEGRAM_BOT_USERNAME) || Boolean(GOOGLE_CLIENT_ID);
 
+  if (pending2fa) {
+    return (
+      <Card>
+        <TwoFactorPrompt
+          ticket={pending2fa.ticket}
+          onDone={() => {
+            router.push('/');
+            router.refresh();
+          }}
+        />
+      </Card>
+    );
+  }
+
+  const canAdvance =
+    step === 'email'
+      ? /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)
+      : step === 'password'
+        ? password.length >= 8
+        : displayName.trim().length >= 2;
+
   return (
     <Card>
-      <h1 style={{ marginTop: 0, fontSize: 'var(--z-fs-xl)' }}>Вход в ZAA4EEM</h1>
+      <h1 style={{ marginTop: 0, fontSize: 'var(--z-fs-xl)' }}>
+        {mode === 'login' ? 'Вход в ZAA4EEM' : 'Регистрация'}
+      </h1>
+
+      {mode === 'register' && (
+        <div className="z-step-dots" aria-label={`Шаг ${['email', 'password', 'name'].indexOf(step) + 1} из 3`}>
+          {(['email', 'password', 'name'] as RegisterStep[]).map((s2, i) => (
+            <span
+              key={s2}
+              className={`z-step-dot${step === s2 ? ' z-step-dot-active' : ''}${
+                ['email', 'password', 'name'].indexOf(step) > i ? ' z-step-dot-done' : ''
+              }`}
+            />
+          ))}
+        </div>
+      )}
 
       {oauthBusy && (
         <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>Входим…</p>
+      )}
+
+      {!oauthBusy && mode === 'login' && passkeySupported && (
+        <button
+          type="button"
+          onClick={onPasskeyLogin}
+          className="z-btn-accent z-pop-on-active"
+          style={{ width: '100%', marginBottom: 12 }}
+        >
+          🔑 Войти по ключу
+        </button>
       )}
 
       {!oauthBusy && hasOauth && (
@@ -166,33 +276,95 @@ function LoginForm() {
         </div>
       )}
 
-      <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {mode === 'register' && (
+      <form
+        onSubmit={(e) => {
+          // In register mode the button only submits on the final step;
+          // earlier ones just advance, so Enter does the expected thing.
+          if (mode === 'register' && step !== 'name') {
+            e.preventDefault();
+            if (canAdvance) setStep(step === 'email' ? 'password' : 'name');
+            return;
+          }
+          onSubmit(e);
+        }}
+        style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+      >
+        {(mode === 'login' || step === 'email') && (
           <input
             className="z-input"
-            placeholder="Имя"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+            autoFocus={mode === 'register'}
           />
         )}
-        <input
-          className="z-input"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-        <input
-          className="z-input"
-          type="password"
-          placeholder="Пароль"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+
+        {(mode === 'login' || step === 'password') && (
+          <div>
+            <input
+              className="z-input"
+              type="password"
+              placeholder="Пароль"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              autoFocus={mode === 'register'}
+              style={{ width: '100%' }}
+            />
+            {mode === 'register' && <PasswordStrength password={password} />}
+          </div>
+        )}
+
+        {mode === 'register' && step === 'name' && (
+          <input
+            className="z-input"
+            placeholder="Как вас называть"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            autoComplete="nickname"
+            maxLength={40}
+            autoFocus
+          />
+        )}
+
         {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
-        <button type="submit" className="z-btn-accent" disabled={submitting}>
-          {mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+
+        {magicSent && (
+          <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>
+            Если такая почта зарегистрирована, ссылка для входа уже отправлена.
+          </div>
+        )}
+
+        <button
+          type="submit"
+          className="z-btn-accent"
+          disabled={submitting || (mode === 'register' && !canAdvance)}
+        >
+          {mode === 'login' ? 'Войти' : step === 'name' ? 'Создать аккаунт' : 'Дальше'}
         </button>
+
+        {mode === 'register' && step !== 'email' && (
+          <button
+            type="button"
+            onClick={() => setStep(step === 'name' ? 'password' : 'email')}
+            className="z-btn-ghost z-pop-on-active"
+          >
+            Назад
+          </button>
+        )}
+
+        {mode === 'login' && (
+          <button
+            type="button"
+            onClick={onMagicLink}
+            disabled={submitting}
+            className="z-btn-ghost z-pop-on-active"
+          >
+            ✉️ Прислать ссылку для входа
+          </button>
+        )}
         {mode === 'login' && (
           <Link
             href="/forgot-password"
@@ -206,7 +378,14 @@ function LoginForm() {
       <button
         className="z-btn-ghost"
         style={{ marginTop: 12, width: '100%' }}
-        onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+        onClick={() => {
+          setMode(mode === 'login' ? 'register' : 'login');
+          // Switching modes restarts the wizard; leaving it on step 3 would
+          // show "Как вас называть" to someone who just asked to sign in.
+          setStep('email');
+          setError(null);
+          setMagicSent(false);
+        }}
       >
         {mode === 'login' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
       </button>

@@ -7,6 +7,22 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface AccessTokenPayload {
   sub: string;
   role: string;
+  /**
+   * Which session this token belongs to — the RefreshToken row's id.
+   *
+   * Needed because the refresh cookie is scoped to /api/auth (deliberately:
+   * it must not be sent to every endpoint), so /api/security can't see it
+   * to work out which of the listed sessions is the one asking. Optional
+   * because tokens issued before this existed are still in circulation.
+   */
+  sid?: string;
+}
+
+/** Where a session was started from, for the sessions list and new-device alerts. */
+export interface DeviceContext {
+  userAgent?: string | null;
+  ipPrefix?: string | null;
+  label?: string | null;
 }
 
 const REFRESH_TOKEN_TTL_DAYS = 30;
@@ -35,17 +51,39 @@ export class TokenService {
     });
   }
 
-  /** Issues a new refresh token, stores only its hash, returns the raw value. */
-  async issueRefreshToken(userId: string): Promise<string> {
+  /**
+   * Issues a new refresh token, stores only its hash, returns the raw value.
+   *
+   * The device context is what makes Settings → Сеансы a list of things a
+   * person recognises rather than a row of opaque ids, and it is what
+   * "выйти на всех устройствах" acts on.
+   */
+  async issueRefreshToken(userId: string, device?: DeviceContext): Promise<string> {
+    return (await this.issueRefreshSession(userId, device)).raw;
+  }
+
+  /** Same as issueRefreshToken, but also hands back the session id for the access token's `sid`. */
+  async issueRefreshSession(
+    userId: string,
+    device?: DeviceContext,
+  ): Promise<{ raw: string; sessionId: string }> {
     const raw = randomBytes(48).toString('hex');
     const tokenHash = this.hashRefreshToken(raw);
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-    await this.prisma.refreshToken.create({
-      data: { userId, tokenHash, expiresAt },
+    const row = await this.prisma.refreshToken.create({
+      data: {
+        userId,
+        tokenHash,
+        expiresAt,
+        userAgent: device?.userAgent ?? null,
+        ipPrefix: device?.ipPrefix ?? null,
+        deviceLabel: device?.label ?? null,
+        lastUsedAt: new Date(),
+      },
     });
 
-    return raw;
+    return { raw, sessionId: row.id };
   }
 
   /**
@@ -64,7 +102,9 @@ export class TokenService {
    * user: the genuine owner just needs to log in again, which is a much
    * smaller cost than leaving a stolen token's lineage alive.
    */
-  async rotateRefreshToken(raw: string): Promise<{ userId: string; newRaw: string } | null> {
+  async rotateRefreshToken(
+    raw: string,
+  ): Promise<{ userId: string; newRaw: string; sessionId: string } | null> {
     const tokenHash = this.hashRefreshToken(raw);
     const result = await this.prisma.refreshToken.updateMany({
       where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -82,8 +122,16 @@ export class TokenService {
     }
 
     const record = await this.prisma.refreshToken.findFirstOrThrow({ where: { tokenHash } });
-    const newRaw = await this.issueRefreshToken(record.userId);
-    return { userId: record.userId, newRaw };
+    // Rotation continues the same session, so the replacement inherits its
+    // identity. Without this, refreshing every 15 minutes would fill
+    // Settings → Сеансы with unlabeled rows and make "выйти на всех
+    // устройствах" meaningless.
+    const { raw: newRaw, sessionId } = await this.issueRefreshSession(record.userId, {
+      userAgent: record.userAgent,
+      ipPrefix: record.ipPrefix,
+      label: record.deviceLabel,
+    });
+    return { userId: record.userId, newRaw, sessionId };
   }
 
   async revokeRefreshToken(raw: string): Promise<void> {

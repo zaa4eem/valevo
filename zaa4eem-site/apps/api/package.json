@@ -23,6 +23,7 @@
     "@nestjs/platform-express": "10.4.15",
     "@nestjs/throttler": "6.5.0",
     "@prisma/client": "5.22.0",
+    "@simplewebauthn/server": "^14.0.1",
     "@zaa4eem/shared": "*",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.1",

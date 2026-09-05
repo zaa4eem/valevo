@@ -66,6 +66,10 @@ function hrefFor(targetType: string | null, targetId: string | null): string | n
     // it is inviting the person back to.
     case 'WINBACK':
       return '/';
+    case 'PROGRESS':
+      return '/progress';
+    case 'SECURITY':
+      return '/settings';
     default:
       return null;
   }

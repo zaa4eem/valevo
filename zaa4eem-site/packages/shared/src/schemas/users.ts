@@ -113,6 +113,8 @@ export const publicProfileSchema = z
     // *current* password before accepting a new one (Telegram/Google-only
     // accounts have none to check yet).
     hasPassword: z.boolean(),
+    /// Drives the "подтвердите почту" banner. null when the account has no email at all (Telegram/Google-only).
+    emailVerified: z.boolean().nullable(),
     createdAt: z.string(),
     followerCount: z.number().int().nonnegative(),
     followingCount: z.number().int().nonnegative(),

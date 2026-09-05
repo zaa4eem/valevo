@@ -7,14 +7,31 @@ import { getTelegramWebApp, isTelegramLaunch, waitForTelegramInitData } from './
 
 type CurrentUser = AuthResponse['user'] | null;
 
+/**
+ * A login that got past the password but still owes a second factor. The
+ * caller is expected to collect a code and hand the ticket back — nothing
+ * is signed in until then.
+ */
+export interface PendingTwoFactor {
+  twoFactorRequired: true;
+  ticket: string;
+}
+
+type LoginOutcome = PendingTwoFactor | null;
+
 interface AuthContextValue {
   user: CurrentUser;
   loading: boolean;
   isTelegram: boolean;
   telegramAuthError: string | null;
   retryTelegramAuth: () => void;
-  login: (input: LoginInput) => Promise<void>;
+  /** Resolves to a pending-2FA handle when the account has it on, otherwise null (signed in). */
+  login: (input: LoginInput) => Promise<LoginOutcome>;
   register: (input: RegisterInput) => Promise<void>;
+  /** Second step of a 2FA login: a TOTP code or one backup code. */
+  submitTwoFactor: (ticket: string, code: string) => Promise<void>;
+  /** Any endpoint that answers with a full session (passkey, magic link) lands here. */
+  adoptSession: (res: AuthResponse) => void;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
 }
@@ -242,9 +259,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const login = useCallback(
-    async (input: LoginInput) => {
-      const res = await api.post<AuthResponse>('/auth/login', input);
+    async (input: LoginInput): Promise<LoginOutcome> => {
+      const res = await api.post<AuthResponse | PendingTwoFactor>('/auth/login', input);
+      if ('twoFactorRequired' in res) return res;
       applySession(res);
+      return null;
+    },
+    [applySession],
+  );
+
+  const submitTwoFactor = useCallback(
+    async (ticket: string, code: string) => {
+      applySession(await api.post<AuthResponse>('/auth/2fa', { ticket, code }));
     },
     [applySession],
   );
@@ -265,8 +291,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, isTelegram, telegramAuthError, retryTelegramAuth, login, register, logout, refresh }),
-    [user, loading, isTelegram, telegramAuthError, retryTelegramAuth, login, register, logout, refresh],
+    () => ({
+      user,
+      loading,
+      isTelegram,
+      telegramAuthError,
+      retryTelegramAuth,
+      login,
+      register,
+      submitTwoFactor,
+      adoptSession: applySession,
+      logout,
+      refresh,
+    }),
+    [
+      user,
+      loading,
+      isTelegram,
+      telegramAuthError,
+      retryTelegramAuth,
+      login,
+      register,
+      submitTwoFactor,
+      applySession,
+      logout,
+      refresh,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

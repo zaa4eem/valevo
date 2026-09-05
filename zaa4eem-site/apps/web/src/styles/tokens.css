@@ -1197,3 +1197,135 @@ img {
     transition: none;
   }
 }
+
+/* ---- Безопасность --------------------------------------------------- */
+
+.z-strength-bars {
+  display: flex;
+  gap: 4px;
+}
+
+.z-strength-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  transition: background 0.25s ease;
+}
+
+.z-breach-warning {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--z-radius-sm);
+  border: 1px solid var(--z-danger);
+  background: color-mix(in oklab, var(--z-danger) 12%, transparent);
+  color: var(--z-danger);
+  font-size: var(--z-fs-xs);
+  line-height: 1.35;
+}
+
+/* Sessions and passkeys share one row shape — both answer "what has access". */
+.z-session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--z-radius-sm);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+  font-size: var(--z-fs-sm);
+}
+.z-session-current {
+  border-color: var(--z-accent);
+  background: var(--z-accent-soft);
+}
+
+.z-session-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--z-surface-hover);
+  font-size: 15px;
+}
+
+.z-session-revoke {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--z-border);
+  border-radius: var(--z-radius-sm);
+  padding: 5px 10px;
+  color: var(--z-danger);
+  font-size: var(--z-fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.z-session-revoke:hover {
+  background: color-mix(in oklab, var(--z-danger) 12%, transparent);
+}
+
+.z-on-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.z-backup-codes {
+  padding: 14px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-accent);
+  background: var(--z-bg-elevated);
+  margin-bottom: 14px;
+}
+
+.z-backup-code-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+}
+.z-backup-code-grid code {
+  padding: 6px 8px;
+  border-radius: var(--z-radius-sm);
+  background: var(--z-surface-hover);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--z-fs-sm);
+  letter-spacing: 0.04em;
+  text-align: center;
+  user-select: all;
+}
+
+/* Three dots, not a progress bar: the point is "this is short", and a bar
+   at 33% reads as "you are barely started". */
+.z-step-dots {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.z-step-dot {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--z-surface-hover);
+  transition: background 0.25s ease;
+}
+.z-step-dot-done {
+  background: color-mix(in oklab, var(--z-accent) 55%, var(--z-surface-hover));
+}
+.z-step-dot-active {
+  background: var(--z-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .z-strength-bar,
+  .z-step-dot {
+    transition: none;
+  }
+}

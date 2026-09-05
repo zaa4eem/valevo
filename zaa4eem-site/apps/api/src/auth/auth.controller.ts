@@ -23,7 +23,11 @@ import {
   resetPasswordSchema,
   telegramAuthSchema,
   telegramWidgetAuthSchema,
+  magicLinkRequestSchema,
+  tokenOnlySchema,
+  twoFactorSubmitSchema,
 } from '@zaa4eem/shared';
+import { WebAuthnService } from '../security/webauthn.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { BotAuthGuard } from './bot-auth.guard';
@@ -42,7 +46,29 @@ const REFRESH_COOKIE_OPTIONS = {
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly webauthn: WebAuthnService,
+  ) {}
+
+  /** What we know about where a sign-in came from, for the sessions list and new-device alerts. */
+  private context(req: Request) {
+    return { userAgent: req.headers['user-agent'] ?? null, ip: req.ip ?? null };
+  }
+
+  /**
+   * A login either completes (tokens + user) or stops at the 2FA step. The
+   * refresh cookie is only ever set in the first case — a half-finished
+   * login must not leave a usable session behind.
+   */
+  private respond(
+    result: Awaited<ReturnType<AuthService['login']>>,
+    res: Response,
+  ) {
+    if ('twoFactorRequired' in result) return result;
+    res.cookie(REFRESH_COOKIE, result.refreshToken, REFRESH_COOKIE_OPTIONS);
+    return { accessToken: result.accessToken, user: result.user };
+  }
 
   @Post('telegram')
   async telegram(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
@@ -70,20 +96,106 @@ export class AuthController {
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
-  async register(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+  async register(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const input = registerSchema.parse(body);
-    const { accessToken, refreshToken, user } = await this.auth.register(input);
+    const { accessToken, refreshToken, user } = await this.auth.register(input, this.context(req));
     res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
     return { accessToken, user };
   }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
-  async login(@Body() body: unknown, @Res({ passthrough: true }) res: Response) {
+  async login(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const input = loginSchema.parse(body);
-    const { accessToken, refreshToken, user } = await this.auth.login(input);
-    res.cookie(REFRESH_COOKIE, refreshToken, REFRESH_COOKIE_OPTIONS);
-    return { accessToken, user };
+    return this.respond(await this.auth.login(input, this.context(req)), res);
+  }
+
+  /** Second step of a 2FA login: the ticket from above, plus a code or a backup code. */
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('2fa')
+  @HttpCode(HttpStatus.OK)
+  async twoFactor(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { ticket, code } = twoFactorSubmitSchema.parse(body);
+    return this.respond(await this.auth.submitSecondFactor(ticket, code, this.context(req)), res);
+  }
+
+  // ---- Email verification ----
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  async verifyEmail(@Body() body: unknown) {
+    const { token } = tokenOnlySchema.parse(body);
+    await this.auth.verifyEmail(token);
+    return { verified: true };
+  }
+
+  @Throttle({ default: { limit: 3, ttl: 300_000 } })
+  @Post('verify-email/resend')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async resendVerification(@CurrentUser() user: RequestUser) {
+    await this.auth.resendVerification(user.id);
+    return { sent: true };
+  }
+
+  // ---- Magic link ----
+
+  /**
+   * Answers identically whether or not the address is registered, so this
+   * cannot be used to find out who has an account here.
+   */
+  @Throttle({ default: { limit: 3, ttl: 300_000 } })
+  @Post('magic-link')
+  @HttpCode(HttpStatus.OK)
+  async magicLink(@Body() body: unknown) {
+    const { email } = magicLinkRequestSchema.parse(body);
+    await this.auth.requestMagicLink(email);
+    return { sent: true };
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('magic-link/consume')
+  @HttpCode(HttpStatus.OK)
+  async consumeMagicLink(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { token } = tokenOnlySchema.parse(body);
+    return this.respond(await this.auth.consumeMagicLink(token, this.context(req)), res);
+  }
+
+  // ---- Passkey login ----
+
+  @Post('passkey/begin')
+  @HttpCode(HttpStatus.OK)
+  beginPasskeyLogin() {
+    return this.webauthn.beginAuthentication();
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('passkey/finish')
+  @HttpCode(HttpStatus.OK)
+  async finishPasskeyLogin(
+    @Body() body: unknown,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const userId = await this.webauthn.finishAuthentication(body);
+    return this.respond(await this.auth.issueSessionForUser(userId, this.context(req)), res);
   }
 
   // Temporary diagnostic logging (owner report: browser tab refresh logs

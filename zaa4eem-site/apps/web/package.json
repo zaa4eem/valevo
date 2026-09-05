@@ -10,14 +10,17 @@
     "test": "playwright test"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^14.0.0",
     "@zaa4eem/shared": "*",
     "next": "15.5.25",
+    "qrcode": "^1.5.4",
     "react": "19.0.0",
     "react-dom": "19.0.0"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
     "@types/node": "20.17.9",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "19.0.2",
     "@types/react-dom": "19.0.2",
     "eslint": "8.57.1",

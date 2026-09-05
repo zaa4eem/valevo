@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import {
   BANNER_OUTPUT_HEIGHT,
   BANNER_OUTPUT_WIDTH,
-  changePasswordSchema,
   updateProfileSchema,
   formatMemberNumber,
   type PublicProfile,
@@ -16,6 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
 import { NotificationSettings } from '@/components/NotificationSettings';
+import { SecuritySettings } from '@/components/SecuritySettings';
 // Crop editors are modals that only exist after a file is picked — keeping
 // them out of the page bundle means opening Settings doesn't pay for code
 // most visits never run. ssr:false because both are canvas/pointer-driven.
@@ -202,92 +202,6 @@ function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved:
         />
       )}
     </div>
-  );
-}
-
-function SecuritySettings({ hasPassword }: { hasPassword: boolean }) {
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSaved(false);
-
-    const parsed = changePasswordSchema.safeParse({
-      currentPassword: hasPassword ? currentPassword : undefined,
-      newPassword,
-    });
-    if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Проверьте поля формы');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await api.post('/auth/change-password', parsed.data);
-      setCurrentPassword('');
-      setNewPassword('');
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Не удалось сменить пароль');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Card hover className="z-animate-in" style={{ marginTop: 20 }}>
-      <h2 style={{ marginTop: 0, fontSize: 'var(--z-fs-lg)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        🔒 Безопасность
-      </h2>
-      <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: -8, marginBottom: 16 }}>
-        {hasPassword
-          ? 'Смена пароля завершает сеансы на всех остальных устройствах.'
-          : 'Пароль ещё не задан — можно установить его для входа по почте.'}
-      </p>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {hasPassword && (
-          <label>
-            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
-              Текущий пароль
-            </div>
-            <input
-              className="z-input"
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              autoComplete="current-password"
-            />
-          </label>
-        )}
-        <label>
-          <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
-            Новый пароль
-          </div>
-          <input
-            className="z-input"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            autoComplete="new-password"
-          />
-        </label>
-        {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
-        {saved && <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>Пароль обновлён!</div>}
-        <button
-          type="submit"
-          disabled={saving || !newPassword}
-          className="z-btn-accent z-pop-on-active"
-          style={{ alignSelf: 'flex-start', opacity: saving || !newPassword ? 0.6 : 1 }}
-        >
-          {saving ? 'Сохранение…' : hasPassword ? 'Сменить пароль' : 'Задать пароль'}
-        </button>
-      </form>
-    </Card>
   );
 }
 
@@ -543,7 +457,7 @@ export default function SettingsPage() {
 
       <NotificationSettings />
 
-      <SecuritySettings hasPassword={profile.hasPassword} />
+      <SecuritySettings />
 
       {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
 

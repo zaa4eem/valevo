@@ -7,12 +7,11 @@ import { TokenService } from './token.service';
 import { JwtStrategy } from './jwt.strategy';
 import { GoogleAuthService } from './google-auth.service';
 import { UsersModule } from '../users/users.module';
-import { EmailService } from '../common/email.service';
 
 @Module({
   imports: [PassportModule, JwtModule.register({}), UsersModule],
   controllers: [AuthController],
-  providers: [AuthService, TokenService, JwtStrategy, EmailService, GoogleAuthService],
+  providers: [AuthService, TokenService, JwtStrategy, GoogleAuthService],
   exports: [TokenService],
 })
 export class AuthModule {}

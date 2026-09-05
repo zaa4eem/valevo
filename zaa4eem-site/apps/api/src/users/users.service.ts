@@ -376,6 +376,9 @@ export class UsersService {
       hasTelegram: user.telegramId !== null,
       telegramUsername: user.telegramUsername,
       hasPassword: user.passwordHash !== null,
+      // null, not false, when there is no address to verify — a
+      // Telegram-only account should never be told to check its email.
+      emailVerified: user.email === null ? null : user.emailVerifiedAt !== null,
       createdAt: user.createdAt.toISOString(),
       followerCount,
       followingCount,

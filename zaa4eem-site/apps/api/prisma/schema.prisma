@@ -59,6 +59,14 @@ enum ScoreReviewState {
   HELD_FOR_REVIEW
 }
 
+/// Every kind of single-use link we email. One model, one table, one expiry sweep.
+enum EmailTokenType {
+  /// Proves the address belongs to whoever is holding the inbox.
+  VERIFY_EMAIL
+  /// Passwordless sign-in: the link itself is the credential.
+  MAGIC_LINK
+}
+
 enum ModerationTargetType {
   IDEA
   POST
@@ -147,6 +155,18 @@ model User {
   /// Telegram DMs, for accounts that linked Telegram. Was previously unconditional.
   notifyTelegram    Boolean   @default(true)
 
+  // --- Security ---
+  /// When the address on this account was proven to belong to whoever holds
+  /// the inbox. null = never proven. Accounts created before verification
+  /// existed are backfilled to their createdAt by the migration: they are
+  /// grandfathered, not silently downgraded.
+  emailVerifiedAt   DateTime?
+  /// Base32 TOTP secret. Only meaningful once totpEnabledAt is set — the
+  /// secret is generated at the start of enrolment and is worthless until
+  /// the user proves they can read a code from it.
+  totpSecret        String?
+  totpEnabledAt     DateTime?
+
   posts             Post[]
   ideas             Idea[]
   votes             Vote[]
@@ -169,6 +189,9 @@ model User {
   dailyQuests       DailyQuestProgress[]
   seasonScores      SeasonScore[]
   rewardClaims      RewardClaim[]
+  emailTokens       EmailToken[]
+  credentials       WebAuthnCredential[]
+  backupCodes       BackupCode[]
 
   @@index([role])
   @@index([invitedById])
@@ -227,7 +250,21 @@ model RefreshToken {
   revokedAt DateTime?
   createdAt DateTime  @default(now())
 
+  /// Device metadata, so "Сеансы" in Settings can show something a person
+  /// recognises instead of a row of opaque ids. Nullable because sessions
+  /// created before this existed have none, and because a client is free
+  /// not to send a User-Agent.
+  userAgent  String?
+  /// Truncated to a /24 (IPv4) or /48 (IPv6) before storing — enough to say
+  /// "a different network", never a precise location log.
+  ipPrefix   String?
+  /// Human-readable, derived from userAgent at issue time ("Chrome, Windows").
+  deviceLabel String?
+  lastUsedAt DateTime?
+
   @@index([userId])
+  /// Serves the sessions list's `where userId, revokedAt: null order by lastUsedAt desc`.
+  @@index([userId, revokedAt])
 }
 
 model PasswordResetToken {
@@ -564,5 +601,76 @@ model RewardClaim {
   claimedAt DateTime @default(now())
 
   @@unique([userId, code])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Security: email proof, passkeys, 2FA.
+// ---------------------------------------------------------------------------
+
+/// A single-use emailed link. Only the hash is stored, exactly like a refresh
+/// token: a leaked database must not hand out working sign-in links.
+model EmailToken {
+  id        String         @id @default(uuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      EmailTokenType
+  tokenHash String         @unique
+  /// The address it was actually sent to — a verification link must not
+  /// verify an address the user changed to something else after requesting it.
+  email     String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime       @default(now())
+
+  @@index([userId, type])
+  @@index([expiresAt])
+}
+
+/// A registered passkey. publicKey is the COSE key as raw bytes; nothing here
+/// is secret on its own — a passkey's private half never leaves the device.
+model WebAuthnCredential {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// base64url, as the browser reports it.
+  credentialId String    @unique
+  publicKey    Bytes
+  /// Replay guard: an authenticator that supports it must never present a
+  /// counter lower than the one we last saw.
+  counter      Int       @default(0)
+  transports   String?
+  /// What the user called it, or a guess from the User-Agent at registration.
+  label        String
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
+/// A WebAuthn challenge in flight. Server-side and single-use, because the
+/// whole protocol rests on the server having chosen the challenge.
+model WebAuthnChallenge {
+  id        String   @id @default(uuid())
+  /// null during a passkey *login*, where the user is not yet identified —
+  /// that is the point of a discoverable credential.
+  userId    String?
+  challenge String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+/// One-time 2FA recovery code. Hashed, so the list shown once at generation
+/// time is genuinely the only copy the user will ever get.
+model BackupCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
   @@index([userId])
 }

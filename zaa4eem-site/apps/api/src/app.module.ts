@@ -18,6 +18,7 @@ import { DigestModule } from './digest/digest.module';
 import { IdeaCreditsModule } from './idea-credits/idea-credits.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ProgressModule } from './progress/progress.module';
+import { SecurityModule } from './security/security.module';
 import { validateEnv } from './config-validate';
 
 @Module({
@@ -49,6 +50,7 @@ import { validateEnv } from './config-validate';
     IdeaCreditsModule,
     NotificationsModule,
     ProgressModule,
+    SecurityModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

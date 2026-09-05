@@ -19,6 +19,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: AccessTokenPayload) {
-    return { id: payload.sub, role: payload.role };
+    // sessionId lets /api/security mark which listed session is the one
+    // asking — the refresh cookie is scoped to /api/auth and never reaches
+    // there. Undefined for tokens minted before the claim existed.
+    return { id: payload.sub, role: payload.role, sessionId: payload.sid };
   }
 }
