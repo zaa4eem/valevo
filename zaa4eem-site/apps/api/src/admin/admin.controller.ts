@@ -1,5 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { moderationActionSchema, setPremiumSchema } from '@zaa4eem/shared';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  adminUsersQuerySchema,
+  moderationActionSchema,
+  setPremiumSchema,
+} from '@zaa4eem/shared';
 import { AdminService } from './admin.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OwnerGuard } from '../auth/owner.guard';
@@ -26,8 +30,8 @@ export class AdminController {
   }
 
   @Get('users')
-  listUsers() {
-    return this.admin.listUsers();
+  listUsers(@Query() query: unknown) {
+    return this.admin.listUsers(adminUsersQuerySchema.parse(query));
   }
 
   @Post('users/:id/mute')

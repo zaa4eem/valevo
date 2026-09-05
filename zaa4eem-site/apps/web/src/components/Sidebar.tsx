@@ -1,53 +1,49 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TransitionLink } from './TransitionLink';
 
 const items = [
-  { href: '/admin', label: 'Обзор' },
-  { href: '/admin/users', label: 'Пользователи' },
-  { href: '/admin/ideas', label: 'Идеи' },
-  { href: '/admin/moderation', label: 'Модерация' },
-  { href: '/admin/posts', label: 'Лента' },
-  { href: '/admin/idea-credits', label: 'Авторы идей' },
+  { href: '/admin', label: 'Обзор', icon: '📊' },
+  { href: '/admin/users', label: 'Пользователи', icon: '👥' },
+  { href: '/admin/ideas', label: 'Идеи', icon: '💡' },
+  { href: '/admin/moderation', label: 'Модерация', icon: '🛡️' },
+  { href: '/admin/posts', label: 'Лента', icon: '📝' },
+  { href: '/admin/idea-credits', label: 'Авторы идей', icon: '🏅' },
 ];
 
+/**
+ * Admin section navigation.
+ *
+ * The same list renders two ways, chosen entirely in CSS (see .z-admin-nav):
+ * a left rail on a wide screen, and a horizontal scrolling strip of chips on
+ * a phone. The rail was a fixed 220px, which on a 390px screen left about
+ * 150px for the actual content — the section list was bigger than the
+ * section. Above the fold and one thumb-swipe wide is the right shape for
+ * navigation you use once per visit.
+ */
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside
-      style={{
-        width: 220,
-        flexShrink: 0,
-        borderRight: '1px solid var(--z-border)',
-        padding: '24px 12px',
-      }}
-    >
-      <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)', padding: '0 12px 12px' }}>
-        ADMIN
-      </div>
-      <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <nav className="z-admin-nav" aria-label="Разделы админки">
+      <span className="z-admin-nav-title">ADMIN</span>
+      <div className="z-admin-nav-items">
         {items.map((item) => {
           const active = pathname === item.href;
           return (
-            <Link
+            <TransitionLink
               key={item.href}
               href={item.href}
-              style={{
-                padding: '10px 12px',
-                borderRadius: 'var(--z-radius-sm)',
-                fontSize: 'var(--z-fs-sm)',
-                background: active ? 'var(--z-accent-soft)' : 'transparent',
-                color: active ? 'var(--z-accent)' : 'var(--z-text-muted)',
-                fontWeight: active ? 700 : 500,
-              }}
+              aria-current={active ? 'page' : undefined}
+              className={`z-admin-nav-item${active ? ' z-admin-nav-item-active' : ''}`}
             >
-              {item.label}
-            </Link>
+              <span aria-hidden>{item.icon}</span>
+              <span>{item.label}</span>
+            </TransitionLink>
           );
         })}
-      </nav>
-    </aside>
+      </div>
+    </nav>
   );
 }

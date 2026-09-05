@@ -166,8 +166,8 @@ export default function AdminIdeaCreditsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {credits.map((credit) => (
-            <Card key={credit.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+            <Card key={credit.id} className="z-admin-row">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: '1 1 200px' }}>
                 <PremiumAvatar
                   name={credit.user.displayName}
                   avatarUrl={credit.user.avatarUrl}
@@ -178,7 +178,10 @@ export default function AdminIdeaCreditsPage() {
                   <b>
                     <PremiumName name={credit.user.displayName} premium={credit.user} />
                   </b>
-                  <span style={{ color: 'var(--z-text-muted)' }}> — {credit.description}</span>
+                  <span style={{ color: 'var(--z-text-muted)', overflowWrap: 'anywhere' }}>
+                    {' '}
+                    — {credit.description}
+                  </span>
                 </div>
               </div>
               <button className="z-btn-ghost z-pop-on-active" onClick={() => remove(credit.id)}>

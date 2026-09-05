@@ -83,6 +83,67 @@ const canRun = Boolean(process.env.DATABASE_URL);
     expect(todayCount).toBeGreaterThanOrEqual(1);
   });
 
+  it('paginates and searches the user list instead of returning everyone', async () => {
+    const ownerEmail = `listowner-${Date.now()}@test.dev`;
+    await request(app.getHttpServer())
+      .post('/api/auth/register')
+      .send({ email: ownerEmail, password: 'password123', displayName: 'List Owner' });
+    await prisma.user.update({ where: { email: ownerEmail }, data: { role: 'OWNER' } });
+    const login = await request(app.getHttpServer())
+      .post('/api/auth/login')
+      .send({ email: ownerEmail, password: 'password123' });
+    const token = login.body.accessToken as string;
+    const auth = { Authorization: `Bearer ${token}` };
+
+    // A distinctive cohort to search for.
+    const tag = `Ктотоособенный${Date.now()}`;
+    for (let i = 0; i < 3; i += 1) {
+      await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          email: `listed-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}@test.dev`,
+          password: 'password123',
+          displayName: `${tag} ${i}`,
+        });
+    }
+
+    const firstPage = await request(app.getHttpServer())
+      .get('/api/admin/users?limit=2')
+      .set(auth)
+      .expect(200);
+
+    // The shape changed from a bare array: an unbounded list was unusable on
+    // a phone once the platform had more than a few hundred accounts.
+    expect(Array.isArray(firstPage.body)).toBe(false);
+    expect(firstPage.body.items).toHaveLength(2);
+    expect(firstPage.body.total).toBeGreaterThanOrEqual(4);
+    expect(firstPage.body.nextCursor).toBeTruthy();
+
+    const secondPage = await request(app.getHttpServer())
+      .get(`/api/admin/users?limit=2&cursor=${firstPage.body.nextCursor}`)
+      .set(auth)
+      .expect(200);
+    const firstIds = firstPage.body.items.map((u: any) => u.id);
+    const secondIds = secondPage.body.items.map((u: any) => u.id);
+    // The cursor must not hand back a row the previous page already showed.
+    expect(secondIds.some((id: string) => firstIds.includes(id))).toBe(false);
+
+    const searched = await request(app.getHttpServer())
+      .get(`/api/admin/users?q=${encodeURIComponent(tag)}`)
+      .set(auth)
+      .expect(200);
+    expect(searched.body.total).toBe(3);
+    expect(searched.body.items.every((u: any) => u.displayName.includes(tag))).toBe(true);
+
+    // Search covers email too, not just the display name.
+    const byEmail = await request(app.getHttpServer())
+      .get(`/api/admin/users?q=${encodeURIComponent(ownerEmail)}`)
+      .set(auth)
+      .expect(200);
+    expect(byEmail.body.total).toBe(1);
+    expect(byEmail.body.items[0].email).toBe(ownerEmail);
+  });
+
   it('grants and revokes Premium, owner-only', async () => {
     const ownerEmail = `premowner-${Date.now()}@test.dev`;
     await request(app.getHttpServer())

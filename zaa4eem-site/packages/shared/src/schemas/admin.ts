@@ -67,6 +67,28 @@ export const adminUserListItemSchema = z
   .merge(premiumFieldsSchema);
 export type AdminUserListItem = z.infer<typeof adminUserListItemSchema>;
 
+/**
+ * The user list is paginated and searchable rather than "everyone, always".
+ * The unbounded version worked while the platform had a handful of accounts
+ * and became unusable on a phone at a few thousand — which is exactly when
+ * an owner most needs to look someone up.
+ */
+export const adminUsersQuerySchema = z.object({
+  /** Matches display name, email or Telegram username, case-insensitively. */
+  q: z.string().trim().max(100).optional(),
+  cursor: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+});
+export type AdminUsersQuery = z.infer<typeof adminUsersQuerySchema>;
+
+export const paginatedAdminUsersSchema = z.object({
+  items: z.array(adminUserListItemSchema),
+  nextCursor: z.string().uuid().nullable(),
+  /** Total matching the current search, so the heading can say "5535" without loading 5535 rows. */
+  total: z.number().int().nonnegative(),
+});
+export type PaginatedAdminUsers = z.infer<typeof paginatedAdminUsersSchema>;
+
 export const premiumDurationMonthsValues = [1, 3, 6, 9, 12] as const;
 
 /** Owner-only Premium grant/config — never self-service, hence no "self" variant of this schema. */

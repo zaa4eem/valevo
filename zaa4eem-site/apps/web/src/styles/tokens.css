@@ -1563,3 +1563,253 @@ img {
     transition: none;
   }
 }
+
+/* ---- Админка: адаптив под телефон ----------------------------------- */
+
+/* Direction flips at the breakpoint: a left rail where there is width for
+   one, a stacked column where there is not. The rail used to be a hard
+   220px, which on a 390px screen left ~150px for the content — the list of
+   sections was wider than the section. */
+.z-admin-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.z-admin-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.z-admin-nav-title {
+  display: none;
+}
+
+/* Phone: a horizontal strip of chips, one thumb-swipe wide. */
+.z-admin-nav-items {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.z-admin-nav-items::-webkit-scrollbar {
+  display: none;
+}
+
+.z-admin-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  color: var(--z-text-muted);
+  font-size: var(--z-fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.z-admin-nav-item:hover {
+  background: var(--z-surface-hover);
+  color: var(--z-text);
+}
+.z-admin-nav-item-active {
+  background: var(--z-accent-soft);
+  border-color: var(--z-accent);
+  color: var(--z-accent);
+}
+
+@media (min-width: 721px) {
+  .z-admin-layout {
+    flex-direction: row;
+    gap: 24px;
+  }
+
+  .z-admin-nav {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--z-border);
+    padding: 24px 12px;
+  }
+
+  .z-admin-nav-title {
+    display: block;
+    font-size: var(--z-fs-xs);
+    color: var(--z-text-faint);
+    padding: 0 12px 12px;
+  }
+
+  .z-admin-nav-items {
+    flex-direction: column;
+    gap: 4px;
+    overflow: visible;
+  }
+
+  .z-admin-nav-item {
+    border-radius: var(--z-radius-sm);
+    border-color: transparent;
+    background: transparent;
+    padding: 10px 12px;
+    font-weight: 500;
+  }
+  .z-admin-nav-item-active {
+    background: var(--z-accent-soft);
+    border-color: transparent;
+    font-weight: 700;
+  }
+}
+
+/* Table on a wide screen, cards on a narrow one — never both, never a
+   table inside a horizontal scroller on a phone. */
+.z-admin-table-wrap {
+  display: none;
+}
+
+.z-admin-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .z-admin-table-wrap {
+    display: block;
+    overflow-x: auto;
+  }
+  .z-admin-cards {
+    display: none;
+  }
+}
+
+.z-admin-table {
+  width: 100%;
+  /* Eight columns need real room. Below this the browser starts stealing
+     width from the actions column until the buttons stack one per line and
+     the last one is clipped — the wrapper scrolls instead, which on a wide
+     screen is a normal affordance rather than the phone's broken layout. */
+  min-width: 980px;
+  /* separate, not collapse: Chrome ignores position:sticky on cells inside a
+     border-collapse table, which silently hid the pinned actions column.
+     Row separators move to the cells themselves below. */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--z-fs-sm);
+}
+
+/* Controls stay on one line; the row's height should be set by the content,
+   not by buttons wrapping into a column.
+   
+   The column is also pinned to the right edge: eight columns of real data
+   don't fit a laptop beside the rail, and an actions column that scrolls out
+   of sight means the buttons you came here to press are the ones you can't
+   see. Everything else scrolls under it. */
+.z-admin-table th:last-child,
+.z-admin-table td:last-child {
+  position: sticky;
+  right: 0;
+  white-space: nowrap;
+  background: var(--z-bg);
+  /* A hairline so the pinned column reads as sitting above the scroll, not
+     as part of the row it happens to be next to. */
+  box-shadow: inset 1px 0 0 var(--z-border);
+}
+.z-admin-table td:last-child > div {
+  flex-wrap: nowrap;
+}
+
+/* The owner badge broke onto two lines and doubled every row's height. */
+.z-admin-table .z-badge-owner {
+  white-space: nowrap;
+}
+.z-admin-table thead tr {
+  text-align: left;
+  color: var(--z-text-faint);
+  font-size: var(--z-fs-xs);
+}
+.z-admin-table th {
+  padding: 8px 10px;
+  font-weight: 600;
+}
+.z-admin-table td {
+  padding: 10px;
+  vertical-align: top;
+  border-top: 1px solid var(--z-border);
+}
+
+.z-admin-card {
+  padding: 14px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+}
+
+.z-admin-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+/* Two columns of label/value, with the long ones spanning both. A definition
+   list because that is what this is: fields and their values. */
+.z-admin-card-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin: 0 0 14px;
+}
+.z-admin-card-facts > div {
+  min-width: 0;
+}
+.z-admin-card-fact-wide {
+  grid-column: 1 / -1;
+}
+.z-admin-card-facts dt {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-faint);
+  margin-bottom: 2px;
+}
+.z-admin-card-facts dd {
+  margin: 0;
+  font-size: var(--z-fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Admin pages are content, not chrome: nothing in them may push the page
+   sideways. Applies to the wide tables and long ids alike. */
+.z-admin-content table:not(.z-admin-table),
+.z-admin-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  display: block;
+}
+
+/* A header row that becomes a stack when there isn't width for both halves.
+   Every admin list used a non-wrapping space-between row, which is what
+   pushed these pages past the viewport on a phone. */
+.z-admin-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.z-admin-row-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 100%;
+}
+
+@media (min-width: 640px) {
+  .z-admin-row-controls {
+    flex: 0 0 180px;
+  }
+}

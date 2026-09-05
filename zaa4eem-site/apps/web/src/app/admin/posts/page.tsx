@@ -97,8 +97,12 @@ export default function AdminPostsPage() {
         {loading && <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>}
         {posts.map((post) => (
           <Card key={post.id}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-              <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{post.body}</p>
+            <div className="z-admin-row">
+              {/* overflow-wrap, not just pre-wrap: a pasted URL with no spaces
+                  is a single word wider than the phone. */}
+              <p style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', flex: '1 1 200px', minWidth: 0 }}>
+                {post.body}
+              </p>
               <button className="z-btn-danger" onClick={() => remove(post.id)}>
                 Удалить
               </button>

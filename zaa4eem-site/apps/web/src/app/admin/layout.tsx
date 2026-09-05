@@ -16,10 +16,12 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     );
   }
 
+  // Direction flips in CSS at the breakpoint: a row with a left rail on a
+  // wide screen, a column with the nav strip on top on a phone.
   return (
-    <div style={{ display: 'flex', gap: 24 }}>
+    <div className="z-admin-layout">
       <Sidebar />
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      <div className="z-admin-content">{children}</div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { IdeaStatus, ModerationState, SetPremiumInput } from '@zaa4eem/shared';
+import { Prisma } from '@prisma/client';
+import { AdminUsersQuery, IdeaStatus, ModerationState, SetPremiumInput } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenService } from '../auth/token.service';
 import { addMonths } from '../common/premium.util';
@@ -72,12 +73,40 @@ export class AdminService {
     }));
   }
 
-  async listUsers() {
-    const users = await this.prisma.user.findMany({
-      include: { _count: { select: { followers: true } } },
-      orderBy: { memberNumber: 'asc' },
-    });
-    return users.map((u) => ({
+  /**
+   * Paginated and searchable. It used to return every row unconditionally,
+   * which is fine at a hundred accounts and unusable on a phone at a few
+   * thousand — the point at which an owner actually needs to find someone.
+   */
+  async listUsers(query: AdminUsersQuery) {
+    const where: Prisma.UserWhereInput = query.q
+      ? {
+          OR: [
+            { displayName: { contains: query.q, mode: 'insensitive' } },
+            { email: { contains: query.q, mode: 'insensitive' } },
+            { telegramUsername: { contains: query.q, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        include: { _count: { select: { followers: true } } },
+        orderBy: { memberNumber: 'asc' },
+        take: query.limit + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    const hasMore = rows.length > query.limit;
+    const users = hasMore ? rows.slice(0, query.limit) : rows;
+
+    return {
+      total,
+      nextCursor: hasMore ? users[users.length - 1].id : null,
+      items: users.map((u) => ({
       id: u.id,
       memberNumber: u.memberNumber,
       displayName: u.displayName,
@@ -95,7 +124,8 @@ export class AdminService {
       nameFont: u.nameFont,
       badgeEmoji: u.badgeEmoji,
       premiumUntil: u.premiumUntil?.toISOString() ?? null,
-    }));
+      })),
+    };
   }
 
   async stats() {

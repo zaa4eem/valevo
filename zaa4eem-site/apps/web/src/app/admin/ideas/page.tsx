@@ -75,8 +75,8 @@ export default function AdminIdeasPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {ideas.map((idea) => (
           <Card key={idea.id}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-              <div style={{ flex: 1 }}>
+            <div className="z-admin-row">
+              <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                 <div style={{ fontWeight: 700 }}>{idea.title}</div>
                 <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>{idea.description}</p>
                 <div style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
@@ -84,7 +84,10 @@ export default function AdminIdeasPage() {
                   {idea.moderationState === 'PENDING_REVIEW' ? 'ждёт модерации' : idea.moderationState}
                 </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 180 }}>
+              {/* A fixed 180px controls column in a non-wrapping row is what
+                  pushed this page past the viewport on a phone; it now wraps
+                  under the text and takes the full width there instead. */}
+              <div className="z-admin-row-controls">
                 <select
                   className="z-input"
                   value={idea.status}
