@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  BANNER_OUTPUT_HEIGHT,
+  BANNER_OUTPUT_WIDTH,
   changePasswordSchema,
   updateProfileSchema,
   formatMemberNumber,
@@ -13,6 +15,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
 import { AvatarCropper } from '@/components/AvatarCropper';
+import { BannerCropper } from '@/components/BannerCropper';
 
 function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; onLinked: (p: PublicProfile) => void }) {
   const [code, setCode] = useState<string | null>(null);
@@ -108,24 +111,50 @@ function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; o
 function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved: (p: PublicProfile) => void }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickedFile, setPickedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function upload(blob: Blob, filename: string, gifCrop?: { x: number; y: number; width: number; height: number }) {
     setError(null);
     setUploading(true);
     try {
       const form = new FormData();
-      form.append('banner', file);
+      form.append('banner', blob, filename);
+      if (gifCrop) {
+        // See AvatarCropper's onCroppedGif — the untouched GIF rides along
+        // with its crop rectangle so the backend can re-crop every frame
+        // with gifsicle instead of losing the animation to a canvas draw.
+        form.append('cropX', String(gifCrop.x));
+        form.append('cropY', String(gifCrop.y));
+        form.append('cropWidth', String(gifCrop.width));
+        form.append('cropHeight', String(gifCrop.height));
+      }
       const updated = await api.upload<PublicProfile>('/users/me/banner', form);
       onSaved(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось загрузить баннер');
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  }
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      setError(null);
+      setPickedFile(file);
+    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }
+
+  async function onCropped(blob: Blob) {
+    setPickedFile(null);
+    await upload(blob, 'banner.jpg');
+  }
+
+  async function onCroppedGif(file: File, crop: { x: number; y: number; width: number; height: number }) {
+    setPickedFile(null);
+    await upload(file, file.name, crop);
   }
 
   return (
@@ -135,7 +164,7 @@ function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved:
       </div>
       <div
         style={{
-          height: 72,
+          aspectRatio: `${BANNER_OUTPUT_WIDTH} / ${BANNER_OUTPUT_HEIGHT}`,
           borderRadius: 'var(--z-radius-md)',
           background: profile.bannerUrl ? `center/cover url(${profile.bannerUrl})` : 'var(--z-bg-elevated)',
           border: '1px solid var(--z-border)',
@@ -145,8 +174,8 @@ function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved:
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
-        onChange={onChange}
+        accept="image/jpeg,image/png,image/webp,image/gif"
+        onChange={onPick}
         disabled={uploading}
         style={{ display: 'none' }}
         id="banner-input"
@@ -155,6 +184,14 @@ function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved:
         {uploading ? 'Загрузка…' : 'Изменить баннер'}
       </label>
       {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 8 }}>{error}</div>}
+      {pickedFile && (
+        <BannerCropper
+          file={pickedFile}
+          onCancel={() => setPickedFile(null)}
+          onCropped={onCropped}
+          onCroppedGif={onCroppedGif}
+        />
+      )}
     </div>
   );
 }

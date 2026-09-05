@@ -187,6 +187,10 @@ export default function PublicProfilePage() {
         <div
           style={{
             height: 96,
+            // center/cover re-crops whatever ratio the banner was saved at
+            // to fit this fixed strip — same treatment every image already
+            // got here before cropping existed, just now starting from a
+            // deliberately-chosen crop instead of the raw upload.
             background: profile.bannerUrl
               ? `center/cover url(${profile.bannerUrl})`
               : isOwner

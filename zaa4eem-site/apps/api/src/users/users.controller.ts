@@ -22,7 +22,11 @@ import * as fs from 'fs';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
 import {
+  AVATAR_OUTPUT_SIZE,
   avatarGifCropSchema,
+  BANNER_OUTPUT_HEIGHT,
+  BANNER_OUTPUT_WIDTH,
+  bannerGifCropSchema,
   updatePremiumStyleSchema,
   updateProfileSchema,
   userListQuerySchema,
@@ -101,7 +105,11 @@ export class UsersController {
       // file, and gifsicle re-crops every frame of the GIF itself.
       const crop = avatarGifCropSchema.safeParse(body);
       if (crop.success) {
-        await cropGifInPlace(file.path, { x: crop.data.cropX, y: crop.data.cropY, size: crop.data.cropSize });
+        await cropGifInPlace(
+          file.path,
+          { x: crop.data.cropX, y: crop.data.cropY, width: crop.data.cropSize, height: crop.data.cropSize },
+          { width: AVATAR_OUTPUT_SIZE, height: AVATAR_OUTPUT_SIZE },
+        );
       }
     }
     const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
@@ -118,7 +126,11 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   @Post('me/banner')
   @UseInterceptors(FileInterceptor('banner', bannerUploadOptions))
-  async uploadBanner(@CurrentUser() user: RequestUser, @UploadedFile() file?: Express.Multer.File) {
+  async uploadBanner(
+    @CurrentUser() user: RequestUser,
+    @UploadedFile() file?: Express.Multer.File,
+    @Body() body?: unknown,
+  ) {
     if (!file) throw new BadRequestException('Файл не загружен');
     const profile = await this.users.getPublicProfile(user.id);
     if (!profile?.isPremium) {
@@ -128,6 +140,19 @@ export class UsersController {
     if (!(await matchesImageSignature(file.path, file.mimetype))) {
       await fs.promises.rm(file.path, { force: true });
       throw new BadRequestException('Файл повреждён или не является изображением заявленного типа');
+    }
+    if (file.mimetype === 'image/gif') {
+      // Same rationale as the avatar's GIF path above — a <canvas> draw
+      // only captures one frame, so the cropper sends the crop rectangle
+      // instead and gifsicle re-crops every frame of the untouched file.
+      const crop = bannerGifCropSchema.safeParse(body);
+      if (crop.success) {
+        await cropGifInPlace(
+          file.path,
+          { x: crop.data.cropX, y: crop.data.cropY, width: crop.data.cropWidth, height: crop.data.cropHeight },
+          { width: BANNER_OUTPUT_WIDTH, height: BANNER_OUTPUT_HEIGHT },
+        );
+      }
     }
     const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
     const bannerUrl = `${origin}/uploads/banners/${file.filename}`;

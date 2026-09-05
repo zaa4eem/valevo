@@ -74,6 +74,28 @@ export const avatarGifCropSchema = z.object({
 });
 export type AvatarGifCropInput = z.infer<typeof avatarGifCropSchema>;
 
+/** Baked-into-the-file output size for a cropped avatar (canvas draw for static formats, gifsicle --resize for GIF) — shared so both crop paths agree. */
+export const AVATAR_OUTPUT_SIZE = 512;
+
+/**
+ * The profile banner is a wide strip, not a square — width:height stays
+ * fixed at this ratio everywhere it renders (profile header, Settings
+ * preview, the crop editor's viewport) so what the cropper shows is
+ * exactly what ends up on the page, never a further auto-crop at display
+ * time.
+ */
+export const BANNER_OUTPUT_WIDTH = 1200;
+export const BANNER_OUTPUT_HEIGHT = 400;
+
+/** Same shape as avatarGifCropSchema, but a rectangle (cropWidth/cropHeight) instead of a square (cropSize) — the banner's crop region isn't 1:1. */
+export const bannerGifCropSchema = z.object({
+  cropX: z.coerce.number().min(0),
+  cropY: z.coerce.number().min(0),
+  cropWidth: z.coerce.number().positive(),
+  cropHeight: z.coerce.number().positive(),
+});
+export type BannerGifCropInput = z.infer<typeof bannerGifCropSchema>;
+
 export const publicProfileSchema = z
   .object({
     id: z.string().uuid(),

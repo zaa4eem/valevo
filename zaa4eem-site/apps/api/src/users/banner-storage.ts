@@ -10,16 +10,16 @@ import type { Request } from 'express';
 export const BANNERS_DIR = path.join(process.cwd(), 'uploads', 'banners');
 fs.mkdirSync(BANNERS_DIR, { recursive: true });
 
-// No GIF here (unlike avatars) — a wide profile banner has no equivalent
-// crop-editor need for preserving animation, so keeping this to static
-// formats avoids adding a second gifsicle code path for little benefit.
 const EXT_BY_MIME: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/png': '.png',
   'image/webp': '.webp',
+  'image/gif': '.gif',
 };
 
-export const BANNER_MAX_BYTES = 5 * 1024 * 1024;
+// A bit more headroom than avatars (AVATAR_MAX_BYTES) — a wide animated
+// banner's frames add up faster than a small square avatar's.
+export const BANNER_MAX_BYTES = 8 * 1024 * 1024;
 
 export const bannerUploadOptions = {
   storage: diskStorage({
@@ -33,7 +33,7 @@ export const bannerUploadOptions = {
   limits: { fileSize: BANNER_MAX_BYTES },
   fileFilter: (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (!EXT_BY_MIME[file.mimetype]) {
-      cb(new BadRequestException('Неподдерживаемый тип изображения — используйте JPEG, PNG или WEBP'));
+      cb(new BadRequestException('Неподдерживаемый тип изображения — используйте JPEG, PNG, WEBP или GIF'));
       return;
     }
     cb(null, true);
