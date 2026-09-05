@@ -4,6 +4,8 @@ import '../styles/tokens.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { NotificationsProvider } from '@/lib/notifications-context';
 import { ProgressProvider } from '@/lib/progress-context';
+import { ToastProvider } from '@/lib/toast-context';
+import { NeonBackdrop } from '@/components/NeonBackdrop';
 import { AppChrome } from '@/components/AppChrome';
 import { premiumFontClassNames } from '@/lib/premium-fonts';
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar';
@@ -65,10 +67,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             the URL fragment (which is there before any script runs) and
             waits for this file only in that case. */}
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
+        <NeonBackdrop />
         <AuthProvider>
           <NotificationsProvider>
             <ProgressProvider>
-              <AppChrome>{children}</AppChrome>
+              {/* Outermost of the app providers so anything below can raise a
+                  toast or ask a question, including the auth screens. */}
+              <ToastProvider>
+                <AppChrome>{children}</AppChrome>
+              </ToastProvider>
             </ProgressProvider>
           </NotificationsProvider>
         </AuthProvider>

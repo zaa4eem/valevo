@@ -1329,3 +1329,237 @@ img {
     transition: none;
   }
 }
+
+/* ---- Визуальный слой: фон, тосты, анимации ------------------------- */
+
+/* Two slow blurred blobs behind everything. Fixed and pointer-events:none,
+   so it is one compositor layer that never intercepts a click and does no
+   work at all while the tab is hidden. */
+.z-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.z-backdrop-blob {
+  position: absolute;
+  display: block;
+  width: 55vmax;
+  height: 55vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.14;
+  will-change: transform;
+}
+
+.z-backdrop-blob-a {
+  top: -18vmax;
+  left: -12vmax;
+  background: radial-gradient(circle, var(--z-accent) 0%, transparent 68%);
+  animation: z-drift-a 34s ease-in-out infinite alternate;
+}
+
+.z-backdrop-blob-b {
+  bottom: -20vmax;
+  right: -14vmax;
+  background: radial-gradient(circle, var(--z-info) 0%, transparent 68%);
+  animation: z-drift-b 42s ease-in-out infinite alternate;
+}
+
+@keyframes z-drift-a {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(12vmax, 8vmax, 0) scale(1.15);
+  }
+}
+
+@keyframes z-drift-b {
+  from {
+    transform: translate3d(0, 0, 0) scale(1.1);
+  }
+  to {
+    transform: translate3d(-10vmax, -9vmax, 0) scale(1);
+  }
+}
+
+/* The light theme's ground is bright, so the same opacity reads as dirt
+   rather than glow — dial it back rather than changing the hue. */
+:root[data-theme='light'] .z-backdrop-blob {
+  opacity: 0.1;
+}
+
+.z-confetti {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 60;
+}
+
+/* Toasts sit above the bottom nav on mobile, bottom-right on desktop. */
+.z-toast-stack {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: none;
+}
+
+@media (min-width: 721px) {
+  .z-toast-stack {
+    left: auto;
+    right: 20px;
+    bottom: 20px;
+    align-items: flex-end;
+  }
+}
+
+.z-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, 100%);
+  padding: 11px 16px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  box-shadow: var(--z-shadow-card);
+  font-size: var(--z-fs-sm);
+  color: var(--z-text);
+  animation: z-toast-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.z-toast > span:first-child {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--z-accent-text-on);
+  background: var(--z-accent);
+}
+.z-toast-error > span:first-child {
+  background: var(--z-danger);
+  color: #fff;
+}
+.z-toast-info > span:first-child {
+  background: var(--z-info);
+  color: #fff;
+}
+
+.z-toast-success {
+  border-color: color-mix(in oklab, var(--z-accent) 55%, var(--z-border));
+}
+.z-toast-error {
+  border-color: color-mix(in oklab, var(--z-danger) 55%, var(--z-border));
+}
+
+@keyframes z-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Confirm dialog — replaces window.confirm, which blocks the page, ignores
+   the theme, and on iOS prefixes the question with the hostname. */
+.z-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(3px);
+  animation: z-fade-in 0.18s ease;
+}
+
+.z-modal {
+  width: min(400px, 100%);
+  padding: 22px;
+  border-radius: var(--z-radius-lg);
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  box-shadow: var(--z-shadow-card);
+  animation: z-modal-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes z-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* The springy counter's bump — the number itself is interpolated in JS;
+   this is the little scale kick that makes an increase feel like a reward. */
+@keyframes z-number-bump {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.z-number-bump {
+  display: inline-block;
+  animation: z-number-bump 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  color: var(--z-accent);
+}
+
+.z-tilt {
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* View Transitions: the shell stays put while the content cross-fades, so
+   navigation reads as the page changing rather than the whole app blinking. */
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.26s;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* Named so the browser morphs them between routes instead of tearing them
+   down: the navbar and the tab bar are the same objects on every page. */
+.z-bottom-nav {
+  view-transition-name: z-bottom-nav;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .z-backdrop-blob {
+    animation: none;
+  }
+  .z-tilt {
+    transition: none;
+  }
+}

@@ -7,6 +7,8 @@ import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { Leaderboard } from '@/components/Leaderboard';
+import { Confetti } from '@/components/Confetti';
+import { useToast } from '@/lib/toast-context';
 import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
 import { ZClicker } from '@/components/games/z-clicker/ZClicker';
@@ -23,6 +25,8 @@ export default function GameDetailPage() {
   const [game, setGame] = useState<Game | null>(null);
   const [error, setError] = useState(false);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [celebrating, setCelebrating] = useState(false);
+  const { toast } = useToast();
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [lastScore, setLastScore] = useState<number | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -63,12 +67,22 @@ export default function GameDetailPage() {
       setSavedMessage('Войдите, чтобы сохранить результат в таблицу лидеров.');
       return;
     }
+    // What "a record" means here is personal: beating your own best is the
+    // thing worth celebrating, and it happens often enough to matter. Read
+    // before the save, because the save is what changes it.
+    const previousBest = leaderboard.find((entry) => entry.userId === user.id)?.value ?? 0;
+
     try {
       await api.post(`/games/${params.slug}/scores`, { value: score });
       setSavedMessage(`Результат ${score} сохранён!`);
+      if (score > previousBest) {
+        setCelebrating(true);
+        toast(previousBest > 0 ? `Личный рекорд! ${score}` : `Первый результат: ${score}`, 'success');
+      }
       loadLeaderboard();
     } catch {
       setSavedMessage('Не удалось сохранить результат — попробуйте ещё раз.');
+      toast('Не удалось сохранить результат', 'error');
     }
   }
 
@@ -99,6 +113,7 @@ export default function GameDetailPage() {
 
   return (
     <div className="z-game-layout">
+      <Confetti fire={celebrating} onDone={() => setCelebrating(false)} />
       <div>
         <Card
           className="z-animate-in"

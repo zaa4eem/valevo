@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { TransitionLink } from './TransitionLink';
 import { usePathname } from 'next/navigation';
 
 const tabs = [
@@ -22,7 +22,7 @@ export function BottomNav() {
       {tabs.map((tab) => {
         const active = tab.href === '/' ? pathname === '/' : pathname.startsWith(tab.href);
         return (
-          <Link
+          <TransitionLink
             key={tab.href}
             href={tab.href}
             className="z-bottom-nav-item z-pop-on-active"
@@ -30,7 +30,7 @@ export function BottomNav() {
           >
             <span style={{ fontSize: 20 }}>{tab.icon}</span>
             <span style={{ fontSize: 'var(--z-fs-xs)', fontWeight: active ? 700 : 500 }}>{tab.label}</span>
-          </Link>
+          </TransitionLink>
         );
       })}
     </nav>

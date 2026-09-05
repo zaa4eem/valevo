@@ -8,6 +8,8 @@ import { useAuth } from '@/lib/auth-context';
 import { PremiumAvatar } from './PremiumAvatar';
 import { PremiumName } from './PremiumName';
 import { NotificationBell } from './NotificationBell';
+import { SpringNumber } from './SpringNumber';
+import { TransitionLink } from './TransitionLink';
 import { LevelStreakBadge } from './LevelStreakBadge';
 
 // The clicker is one of the games listed under /games, not a top-level tab —
@@ -54,7 +56,7 @@ function ZCoinsBadge({ zCoins }: { zCoins: number | null }) {
   if (zCoins === null) return null;
   return (
     <Link href="/games/z-clicker" className="z-navbar-zcoins z-pop-on-active" title="Z-Кликер">
-      🪙 {zCoins}
+      🪙 <SpringNumber value={zCoins} />
     </Link>
   );
 }
@@ -160,13 +162,13 @@ export function Navbar() {
         {/* Section tabs — desktop only. Mobile gets the same set as BottomNav's fixed tab bar instead. */}
         <nav className="z-navbar-links z-navbar-desktop-only" style={{ minWidth: 0 }}>
           {links.map((link) => (
-            <Link
+            <TransitionLink
               key={link.href}
               href={link.href}
               style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}
             >
               {link.label}
-            </Link>
+            </TransitionLink>
           ))}
         </nav>
 

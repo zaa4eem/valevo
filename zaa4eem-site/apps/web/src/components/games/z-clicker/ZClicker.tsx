@@ -1,4 +1,5 @@
 'use client';
+import { SpringNumber } from '@/components/SpringNumber';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ClickerState } from '@zaa4eem/shared';
@@ -89,7 +90,7 @@ export function ZClicker() {
           Z-Коины
         </div>
         <div style={{ fontSize: 'var(--z-fs-3xl)', fontWeight: 900, color: 'var(--z-accent)', fontVariantNumeric: 'tabular-nums' }}>
-          {state.zCoins.toLocaleString('ru-RU')}
+          <SpringNumber value={state.zCoins} />
         </div>
       </div>
 

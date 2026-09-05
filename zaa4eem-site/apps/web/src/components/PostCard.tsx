@@ -6,6 +6,7 @@ import type { Comment, Post } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
+import { useToast } from '@/lib/toast-context';
 import { haptic } from '@/lib/telegram';
 import { useApiData } from '@/lib/use-api-data';
 import { Card } from '@/components/Card';
@@ -26,6 +27,7 @@ export function formatDate(iso: string) {
 
 function CommentThread({ postId }: { postId: string }) {
   const { user } = useAuth();
+  const { confirm, toast } = useToast();
   const { data: comments, error } = useApiData<Comment[]>(`/posts/${postId}/comments`, [postId]);
   const [items, setItems] = useState<Comment[] | null>(null);
   const [body, setBody] = useState('');
@@ -53,13 +55,14 @@ function CommentThread({ postId }: { postId: string }) {
   }
 
   async function removeComment(commentId: string) {
-    if (!window.confirm('Удалить комментарий?')) return;
+    if (!(await confirm('Удалить комментарий?', { confirmLabel: 'Удалить' }))) return;
     setDeletingId(commentId);
     try {
       await api.delete(`/posts/${postId}/comments/${commentId}`);
       setItems((list ?? []).filter((c) => c.id !== commentId));
     } catch {
       // Leave the comment in place — the click can simply be retried.
+      toast('Не удалось удалить комментарий', 'error');
     } finally {
       setDeletingId(null);
     }
@@ -169,6 +172,7 @@ export function PostCard({
   index: number;
 }) {
   const { user } = useAuth();
+  const { confirm, toast } = useToast();
   const [showComments, setShowComments] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -216,12 +220,17 @@ export function PostCard({
   }
 
   async function removePost() {
-    if (!window.confirm('Удалить пост? Это действие нельзя отменить.')) return;
+    const ok = await confirm('Удалить пост? Это действие нельзя отменить.', {
+      confirmLabel: 'Удалить',
+    });
+    if (!ok) return;
     try {
       await api.delete(`/posts/${post.id}`);
       onDelete(post.id);
+      toast('Пост удалён', 'success');
     } catch {
       // Leave the post in place — the click can simply be retried.
+      toast('Не удалось удалить пост', 'error');
     }
   }
 

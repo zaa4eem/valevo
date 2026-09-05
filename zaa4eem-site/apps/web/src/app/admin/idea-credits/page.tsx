@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { IdeaCredit, SearchResults } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { Card } from '@/components/Card';
+import { useToast } from '@/lib/toast-context';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
 import { PremiumName } from '@/components/PremiumName';
 
 type UserOption = SearchResults['users'][number];
 
 export default function AdminIdeaCreditsPage() {
+  const { confirm, toast } = useToast();
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<UserOption[]>([]);
   const [selected, setSelected] = useState<UserOption | null>(null);
@@ -65,9 +67,14 @@ export default function AdminIdeaCreditsPage() {
   }
 
   async function remove(id: string) {
-    if (!window.confirm('Удалить эту запись?')) return;
-    await api.delete(`/idea-credits/${id}`);
-    await loadCredits();
+    if (!(await confirm('Удалить эту запись?', { confirmLabel: 'Удалить' }))) return;
+    try {
+      await api.delete(`/idea-credits/${id}`);
+      toast('Запись удалена', 'success');
+      await loadCredits();
+    } catch {
+      toast('Не удалось удалить запись', 'error');
+    }
   }
 
   return (

@@ -1,6 +1,7 @@
 'use client';
 
 import type { AchievementState } from '@zaa4eem/shared';
+import { TiltCard } from './TiltCard';
 
 /**
  * A locked tile still shows its icon and how far along you are — hiding the
@@ -10,8 +11,11 @@ import type { AchievementState } from '@zaa4eem/shared';
 export function AchievementTile({ achievement }: { achievement: AchievementState }) {
   const { unlocked, progress, threshold } = achievement;
   return (
-    <div
+    // Tilt only on an unlocked tile: a locked one is a target, not a thing
+    // you own, and giving it the same physicality muddles that.
+    <TiltCard
       className={`z-achievement z-tier-${achievement.tier.toLowerCase()}${unlocked ? ' z-achievement-unlocked' : ''}`}
+      maxTilt={unlocked ? 8 : 0}
       title={achievement.description}
     >
       <span className="z-achievement-icon" aria-hidden>
@@ -34,6 +38,6 @@ export function AchievementTile({ achievement }: { achievement: AchievementState
           </span>
         </>
       )}
-    </div>
+    </TiltCard>
   );
 }

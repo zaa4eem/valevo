@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SecurityOverview, SessionInfo, PasskeyInfo } from '@zaa4eem/shared';
 import { api, ApiError } from '@/lib/api-client';
 import { Card } from './Card';
+import { useToast } from '@/lib/toast-context';
 import { PasswordStrength } from './PasswordStrength';
 import { hasPlatformAuthenticator, isCancellation, isPasskeySupported, registerPasskey } from '@/lib/webauthn';
 import { changePasswordSchema } from '@zaa4eem/shared';
@@ -106,6 +107,7 @@ function EmailVerification({
 }
 
 function PasskeySettings({ overview, onChanged }: { overview: SecurityOverview; onChanged: () => void }) {
+  const { confirm: ask, toast } = useToast();
   const [supported, setSupported] = useState(false);
   const [platform, setPlatform] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -133,9 +135,10 @@ function PasskeySettings({ overview, onChanged }: { overview: SecurityOverview; 
   }
 
   async function remove(passkey: PasskeyInfo) {
-    if (!confirm(`Удалить «${passkey.label}»?`)) return;
+    if (!(await ask(`Удалить ключ «${passkey.label}»?`, { confirmLabel: 'Удалить' }))) return;
     try {
       await api.delete(`/security/passkeys/${passkey.id}`);
+      toast('Ключ удалён', 'success');
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось удалить ключ');
@@ -470,6 +473,7 @@ function PasswordSettings({ hasPassword }: { hasPassword: boolean }) {
 }
 
 function SessionsSettings({ sessions, onChanged }: { sessions: SessionInfo[]; onChanged: () => void }) {
+  const { confirm: ask, toast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -484,11 +488,13 @@ function SessionsSettings({ sessions, onChanged }: { sessions: SessionInfo[]; on
   }
 
   async function revokeOthers() {
-    if (!confirm('Завершить все сеансы, кроме текущего?')) return;
+    const ok = await ask('Завершить все сеансы, кроме текущего?', { confirmLabel: 'Завершить' });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {
-      await api.post('/security/sessions/revoke-others');
+      const res = await api.post<{ revoked: number }>('/security/sessions/revoke-others');
+      toast(`Завершено сеансов: ${res.revoked}`, 'success');
       onChanged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось завершить сеансы');

@@ -1,8 +1,12 @@
+'use client';
+
+import { useMemo } from 'react';
 import Link from 'next/link';
 import type { LeaderboardEntry } from '@zaa4eem/shared';
 import { Card } from './Card';
 import { Avatar } from './Avatar';
 import { EmptyState } from './EmptyState';
+import { useFlip } from '@/lib/use-flip';
 
 // Rank 1-3 get a medal + a color-mix ramp off the site's own accent, the
 // same technique the admin dashboard's charts use for a sequential scale —
@@ -20,6 +24,13 @@ const RANK_BORDERS: Record<number, string> = {
 };
 
 export function Leaderboard({ title, entries }: { title: string; entries: LeaderboardEntry[] }) {
+  // The clicker's board reshuffles every five seconds while someone plays.
+  // Without FLIP, overtaking one place looks identical to the list simply
+  // redrawing; with it, the rows visibly slide past each other, which is
+  // the entire emotional payload of a leaderboard.
+  const keys = useMemo(() => entries.map((entry) => entry.userId), [entries]);
+  const rowRef = useFlip<HTMLLIElement>(keys);
+
   return (
     <Card hover>
       <h3 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -34,6 +45,7 @@ export function Leaderboard({ title, entries }: { title: string; entries: Leader
             return (
               <li
                 key={entry.userId}
+                ref={rowRef(entry.userId)}
                 className="z-animate-in"
                 style={{
                   display: 'flex',
