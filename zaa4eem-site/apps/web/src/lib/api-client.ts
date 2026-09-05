@@ -1,5 +1,10 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
 
+/** For the handful of callers that need the raw URL rather than apiFetch — EventSource, which builds its own request. */
+export function getApiBase() {
+  return API_BASE;
+}
+
 let inMemoryAccessToken: string | null = null;
 
 /** Lets auth-context stash the current access token for requests that can't rely on cookies alone (Telegram WebView). */
@@ -102,6 +107,6 @@ export const api = {
   get: <T>(path: string) => apiFetch<T>(path),
   post: <T>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'PATCH', body }),
-  delete: <T>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
+  delete: <T>(path: string, body?: unknown) => apiFetch<T>(path, { method: 'DELETE', body }),
   upload: apiUpload,
 };

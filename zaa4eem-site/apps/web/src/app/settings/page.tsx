@@ -15,6 +15,7 @@ import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
+import { NotificationSettings } from '@/components/NotificationSettings';
 // Crop editors are modals that only exist after a file is picked — keeping
 // them out of the page bundle means opening Settings doesn't pay for code
 // most visits never run. ssr:false because both are canvas/pointer-driven.
@@ -539,6 +540,8 @@ export default function SettingsPage() {
       </Card>
 
       <TelegramLinkSettings profile={profile} onLinked={setProfile} />
+
+      <NotificationSettings />
 
       <SecuritySettings hasPassword={profile.hasPassword} />
 

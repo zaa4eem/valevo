@@ -7,12 +7,10 @@
  *   - makes the site installable (a fetch handler is a hard requirement)
  *   - serves Next's content-hashed static assets from cache instantly
  *   - shows a real page instead of the browser's dinosaur when offline
- *
- * Web Push handlers get added here in the notifications stage; the file
- * exists now so the registration and the install prompt already work.
+ *   - receives Web Push and opens the right page when one is tapped
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = `zaa4eem-static-${VERSION}`;
 const SHELL_CACHE = `zaa4eem-shell-${VERSION}`;
 const OFFLINE_URL = '/offline.html';
@@ -73,4 +71,54 @@ self.addEventListener('fetch', (event) => {
       fetch(request).catch(() => caches.match(OFFLINE_URL).then((hit) => hit || Response.error())),
     );
   }
+});
+
+// ---- Web Push ----
+
+/**
+ * The payload is written by the API (see PushService) and is always JSON with
+ * title/body/url. A push with no readable payload still has to show something:
+ * `userVisibleOnly: true` was promised at subscribe time, and browsers punish
+ * a silent push by revoking the subscription.
+ */
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (err) {
+    payload = {};
+  }
+
+  const title = payload.title || 'ZAA4EEM';
+  const options = {
+    body: payload.body || 'Новое уведомление',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    data: { url: payload.url || '/notifications' },
+    // Same tag = the newer one replaces the older instead of stacking a
+    // column of near-identical banners on the lock screen.
+    tag: payload.tag || 'zaa4eem',
+    renotify: Boolean(payload.tag),
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/notifications';
+
+  // Focus an existing tab when there is one — opening a fourth copy of the
+  // site because someone tapped three notifications is not what they meant.
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          if ('navigate' in client) client.navigate(target).catch(() => undefined);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    }),
+  );
 });

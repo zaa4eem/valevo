@@ -7,6 +7,7 @@ import { ensurePremiumFresh, grantTrialPremiumIfUnused } from '../common/premium
 import { computePresence } from '../common/presence.util';
 import { GamesService } from '../games/games.service';
 import { ClickerService } from '../clicker/clicker.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const CLICKER_SLUG = 'z-clicker';
 const CLICKER_TITLE = 'Z-Кликер';
@@ -39,6 +40,7 @@ export class UsersService {
     private readonly notify: TelegramNotifyService,
     private readonly games: GamesService,
     private readonly clicker: ClickerService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   findById(id: string) {
@@ -225,16 +227,22 @@ export class UsersService {
       throw err;
     }
 
-    if (target.telegramId) {
-      const follower = await this.prisma.user.findUnique({
-        where: { id: followerId },
-        select: { displayName: true },
-      });
-      if (follower) {
-        this.notify
-          .notify(target.telegramId, `➕ ${follower.displayName} подписался(лась) на вас`)
-          .catch(() => undefined);
-      }
+    const follower = await this.prisma.user.findUnique({
+      where: { id: followerId },
+      select: { displayName: true },
+    });
+    if (follower) {
+      this.notifications
+        .create({
+          userId: followingId,
+          type: 'NEW_FOLLOWER',
+          actorId: followerId,
+          targetType: 'USER',
+          targetId: followerId,
+          body: `${follower.displayName} подписался(лась) на вас`,
+          telegramText: `➕ ${follower.displayName} подписался(лась) на вас`,
+        })
+        .catch(() => undefined);
     }
   }
 

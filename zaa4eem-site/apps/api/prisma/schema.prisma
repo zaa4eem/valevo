@@ -132,6 +132,21 @@ model User {
   premiumUntil      DateTime?
   usedTrialPremium  Boolean   @default(false)
 
+  // Notification preferences. Separate columns rather than a JSON blob so
+  // the sender can filter recipients in the query itself instead of loading
+  // every candidate and checking in JS. All default to on: a brand-new
+  // account should hear about things happening to it, and turning any of
+  // them off is one toggle away in Settings.
+  notifyLikes       Boolean   @default(true)
+  notifyComments    Boolean   @default(true)
+  notifyFollows     Boolean   @default(true)
+  notifyIdeas       Boolean   @default(true)
+  notifyRecords     Boolean   @default(true)
+  /// Master switch for browser/phone push. The in-app bell is always on — it's just a list, it can't interrupt anyone.
+  notifyPush        Boolean   @default(true)
+  /// Telegram DMs, for accounts that linked Telegram. Was previously unconditional.
+  notifyTelegram    Boolean   @default(true)
+
   posts             Post[]
   ideas             Idea[]
   votes             Vote[]
@@ -146,6 +161,9 @@ model User {
   moderationActions ModerationLogEntry[] @relation("ModerationActor")
   following         Follow[]             @relation("Follower")
   followers         Follow[]             @relation("Following")
+  notifications     Notification[]       @relation("NotificationRecipient")
+  notificationsCaused Notification[]     @relation("NotificationActor")
+  pushSubscriptions PushSubscription[]
 
   @@index([role])
   @@index([invitedById])
@@ -357,4 +375,79 @@ model ModerationLogEntry {
 
   @@index([targetType, targetId])
   @@index([createdAt])
+}
+
+// What kind of thing happened. Kept as an enum rather than free text so the
+
+// frontend can render each one its own way (icon, wording, where tapping it
+
+// goes) without parsing strings.
+enum NotificationType {
+  POST_LIKED
+  POST_COMMENTED
+  NEW_FOLLOWER
+  IDEA_STATUS_CHANGED
+  IDEA_VOTED
+  RECORD_BEATEN
+  PREMIUM_GRANTED
+  SYSTEM
+}
+
+// One entry in a user's notification feed.
+
+//
+
+// Before this existed the only notification channel was a fire-and-forget
+
+// Telegram DM, which meant no history, no unread count, and nothing at all
+
+// for the majority of users who signed up with an email address.
+
+//
+
+// `actorId` is who caused it (null for system messages), and the
+
+// targetType/targetId pair is a loose reference to whatever the
+
+// notification is about — deliberately not a foreign key, so deleting a
+
+// post doesn't cascade away the record that it was once liked.
+model Notification {
+  id         String           @id @default(uuid())
+  userId     String
+  user       User             @relation("NotificationRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  type       NotificationType
+  actorId    String?
+  actor      User?            @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  targetType String?
+  targetId   String?
+  /// Pre-rendered Russian text — the wording is decided once, at creation, so old notifications don't silently change meaning when the copy is reworded.
+  body       String
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  // Covers both the feed query (newest first for one user) and the unread
+  // badge count, which is the same filter plus readAt IS NULL.
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+// A browser/device that agreed to receive Web Push. One user can have
+
+// several (phone, laptop, work machine). `endpoint` is the push service's
+
+// own URL and is unique per subscription — re-subscribing on the same
+
+// device returns the same endpoint, so it doubles as the identity.
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }

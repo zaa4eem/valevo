@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
 import { computePresence } from '../common/presence.util';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const POST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
@@ -63,6 +64,7 @@ export class PostsService {
     private readonly prisma: PrismaService,
     private readonly moderation: ModerationService,
     private readonly notify: TelegramNotifyService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async listPublished(opts: {
@@ -253,18 +255,28 @@ export class PostsService {
       throw err;
     }
     if (post.authorId !== userId) {
-      this.notifyLike(post.authorId, userId).catch(() => undefined);
+      this.notifyLike(post.authorId, userId, postId).catch(() => undefined);
     }
   }
 
-  private async notifyLike(authorId: string, likerId: string) {
-    const [author, liker] = await Promise.all([
-      this.prisma.user.findUnique({ where: { id: authorId }, select: { telegramId: true } }),
-      this.prisma.user.findUnique({ where: { id: likerId }, select: { displayName: true } }),
-    ]);
-    if (author?.telegramId && liker) {
-      await this.notify.notify(author.telegramId, `🤍 ${liker.displayName} лайкнул(а) ваш пост`);
-    }
+  private async notifyLike(authorId: string, likerId: string, postId: string) {
+    const liker = await this.prisma.user.findUnique({
+      where: { id: likerId },
+      select: { displayName: true },
+    });
+    if (!liker) return;
+    // Routed through NotificationsService now rather than straight to
+    // Telegram: it writes the bell entry, respects the recipient's channel
+    // switches, and covers everyone who never linked a Telegram account.
+    await this.notifications.create({
+      userId: authorId,
+      type: 'POST_LIKED',
+      actorId: likerId,
+      targetType: 'POST',
+      targetId: postId,
+      body: `${liker.displayName} лайкнул(а) ваш пост`,
+      telegramText: `🤍 ${liker.displayName} лайкнул(а) ваш пост`,
+    });
   }
 
   async unlike(postId: string, userId: string) {
@@ -293,20 +305,30 @@ export class PostsService {
       include: { author: true },
     });
     if (post.authorId !== authorId) {
-      this.notifyComment(post.authorId, comment.author.displayName, body).catch(() => undefined);
+      this.notifyComment(post.authorId, authorId, comment.author.displayName, body, postId).catch(
+        () => undefined,
+      );
     }
     return serializeComment(comment);
   }
 
-  private async notifyComment(postAuthorId: string, commenterName: string, body: string) {
-    const author = await this.prisma.user.findUnique({
-      where: { id: postAuthorId },
-      select: { telegramId: true },
+  private async notifyComment(
+    postAuthorId: string,
+    commenterId: string,
+    commenterName: string,
+    body: string,
+    postId: string,
+  ) {
+    const preview = body.length > 120 ? `${body.slice(0, 120)}…` : body;
+    await this.notifications.create({
+      userId: postAuthorId,
+      type: 'POST_COMMENTED',
+      actorId: commenterId,
+      targetType: 'POST',
+      targetId: postId,
+      body: `${commenterName} прокомментировал(а) ваш пост: «${preview}»`,
+      telegramText: `💬 ${commenterName} прокомментировал(а) ваш пост:\n«${preview}»`,
     });
-    if (author?.telegramId) {
-      const preview = body.length > 200 ? `${body.slice(0, 200)}…` : body;
-      await this.notify.notify(author.telegramId, `💬 ${commenterName} прокомментировал(а) ваш пост:\n«${preview}»`);
-    }
   }
 
   async deleteComment(postId: string, commentId: string, actor: { id: string; isOwner: boolean }) {

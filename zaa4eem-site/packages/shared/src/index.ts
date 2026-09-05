@@ -12,3 +12,4 @@ export * from './schemas/admin';
 export * from './schemas/search';
 export * from './schemas/clicker';
 export * from './schemas/idea-credits';
+export * from './schemas/notifications';

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
 import '../styles/tokens.css';
 import { AuthProvider } from '@/lib/auth-context';
+import { NotificationsProvider } from '@/lib/notifications-context';
 import { AppChrome } from '@/components/AppChrome';
 import { premiumFontClassNames } from '@/lib/premium-fonts';
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar';
@@ -64,7 +65,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             waits for this file only in that case. */}
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
         <AuthProvider>
-          <AppChrome>{children}</AppChrome>
+          <NotificationsProvider>
+            <AppChrome>{children}</AppChrome>
+          </NotificationsProvider>
         </AuthProvider>
         <ServiceWorkerRegistrar />
       </body>

@@ -7,6 +7,7 @@ import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { PremiumAvatar } from './PremiumAvatar';
 import { PremiumName } from './PremiumName';
+import { NotificationBell } from './NotificationBell';
 
 // The clicker is one of the games listed under /games, not a top-level tab —
 // and Зал славы lives in the profile menu below, one click away, instead of
@@ -94,6 +95,9 @@ function UserMenu() {
           <Link href="/settings" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
             ⚙️ Настройки
           </Link>
+          <Link href="/notifications" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            🔔 Уведомления
+          </Link>
           <Link href="/hall-of-fame" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
             💡 Зал славы
           </Link>
@@ -173,6 +177,7 @@ export function Navbar() {
           {user ? (
             <>
               <ZCoinsBadge zCoins={zCoins} />
+              <NotificationBell />
               <UserMenu />
             </>
           ) : loading ? (

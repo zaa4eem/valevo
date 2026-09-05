@@ -566,3 +566,302 @@ img {
     gap: 10px;
   }
 }
+
+/* ---- Уведомления ---------------------------------------------------- */
+
+/* The count on the bell. Absolutely positioned so it never changes the
+   button's size — a badge that appears and pushes the avatar sideways is
+   the kind of jitter people notice without being able to name. */
+.z-notif-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--z-danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 17px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--z-navbar-bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.z-notif-count-pill {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+  font-size: var(--z-fs-xs);
+  font-weight: 800;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.z-notif-panel {
+  width: min(360px, calc(100vw - 28px));
+  display: flex;
+  flex-direction: column;
+  max-height: min(70vh, 520px);
+}
+
+.z-notif-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--z-border);
+  font-size: var(--z-fs-sm);
+}
+
+.z-notif-mark-all {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--z-accent);
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+}
+.z-notif-mark-all:hover {
+  text-decoration: underline;
+}
+
+.z-notif-panel-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.z-notif-panel-foot {
+  display: block;
+  padding: 12px 14px;
+  border-top: 1px solid var(--z-border);
+  text-align: center;
+  font-size: var(--z-fs-sm);
+  font-weight: 700;
+  color: var(--z-accent);
+}
+.z-notif-panel-foot:hover {
+  background: var(--z-surface-hover);
+}
+
+.z-notif-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.z-notif-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--z-border);
+  text-align: left;
+  cursor: pointer;
+  color: var(--z-text);
+  font: inherit;
+  transition: background 0.15s ease;
+}
+.z-notif-row:last-child {
+  border-bottom: none;
+}
+.z-notif-row:hover {
+  background: var(--z-surface-hover);
+}
+.z-notif-row-unread {
+  background: var(--z-accent-soft);
+}
+.z-notif-row-unread:hover {
+  background: var(--z-surface-hover);
+}
+
+/* The kind glyph rides the corner of the actor's avatar, the way a reaction
+   sits on a message — one object, two pieces of information. */
+.z-notif-icon {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+}
+
+.z-notif-icon-system {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--z-surface-hover);
+  font-size: 16px;
+}
+
+.z-notif-icon-kind {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--z-surface);
+  box-shadow: 0 0 0 1px var(--z-border);
+}
+
+.z-notif-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.z-notif-body {
+  font-size: var(--z-fs-sm);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.z-notif-time {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-faint);
+}
+
+.z-notif-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--z-accent);
+}
+
+/* Filter chips — a single scrollable row so four (or later, more) never
+   wrap into a second line on a narrow phone. */
+.z-chip-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+.z-chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.z-chip {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  color: var(--z-text-muted);
+  font-size: var(--z-fs-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.z-chip:hover {
+  background: var(--z-surface-hover);
+  color: var(--z-text);
+}
+.z-chip-active {
+  background: var(--z-accent-soft);
+  border-color: var(--z-accent);
+  color: var(--z-accent);
+}
+
+.z-push-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--z-accent);
+  border-radius: var(--z-radius-md);
+  background: var(--z-bg-elevated);
+}
+.z-push-banner-on {
+  border-style: solid;
+  border-color: var(--z-border);
+}
+
+/* Preference switches. A real checkbox underneath (keyboard, screen readers,
+   form semantics) restyled into a track-and-knob. */
+.z-switch-group-title {
+  font-size: var(--z-fs-xs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--z-text-faint);
+  margin-bottom: 6px;
+}
+
+.z-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--z-border);
+  font-size: var(--z-fs-sm);
+  cursor: pointer;
+}
+.z-switch-row:last-child {
+  border-bottom: none;
+}
+
+.z-switch {
+  appearance: none;
+  -webkit-appearance: none;
+  flex-shrink: 0;
+  width: 44px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--z-surface-hover);
+  border: 1px solid var(--z-border);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+.z-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--z-text-muted);
+  transition: transform 0.18s ease, background 0.18s ease;
+}
+.z-switch:checked {
+  background: var(--z-accent-soft);
+  border-color: var(--z-accent);
+}
+.z-switch:checked::after {
+  transform: translateX(18px);
+  background: var(--z-accent);
+}
+.z-switch:focus-visible {
+  outline: 2px solid var(--z-accent);
+  outline-offset: 2px;
+}
+.z-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .z-switch,
+  .z-switch::after,
+  .z-notif-row,
+  .z-chip {
+    transition: none;
+  }
+}

@@ -2,12 +2,16 @@ import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/com
 import { ScoreReviewState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { KNOWN_GAMES } from './known-games';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class GamesService implements OnModuleInit {
   private readonly logger = new Logger(GamesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * Self-heals a deployment whose database predates a game being added to
@@ -48,8 +52,44 @@ export class GamesService implements OnModuleInit {
     const reviewState =
       value > game.maxPlausibleScore ? ScoreReviewState.HELD_FOR_REVIEW : ScoreReviewState.NORMAL;
 
-    return this.prisma.score.create({
+    // Who was on top before this run — read first, because creating the row
+    // is what may push them off it.
+    const previousLeader =
+      reviewState === ScoreReviewState.NORMAL ? (await this.leaderboardForGame(slug, 1))[0] : undefined;
+
+    const score = await this.prisma.score.create({
       data: { gameId: game.id, userId, value, reviewState },
+    });
+
+    if (previousLeader && previousLeader.userId !== userId && value > previousLeader.value) {
+      this.notifyDethroned(previousLeader.userId, userId, game.title, slug, value).catch(() => undefined);
+    }
+
+    return score;
+  }
+
+  /** "Someone just took your first place" — the strongest reason a player has to come back and try again. */
+  private async notifyDethroned(
+    previousLeaderId: string,
+    newLeaderId: string,
+    gameTitle: string,
+    gameSlug: string,
+    value: number,
+  ) {
+    const newLeader = await this.prisma.user.findUnique({
+      where: { id: newLeaderId },
+      select: { displayName: true },
+    });
+    if (!newLeader) return;
+
+    await this.notifications.create({
+      userId: previousLeaderId,
+      type: 'RECORD_BEATEN',
+      actorId: newLeaderId,
+      targetType: 'GAME',
+      targetId: gameSlug,
+      body: `${newLeader.displayName} обошёл(ла) вас в «${gameTitle}» — ${value} очков`,
+      telegramText: `⚔️ ${newLeader.displayName} обошёл(ла) вас в «${gameTitle}» — ${value} очков. Реванш?`,
     });
   }
 
