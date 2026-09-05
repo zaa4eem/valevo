@@ -1,13 +1,23 @@
 'use client';
 
-import type { LeaderboardEntry } from '@zaa4eem/shared';
+import { useState } from 'react';
+import Link from 'next/link';
+import type { LeaderboardEntry, SeasonLeaderboardEntry } from '@zaa4eem/shared';
+import { seasonAt } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
 import { Card } from '@/components/Card';
 import { Leaderboard } from '@/components/Leaderboard';
 import { SkeletonCard } from '@/components/Skeleton';
 
+type Tab = 'global' | 'season';
+
 export default function GlobalLeaderboardPage() {
+  const [tab, setTab] = useState<Tab>('global');
   const { data: entries, error } = useApiData<LeaderboardEntry[]>('/leaderboard/global');
+  const { data: seasonEntries, error: seasonError } = useApiData<SeasonLeaderboardEntry[]>(
+    '/progress/season/leaderboard?limit=30',
+  );
+  const season = seasonAt();
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto' }}>
@@ -46,16 +56,69 @@ export default function GlobalLeaderboardPage() {
           Топ <span className="z-accent-text">игроков</span>
         </h1>
         <p style={{ color: 'var(--z-text-muted)', margin: '8px 0 0', fontSize: 'var(--z-fs-sm)' }}>
-          Суммарный счёт по всем мини-играм. 🎮
+          {tab === 'global'
+            ? 'Суммарный счёт по всем мини-играм. 🎮'
+            : `Сезон ${season.index}: опыт за всё — посты, идеи, игры. Осталось ${season.daysLeft} дн.`}
         </p>
       </Card>
 
-      {error ? (
-        <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить лидерборд.</p>
-      ) : entries === null ? (
+      {/* Two boards, deliberately different: the global one rewards raw skill
+          in the games and never resets; the season one rewards being around
+          at all and starts everyone from zero every four weeks, so someone
+          who joined yesterday still has something to win. */}
+      <div className="z-chip-row" style={{ marginBottom: 16 }} role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === 'global'}
+          onClick={() => setTab('global')}
+          className={`z-chip z-pop-on-active${tab === 'global' ? ' z-chip-active' : ''}`}
+        >
+          🎮 Игры
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'season'}
+          onClick={() => setTab('season')}
+          className={`z-chip z-pop-on-active${tab === 'season' ? ' z-chip-active' : ''}`}
+        >
+          🏆 Сезон {season.index}
+        </button>
+      </div>
+
+      {tab === 'global' ? (
+        error ? (
+          <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить лидерборд.</p>
+        ) : entries === null ? (
+          <SkeletonCard lines={6} />
+        ) : (
+          <Leaderboard title="Общий рейтинг" entries={entries} />
+        )
+      ) : seasonError ? (
+        <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить таблицу сезона.</p>
+      ) : seasonEntries === null ? (
         <SkeletonCard lines={6} />
+      ) : seasonEntries.length === 0 ? (
+        <Card style={{ textAlign: 'center', padding: '32px 20px' }}>
+          <div style={{ fontSize: 34, marginBottom: 8 }}>🌱</div>
+          <div style={{ fontWeight: 700, marginBottom: 6 }}>Сезон только начался</div>
+          <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', margin: 0 }}>
+            Первый, кто заработает опыт, займёт первое место.
+          </p>
+          <Link href="/progress" className="z-btn-accent z-pop-on-active" style={{ display: 'inline-block', marginTop: 12 }}>
+            К заданиям
+          </Link>
+        </Card>
       ) : (
-        <Leaderboard title="Общий рейтинг" entries={entries} />
+        <Leaderboard
+          title={`Сезон ${season.index}`}
+          entries={seasonEntries.map((entry) => ({
+            rank: entry.rank,
+            userId: entry.userId,
+            displayName: entry.displayName,
+            avatarUrl: entry.avatarUrl,
+            value: entry.xp,
+          }))}
+        />
       )}
     </div>
   );

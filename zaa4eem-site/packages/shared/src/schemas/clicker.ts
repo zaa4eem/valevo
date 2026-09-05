@@ -4,6 +4,17 @@ import { z } from 'zod';
 // earned per manual click, so the daily cap is what actually limits how much
 // a single user can farm, not how long they leave a tab open.
 export const CLICKER_DAILY_CAP = 2000;
+
+/**
+ * The daily streak scales both the per-tap payout AND the cap by the same
+ * factor. Scaling only the payout would hand a streak nothing at all —
+ * the cap would still bind at the same total, so the reward would be
+ * "reach the same ceiling with fewer taps", which nobody notices. Scaling
+ * both means a kept streak genuinely earns more per day.
+ */
+export function effectiveDailyCap(multiplier: number): number {
+  return Math.floor(CLICKER_DAILY_CAP * multiplier);
+}
 export const CLICKER_UPGRADE_BASE_COST = 10;
 export const CLICKER_UPGRADE_GROWTH = 1.15;
 export const PREMIUM_SHOP_PRICE = 22222;
@@ -24,6 +35,9 @@ export const clickerStateSchema = z.object({
   usedTrialPremium: z.boolean(),
   referralCode: z.string(),
   referralCount: z.number().int().nonnegative(),
+  /// Streak bonus currently in force. 1 means no streak; see progress/streak.ts.
+  streakMultiplier: z.number(),
+  streakDays: z.number().int().nonnegative(),
 });
 export type ClickerState = z.infer<typeof clickerStateSchema>;
 

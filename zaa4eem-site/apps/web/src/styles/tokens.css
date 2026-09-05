@@ -865,3 +865,335 @@ img {
     transition: none;
   }
 }
+
+/* ---- Прогресс: уровни, серия, задания, достижения -------------------- */
+
+/* Navbar badge: level number, plus the streak flame when there is one. */
+.z-level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--z-border);
+  background: var(--z-surface);
+  font-size: var(--z-fs-xs);
+  font-weight: 800;
+  color: var(--z-text);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.z-level-badge-num::before {
+  content: '★';
+  color: var(--z-accent);
+  margin-right: 3px;
+}
+
+/* Unlit by default. The cold flame is the point: it is the only thing on
+   screen that says "you have not been here today". */
+.z-streak-flame {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.z-streak-flame-lit {
+  filter: none;
+  opacity: 1;
+}
+
+.z-xp-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--z-surface-hover);
+  overflow: hidden;
+  border: 1px solid var(--z-border);
+}
+
+.z-xp-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--z-accent-strong), var(--z-accent));
+  transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.z-streak-row {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.z-streak-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+  flex-shrink: 0;
+}
+.z-streak-badge > span:first-child {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+.z-streak-badge-lit {
+  border-color: var(--z-accent);
+  background: var(--z-accent-soft);
+}
+.z-streak-badge-lit > span:first-child {
+  filter: none;
+  opacity: 1;
+}
+
+.z-streak-facts {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.z-fact {
+  flex: 1 1 110px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--z-radius-sm);
+  background: var(--z-bg-elevated);
+  border: 1px solid var(--z-border);
+}
+.z-fact-label {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-faint);
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+.z-fact-value {
+  font-size: var(--z-fs-lg);
+  font-weight: 900;
+  color: var(--z-accent);
+  font-variant-numeric: tabular-nums;
+}
+.z-fact-hint {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-muted);
+}
+
+.z-freeze-note {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: var(--z-radius-sm);
+  background: var(--z-surface-hover);
+  color: var(--z-text-muted);
+  font-size: var(--z-fs-xs);
+}
+
+/* One row shape shared by daily quests and referral goals — same object,
+   different content, so they read as one system rather than two lists. */
+.z-quest {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+}
+.z-quest-claimed {
+  opacity: 0.62;
+}
+
+.z-quest-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--z-surface-hover);
+  font-size: 18px;
+}
+.z-quest-claimed .z-quest-icon {
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+  font-weight: 900;
+}
+
+.z-quest-track {
+  height: 6px;
+  margin-top: 6px;
+}
+
+.z-quest-done {
+  flex-shrink: 0;
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+  color: var(--z-accent);
+}
+
+.z-reward-toast {
+  padding: 12px 16px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-accent);
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+  font-weight: 700;
+  text-align: center;
+}
+
+.z-onboarding-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.z-onboarding-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--z-radius-sm);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+  color: var(--z-text);
+  font-size: var(--z-fs-sm);
+}
+.z-onboarding-step-done {
+  opacity: 0.6;
+}
+.z-onboarding-step-done span:nth-child(2) {
+  text-decoration: line-through;
+  text-decoration-color: var(--z-text-faint);
+}
+
+.z-onboarding-icon,
+.z-onboarding-check {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--z-surface-hover);
+  font-size: 15px;
+}
+.z-onboarding-check {
+  background: var(--z-accent-soft);
+  color: var(--z-accent);
+  font-weight: 900;
+}
+
+/* Achievement tiles. Tier is carried by the border and the icon's ring —
+   not by a coloured background, which would fight the accent everywhere. */
+.z-achievement-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.z-achievement {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 14px 12px;
+  border-radius: var(--z-radius-md);
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+  text-align: center;
+  align-items: center;
+  /* Locked tiles are dimmed, not hidden: the target is what makes someone
+     go and do one more. */
+  opacity: 0.55;
+  filter: grayscale(0.8);
+}
+.z-achievement-unlocked {
+  opacity: 1;
+  filter: none;
+}
+
+.z-achievement-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  font-size: 22px;
+  background: var(--z-surface-hover);
+  border: 2px solid var(--z-border);
+}
+
+.z-achievement-title {
+  font-weight: 800;
+  font-size: var(--z-fs-sm);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.z-achievement-desc {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-muted);
+  line-height: 1.3;
+}
+
+.z-achievement-meta {
+  font-size: var(--z-fs-xs);
+  color: var(--z-text-faint);
+  margin-top: 2px;
+}
+
+.z-achievement-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.z-achievement-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--z-border);
+  background: var(--z-bg-elevated);
+  font-size: var(--z-fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Tier colours, blended off the accent so they stay in the palette rather
+   than importing four unrelated hues. */
+.z-tier-bronze.z-achievement-unlocked .z-achievement-icon,
+.z-tier-bronze.z-achievement-chip {
+  border-color: color-mix(in oklab, var(--z-warning) 45%, var(--z-border));
+}
+.z-tier-silver.z-achievement-unlocked .z-achievement-icon,
+.z-tier-silver.z-achievement-chip {
+  border-color: color-mix(in oklab, var(--z-text-muted) 70%, var(--z-border));
+}
+.z-tier-gold.z-achievement-unlocked .z-achievement-icon,
+.z-tier-gold.z-achievement-chip {
+  border-color: var(--z-warning);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--z-warning) 16%, transparent);
+}
+.z-tier-legend.z-achievement-unlocked .z-achievement-icon,
+.z-tier-legend.z-achievement-chip {
+  border-color: var(--z-accent);
+  box-shadow: 0 0 0 3px var(--z-accent-soft);
+}
+
+@media (max-width: 520px) {
+  .z-streak-badge {
+    width: 100%;
+  }
+  .z-achievement-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .z-xp-fill {
+    transition: none;
+  }
+}

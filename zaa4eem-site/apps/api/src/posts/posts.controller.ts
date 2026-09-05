@@ -60,7 +60,7 @@ export class PostsController {
   @Post()
   create(@CurrentUser() user: RequestUser, @Body() body: unknown) {
     const input = createPostSchema.parse(body);
-    return this.posts.create(user.id, input.body, input.publish, user.role === 'OWNER', input.imageUrl);
+    return this.posts.createAndTrack(user.id, input.body, input.publish, user.role === 'OWNER', input.imageUrl);
   }
 
   // Upload-then-reference, mirroring UsersController's POST /users/me/avatar:

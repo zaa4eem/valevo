@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  CLICKER_DAILY_CAP,
   PREMIUM_SHOP_PRICE,
   clickerUpgradeCost,
+  effectiveDailyCap,
+  streakMultiplier,
   type ClickResult,
   type ClickerState,
 } from '@zaa4eem/shared';
@@ -10,6 +11,7 @@ import type { User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
 import { addMonths, ensurePremiumFresh, grantTrialPremiumIfUnused } from '../common/premium.util';
+import { ProgressService } from '../progress/progress.service';
 
 const PREMIUM_PURCHASE_MONTHS = 1;
 
@@ -24,6 +26,7 @@ export class ClickerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notify: TelegramNotifyService,
+    private readonly progress: ProgressService,
   ) {}
 
   /**
@@ -44,12 +47,15 @@ export class ClickerService {
     });
   }
 
-  private toState(user: User, referralCount = 0): ClickerState {
+  private toState(user: User, referralCount = 0, streakDays = 0): ClickerState {
+    const multiplier = streakMultiplier(streakDays);
     return {
       zCoins: user.zCoins,
       clickPower: user.clickPower,
       coinsEarnedToday: user.coinsEarnedToday,
-      dailyCap: CLICKER_DAILY_CAP,
+      dailyCap: effectiveDailyCap(multiplier),
+      streakMultiplier: multiplier,
+      streakDays,
       nextUpgradeCost: clickerUpgradeCost(user.clickPower),
       isPremium: user.isPremium,
       premiumUntil: user.premiumUntil?.toISOString() ?? null,
@@ -61,11 +67,12 @@ export class ClickerService {
 
   async getState(userId: string): Promise<ClickerState> {
     const fresh = await this.ensureFreshDay(userId);
-    const [user, referralCount] = await Promise.all([
+    const [user, referralCount, progress] = await Promise.all([
       ensurePremiumFresh(this.prisma, fresh),
       this.prisma.user.count({ where: { invitedById: userId } }),
+      this.progress.getRow(userId),
     ]);
-    return this.toState(user, referralCount);
+    return this.toState(user, referralCount, progress?.streakDays ?? 0);
   }
 
   /**
@@ -76,18 +83,24 @@ export class ClickerService {
    * write on the exact coinsEarnedToday snapshot we computed `awarded`
    * from, via updateMany + count check) rather than a plain read-then-write
    * — two concurrent batches reading the same "remaining" snapshot could
-   * otherwise both be awarded up to it, blowing past CLICKER_DAILY_CAP.
+   * otherwise both be awarded up to it, blowing past the day's cap.
    */
   async click(userId: string, count: number): Promise<ClickResult> {
     let user = await this.ensureFreshDay(userId);
-    const requested = count * user.clickPower;
+    // Tapping is activity, so it also keeps the streak alive — and the
+    // streak it keeps alive is the one being read here for the multiplier.
+    const streak = await this.progress.touchStreak(userId).catch(() => null);
+    const streakDays = streak?.streakDays ?? 0;
+    const multiplier = streakMultiplier(streakDays);
+    const cap = effectiveDailyCap(multiplier);
+    const requested = Math.round(count * user.clickPower * multiplier);
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      const remaining = Math.max(0, CLICKER_DAILY_CAP - user.coinsEarnedToday);
+      const remaining = Math.max(0, cap - user.coinsEarnedToday);
       const awarded = Math.min(requested, remaining);
       const capped = awarded < requested;
       if (awarded === 0) {
-        return { ...this.toState(user), awarded: 0, capped };
+        return { ...this.toState(user, 0, streakDays), awarded: 0, capped };
       }
 
       const result = await this.prisma.user.updateMany({
@@ -96,7 +109,8 @@ export class ClickerService {
       });
       if (result.count === 1) {
         const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-        return { ...this.toState(updated), awarded, capped };
+        this.progress.record(userId, 'COINS_EARNED', awarded).catch(() => undefined);
+        return { ...this.toState(updated, 0, streakDays), awarded, capped };
       }
       // Another request updated coinsEarnedToday between our read and
       // write — re-read the real current value and recompute against it.

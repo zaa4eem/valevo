@@ -164,6 +164,11 @@ model User {
   notifications     Notification[]       @relation("NotificationRecipient")
   notificationsCaused Notification[]     @relation("NotificationActor")
   pushSubscriptions PushSubscription[]
+  progress          UserProgress?
+  achievements      AchievementUnlock[]
+  dailyQuests       DailyQuestProgress[]
+  seasonScores      SeasonScore[]
+  rewardClaims      RewardClaim[]
 
   @@index([role])
   @@index([invitedById])
@@ -449,5 +454,115 @@ model PushSubscription {
   userAgent String?
   createdAt DateTime @default(now())
 
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Retention: levels, streaks, quests, achievements, seasons.
+// ---------------------------------------------------------------------------
+
+/// Everything that only goes up, in its own row rather than a dozen more
+/// columns on User. Created lazily the first time a user does anything
+/// countable, so accounts that predate this feature need no backfill.
+model UserProgress {
+  userId            String    @id
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Lifetime XP. `level` is derived from it (levelFromXp) but stored too,
+  /// so leaderboards and achievement checks can sort/filter in SQL.
+  xp                Int       @default(0)
+  level             Int       @default(1)
+
+  /// Consecutive days with a visit. lastStreakDay is UTC midnight of the
+  /// most recent counted day, which is what makes the check idempotent —
+  /// a hundred requests on the same day advance nothing.
+  streakDays        Int       @default(0)
+  streakBest        Int       @default(0)
+  lastStreakDay     DateTime?
+  /// When Premium last forgave a missed day, so the freeze can have a cooldown.
+  freezeUsedAt      DateTime?
+
+  // Lifetime counters — the raw material every achievement is measured against.
+  postsPublished    Int       @default(0)
+  commentsWritten   Int       @default(0)
+  likesReceived     Int       @default(0)
+  likesGiven        Int       @default(0)
+  ideasSubmitted    Int       @default(0)
+  ideasAccepted     Int       @default(0)
+  ideaVotesCast     Int       @default(0)
+  gamesPlayed       Int       @default(0)
+  followersGained   Int       @default(0)
+  followsMade       Int       @default(0)
+  coinsEarnedTotal  Int       @default(0)
+  referralsJoined   Int       @default(0)
+  daysActive        Int       @default(0)
+
+  /// The 5-step newcomer quest pays 24h of Premium exactly once.
+  onboardingDone    Boolean   @default(false)
+  onboardingClaimed Boolean   @default(false)
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  /// Serves the level leaderboard.
+  @@index([xp])
+}
+
+/// One row per achievement a user has earned. The catalogue itself lives in
+/// code (packages/shared/src/progress/achievements.ts) — only the unlock is
+/// data, so adding an achievement never needs a migration.
+model AchievementUnlock {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code       String
+  unlockedAt DateTime @default(now())
+
+  @@unique([userId, code])
+  @@index([userId, unlockedAt])
+}
+
+/// Progress on one of today's three quests. The assignment itself is
+/// computed (questsForDay), so a row only appears once there is progress
+/// to record.
+model DailyQuestProgress {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// UTC midnight of the day this belongs to.
+  day       DateTime
+  code      String
+  progress  Int       @default(0)
+  claimedAt DateTime?
+
+  @@unique([userId, day, code])
+  @@index([userId, day])
+}
+
+/// XP earned inside one season. Season boundaries are computed from the
+/// calendar (seasonAt), so nothing has to create or close a season.
+model SeasonScore {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  season Int
+  xp     Int    @default(0)
+
+  @@unique([userId, season])
+  /// Serves the season leaderboard's `where season = ? order by xp desc`.
+  @@index([season, xp])
+}
+
+/// One-off rewards that must never pay twice — referral goals today, and
+/// anything else with a "claimed" state later. Kept separate from
+/// AchievementUnlock because these carry a payout, not just a badge.
+model RewardClaim {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  claimedAt DateTime @default(now())
+
+  @@unique([userId, code])
   @@index([userId])
 }

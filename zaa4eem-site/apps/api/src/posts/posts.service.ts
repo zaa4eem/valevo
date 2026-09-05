@@ -6,6 +6,7 @@ import { ModerationService } from '../moderation/moderation.service';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
 import { computePresence } from '../common/presence.util';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProgressService } from '../progress/progress.service';
 
 const POST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
@@ -65,6 +66,7 @@ export class PostsService {
     private readonly moderation: ModerationService,
     private readonly notify: TelegramNotifyService,
     private readonly notifications: NotificationsService,
+    private readonly progress: ProgressService,
   ) {}
 
   async listPublished(opts: {
@@ -196,6 +198,27 @@ export class PostsService {
     });
   }
 
+  /**
+   * Wraps create() so the caller gets the post immediately and the XP,
+   * quests and achievements settle behind it — a slow progress write must
+   * never make publishing feel slow, and a failed one must never lose the
+   * post.
+   */
+  async createAndTrack(
+    authorId: string,
+    body: string,
+    publish: boolean,
+    isOwner: boolean,
+    imageUrl?: string,
+  ) {
+    const post = await this.create(authorId, body, publish, isOwner, imageUrl);
+    // A draft isn't published yet, so it hasn't earned anything.
+    if (post.publishedAt) {
+      this.progress.record(authorId, 'POST_PUBLISHED').catch(() => undefined);
+    }
+    return post;
+  }
+
   async update(id: string, data: { body?: string; publish?: boolean }) {
     const existing = await this.prisma.post.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Пост не найден');
@@ -254,7 +277,9 @@ export class PostsService {
       }
       throw err;
     }
+    this.progress.record(userId, 'LIKE_GIVEN').catch(() => undefined);
     if (post.authorId !== userId) {
+      this.progress.record(post.authorId, 'LIKE_RECEIVED').catch(() => undefined);
       this.notifyLike(post.authorId, userId, postId).catch(() => undefined);
     }
   }
@@ -304,6 +329,7 @@ export class PostsService {
       data: { postId, authorId, body, moderationState },
       include: { author: true },
     });
+    this.progress.record(authorId, 'COMMENT_WRITTEN').catch(() => undefined);
     if (post.authorId !== authorId) {
       this.notifyComment(post.authorId, authorId, comment.author.displayName, body, postId).catch(
         () => undefined,

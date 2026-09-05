@@ -17,6 +17,7 @@ import { ClickerModule } from './clicker/clicker.module';
 import { DigestModule } from './digest/digest.module';
 import { IdeaCreditsModule } from './idea-credits/idea-credits.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { ProgressModule } from './progress/progress.module';
 import { validateEnv } from './config-validate';
 
 @Module({
@@ -47,6 +48,7 @@ import { validateEnv } from './config-validate';
     DigestModule,
     IdeaCreditsModule,
     NotificationsModule,
+    ProgressModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

@@ -121,7 +121,11 @@ const canRun = Boolean(process.env.DATABASE_URL);
       .set('Authorization', `Bearer ${user.token}`)
       .expect(200);
 
-    expect(list.body.unreadCount).toBe(0);
+    // Asserted on the type, not on unreadCount: posting and liking also earn
+    // XP, and the progress system's own "новый уровень"/"достижение" entries
+    // are legitimately unread here. What must never appear is a POST_LIKED
+    // telling someone they liked their own post.
+    expect(list.body.items.some((n: any) => n.type === 'POST_LIKED')).toBe(false);
   });
 
   it('marks everything read and drops the unread count to zero', async () => {

@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProgressService } from '../progress/progress.service';
 
 const IDEA_STATUS_LABELS: Record<string, string> = {
   NEW: 'Новая',
@@ -40,6 +41,7 @@ export class IdeasService {
     private readonly moderation: ModerationService,
     private readonly notify: TelegramNotifyService,
     private readonly notifications: NotificationsService,
+    private readonly progress: ProgressService,
   ) {}
 
   async create(submitterId: string, title: string, description: string) {
@@ -48,6 +50,7 @@ export class IdeasService {
       data: { submitterId, title, description, moderationState },
       include: { submitter: true },
     });
+    this.progress.record(submitterId, 'IDEA_SUBMITTED').catch(() => undefined);
     return serializeIdea(idea);
   }
 
@@ -109,6 +112,7 @@ export class IdeasService {
       }
       throw err;
     }
+    this.progress.record(userId, 'IDEA_VOTED').catch(() => undefined);
   }
 
   async unvote(ideaId: string, userId: string) {
@@ -135,6 +139,12 @@ export class IdeasService {
         reason,
       },
     });
+    // ACCEPTED is the one status that pays the author — it's the moment
+    // their idea became part of the project, and the only status the
+    // "Соавтор" achievements are measured against.
+    if (status === IdeaStatus.ACCEPTED) {
+      this.progress.record(idea.submitterId, 'IDEA_ACCEPTED').catch(() => undefined);
+    }
     const label = IDEA_STATUS_LABELS[status] ?? status;
     this.notifications
       .create({

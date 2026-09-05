@@ -3,6 +3,7 @@ import Script from 'next/script';
 import '../styles/tokens.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { NotificationsProvider } from '@/lib/notifications-context';
+import { ProgressProvider } from '@/lib/progress-context';
 import { AppChrome } from '@/components/AppChrome';
 import { premiumFontClassNames } from '@/lib/premium-fonts';
 import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar';
@@ -66,7 +67,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
         <AuthProvider>
           <NotificationsProvider>
-            <AppChrome>{children}</AppChrome>
+            <ProgressProvider>
+              <AppChrome>{children}</AppChrome>
+            </ProgressProvider>
           </NotificationsProvider>
         </AuthProvider>
         <ServiceWorkerRegistrar />

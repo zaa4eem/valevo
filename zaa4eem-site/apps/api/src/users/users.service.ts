@@ -8,6 +8,7 @@ import { computePresence } from '../common/presence.util';
 import { GamesService } from '../games/games.service';
 import { ClickerService } from '../clicker/clicker.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProgressService } from '../progress/progress.service';
 
 const CLICKER_SLUG = 'z-clicker';
 const CLICKER_TITLE = 'Z-Кликер';
@@ -41,6 +42,7 @@ export class UsersService {
     private readonly games: GamesService,
     private readonly clicker: ClickerService,
     private readonly notifications: NotificationsService,
+    private readonly progress: ProgressService,
   ) {}
 
   findById(id: string) {
@@ -133,6 +135,9 @@ export class UsersService {
     if (referralCount === 1) {
       await grantTrialPremiumIfUnused(this.prisma, this.notify, referrer.id);
     }
+    // Referral goals (3/5/10) are claimed from the progress screen; this is
+    // what moves the counter towards them.
+    this.progress.record(referrer.id, 'REFERRAL_JOINED').catch(() => undefined);
   }
 
   /** Telegram-path counterpart to attributeReferral — resolves a pending referral left by /start ref_CODE for a telegramId that just became a real account. */
@@ -226,6 +231,9 @@ export class UsersService {
       }
       throw err;
     }
+
+    this.progress.record(followerId, 'FOLLOW_MADE').catch(() => undefined);
+    this.progress.record(followingId, 'FOLLOWER_GAINED').catch(() => undefined);
 
     const follower = await this.prisma.user.findUnique({
       where: { id: followerId },

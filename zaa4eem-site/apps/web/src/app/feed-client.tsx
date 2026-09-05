@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { haptic, hapticNotify } from '@/lib/telegram';
 import { Card } from '@/components/Card';
+import { OnboardingCard } from '@/components/OnboardingCard';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
 import { PostCard } from '@/components/PostCard';
 
@@ -296,6 +297,12 @@ export default function HomeFeedClient({ initialPage }: { initialPage: Paginated
           Всё новое появляется здесь — публикуй, лайкай, обсуждай.
         </p>
       </Card>
+
+      {/* Above the composer on purpose: a brand-new account's first question
+          is "what do I do here", and the checklist answers it before the
+          empty text box can ask it back. Hides itself for good once the
+          reward is taken. */}
+      <OnboardingCard />
 
       <div style={{ marginBottom: 16 }}>
         <Composer onPosted={prependPost} />

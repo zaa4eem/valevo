@@ -9,6 +9,7 @@ import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { haptic } from '@/lib/telegram';
 import { Card } from '@/components/Card';
+import { ProfileAchievements } from '@/components/ProfileAchievements';
 import { StatTile } from '@/components/StatTile';
 import { Skeleton, SkeletonCircle, SkeletonText } from '@/components/Skeleton';
 import { PremiumName } from '@/components/PremiumName';
@@ -384,6 +385,10 @@ export default function PublicProfilePage() {
           </Card>
         </div>
       )}
+
+      <div className="z-animate-in" style={{ animationDelay: '160ms' }}>
+        <ProfileAchievements userId={params.id} />
+      </div>
 
       <div className="z-animate-in" style={{ marginTop: 24, animationDelay: '180ms' }}>
         <h3 style={{ marginBottom: 12 }}>Посты</h3>

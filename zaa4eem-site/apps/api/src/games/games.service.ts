@@ -3,6 +3,7 @@ import { ScoreReviewState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { KNOWN_GAMES } from './known-games';
 import { NotificationsService } from '../notifications/notifications.service';
+import { ProgressService } from '../progress/progress.service';
 
 @Injectable()
 export class GamesService implements OnModuleInit {
@@ -11,6 +12,7 @@ export class GamesService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
+    private readonly progress: ProgressService,
   ) {}
 
   /**
@@ -60,6 +62,8 @@ export class GamesService implements OnModuleInit {
     const score = await this.prisma.score.create({
       data: { gameId: game.id, userId, value, reviewState },
     });
+
+    this.progress.record(userId, 'GAME_PLAYED').catch(() => undefined);
 
     if (previousLeader && previousLeader.userId !== userId && value > previousLeader.value) {
       this.notifyDethroned(previousLeader.userId, userId, game.title, slug, value).catch(() => undefined);

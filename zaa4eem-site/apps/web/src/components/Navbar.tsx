@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { PremiumAvatar } from './PremiumAvatar';
 import { PremiumName } from './PremiumName';
 import { NotificationBell } from './NotificationBell';
+import { LevelStreakBadge } from './LevelStreakBadge';
 
 // The clicker is one of the games listed under /games, not a top-level tab —
 // and Зал славы lives in the profile menu below, one click away, instead of
@@ -95,6 +96,12 @@ function UserMenu() {
           <Link href="/settings" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
             ⚙️ Настройки
           </Link>
+          <Link href="/progress" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            🎯 Прогресс
+          </Link>
+          <Link href="/achievements" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
+            🏅 Достижения
+          </Link>
           <Link href="/notifications" className="z-navbar-menu-item" onClick={() => setOpen(false)}>
             🔔 Уведомления
           </Link>
@@ -176,6 +183,7 @@ export function Navbar() {
           </Link>
           {user ? (
             <>
+              <LevelStreakBadge />
               <ZCoinsBadge zCoins={zCoins} />
               <NotificationBell />
               <UserMenu />
