@@ -124,7 +124,7 @@ function UserMenu() {
 }
 
 export function Navbar() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const zCoins = useZCoinsBalance(Boolean(user));
 
   return (
@@ -175,6 +175,17 @@ export function Navbar() {
               <ZCoinsBadge zCoins={zCoins} />
               <UserMenu />
             </>
+          ) : loading ? (
+            // Session restore is still in flight and this browser has been
+            // signed in before — showing "Войти" here would flash the wrong
+            // state at a returning user for a fraction of a second. A guest
+            // never lands here: `loading` drops synchronously for anyone
+            // without a session hint (see auth-context).
+            <span
+              aria-hidden
+              className="z-skeleton"
+              style={{ width: 36, height: 36, borderRadius: '50%' }}
+            />
           ) : (
             <Link href="/login" className="z-btn-accent">
               Войти

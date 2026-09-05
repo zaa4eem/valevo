@@ -14,16 +14,13 @@ import { BottomNav } from './BottomNav';
  * move between Feed/Ideas/Games/Leaderboard at all).
  */
 export function AppChrome({ children }: { children: ReactNode }) {
-  const { loading, isTelegram, telegramAuthError, user, retryTelegramAuth } = useAuth();
+  const { isTelegram, telegramAuthError, user, retryTelegramAuth } = useAuth();
 
-  if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <span style={{ color: 'var(--z-text-muted)' }}>Загрузка…</span>
-      </div>
-    );
-  }
-
+  // Deliberately does NOT gate on `loading` any more. Blocking the whole tree
+  // on session restore is what made the first visit feel broken: the shell is
+  // identical for a guest and a signed-in user, so there is nothing to wait
+  // for — only the avatar/menu in the Navbar depends on who's logged in, and
+  // that resolves itself a moment later without holding up the page.
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar />

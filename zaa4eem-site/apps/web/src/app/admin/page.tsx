@@ -1,11 +1,23 @@
 'use client';
 
 import type { CSSProperties } from 'react';
+import dynamic from 'next/dynamic';
 import type { AdminStats } from '@zaa4eem/shared';
 import { useApiData } from '@/lib/use-api-data';
 import { StatTile } from '@/components/StatTile';
-import { StatusBarChart, type StatusBarDatum } from '@/components/charts/StatusBarChart';
-import { TrendChart } from '@/components/charts/TrendChart';
+import { Skeleton } from '@/components/Skeleton';
+import type { StatusBarDatum } from '@/components/charts/StatusBarChart';
+
+// Charts are the heaviest thing in the admin bundle and only the owner ever
+// sees them — split out so they don't ride along in shared chunks.
+const StatusBarChart = dynamic(
+  () => import('@/components/charts/StatusBarChart').then((m) => m.StatusBarChart),
+  { ssr: false, loading: () => <Skeleton height={140} /> },
+);
+const TrendChart = dynamic(() => import('@/components/charts/TrendChart').then((m) => m.TrendChart), {
+  ssr: false,
+  loading: () => <Skeleton height={180} />,
+});
 
 const IDEA_STATUS_LABELS: Record<string, string> = {
   NEW: 'Новая',

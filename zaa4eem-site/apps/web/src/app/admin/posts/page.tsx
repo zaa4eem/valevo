@@ -9,13 +9,24 @@ export default function AdminPostsPage() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [body, setBody] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
-    const page = await api.get<PaginatedPosts>('/posts?limit=50');
-    setPosts(page.items);
-    setNextCursor(page.nextCursor);
+    setError(false);
+    try {
+      const page = await api.get<PaginatedPosts>('/posts?limit=50');
+      setPosts(page.items);
+      setNextCursor(page.nextCursor);
+    } catch {
+      // Without this the rejection escaped as an unhandled promise and the
+      // page just sat there empty with no hint that anything had failed.
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -52,6 +63,18 @@ export default function AdminPostsPage() {
     load();
   }
 
+  if (error) {
+    return (
+      <div>
+        <h1 style={{ marginTop: 0 }}>Лента — управление</h1>
+        <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить посты.</p>
+        <button className="z-btn-ghost z-pop-on-active" onClick={load}>
+          Попробовать снова
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div>
       <h1 style={{ marginTop: 0 }}>Лента — управление</h1>
@@ -71,6 +94,7 @@ export default function AdminPostsPage() {
       </Card>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+        {loading && <p style={{ color: 'var(--z-text-muted)' }}>Загрузка…</p>}
         {posts.map((post) => (
           <Card key={post.id}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>

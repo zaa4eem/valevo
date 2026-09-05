@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AuthResponse, LoginInput, RegisterInput } from '@zaa4eem/shared';
 import { ApiError, api, apiFetch, getAccessToken, setAccessToken, setUnauthorizedHandler } from './api-client';
-import { getTelegramWebApp } from './telegram';
+import { getTelegramWebApp, isTelegramLaunch, waitForTelegramInitData } from './telegram';
 
 type CurrentUser = AuthResponse['user'] | null;
 
@@ -21,17 +21,38 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Telegram injects window.Telegram.WebApp synchronously when the page is
-// opened as a real Mini App, but `initData` itself can be empty for a brief
-// moment on some clients before Telegram finishes populating it — poll a
-// few times before concluding we're not inside Telegram at all.
-async function waitForInitData(maxAttempts = 5, delayMs = 200): Promise<string | null> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const initData = getTelegramWebApp()?.initData;
-    if (initData) return initData;
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+/**
+ * "This browser probably has a live session" flag.
+ *
+ * The refresh token lives in an httpOnly cookie scoped to the API's own
+ * host, so this tab can't read it to find out whether restoring a session
+ * is even worth a network call. Without a hint, every first-time visitor
+ * paid for a /auth/refresh round-trip that was always going to 401.
+ *
+ * The flag is only ever an optimisation for *what to show first*: a
+ * background refresh still runs either way, so a returning user whose
+ * localStorage got cleared is picked up a moment later rather than being
+ * wrongly treated as a guest forever.
+ */
+const SESSION_HINT_KEY = 'zaa4eem_session_hint';
+
+function readSessionHint(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(SESSION_HINT_KEY) === '1';
+  } catch {
+    return false;
   }
-  return null;
+}
+
+function writeSessionHint(hasSession: boolean) {
+  if (typeof window === 'undefined') return;
+  try {
+    if (hasSession) localStorage.setItem(SESSION_HINT_KEY, '1');
+    else localStorage.removeItem(SESSION_HINT_KEY);
+  } catch {
+    // Private mode / storage disabled — the background refresh still covers us.
+  }
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -45,6 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAccessToken(res.accessToken);
     setUser(res.user);
     setTelegramAuthError(null);
+    writeSessionHint(true);
   }, []);
 
   // The access token is short-lived (15 min server-side) so `refresh` gets
@@ -71,10 +93,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // guaranteed deadlock.
         const me = await apiFetch<CurrentUser>('/users/me', {}, true);
         setUser(me);
+        writeSessionHint(true);
         return true;
       } catch {
         setAccessToken(null);
         setUser(null);
+        writeSessionHint(false);
         return false;
       } finally {
         refreshInFlight.current = null;
@@ -96,66 +120,73 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    const telegram = getTelegramWebApp();
-    if (telegram) {
-      telegram.ready();
-      telegram.expand();
-    }
-
     let cancelled = false;
+
+    async function loginWithTelegram() {
+      setIsTelegram(true);
+      getTelegramWebApp()?.ready();
+      getTelegramWebApp()?.expand();
+
+      const initData = await waitForTelegramInitData();
+      if (cancelled) return false;
+      if (!initData) return false;
+
+      try {
+        let res: AuthResponse;
+        try {
+          res = await api.post<AuthResponse>('/auth/telegram', { initData });
+        } catch (err) {
+          // A rejection the server actually returned (bad signature, stale
+          // initData) won't succeed on retry with the same payload — only
+          // retry a network-level failure, which is exactly what a brief
+          // connectivity blip right as the WebView wakes from background
+          // looks like (the scenario this is guarding against).
+          if (err instanceof ApiError) throw err;
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          if (cancelled) return false;
+          res = await api.post<AuthResponse>('/auth/telegram', { initData });
+        }
+        if (cancelled) return false;
+        applySession(res);
+        return true;
+      } catch (err) {
+        if (cancelled) return false;
+        console.error('Telegram auto-login failed:', err);
+        setTelegramAuthError(
+          err instanceof ApiError
+            ? `Не удалось войти через Telegram: ${err.message}`
+            : 'Не удалось войти через Telegram — проверь соединение и попробуй ещё раз.',
+        );
+        return false;
+      }
+    }
 
     async function bootstrap() {
       setTelegramAuthError(null);
 
-      // window.Telegram.WebApp existing is NOT proof we're inside Telegram —
-      // the SDK script (loaded on every page, see layout.tsx) defines that
-      // object on any plain browser tab too, just with an always-empty
-      // initData as its default state. The old assumption here (object
-      // present = show the Telegram-only error/retry UI if initData never
-      // shows up) meant a normal email+password visitor got a scary
-      // "Telegram didn't pass login data" banner on every single page
-      // refresh instead of a quiet cookie-based session restore. Only
-      // commit to "we're in Telegram" once initData actually arrives.
-      if (getTelegramWebApp()) {
-        const initData = await waitForInitData();
-        if (cancelled) return;
-
-        if (!initData) {
-          await refresh();
-          if (!cancelled) setLoading(false);
-          return;
-        }
-
-        setIsTelegram(true);
-        try {
-          let res: AuthResponse;
-          try {
-            res = await api.post<AuthResponse>('/auth/telegram', { initData });
-          } catch (err) {
-            // A rejection the server actually returned (bad signature, stale
-            // initData) won't succeed on retry with the same payload — only
-            // retry a network-level failure, which is exactly what a brief
-            // connectivity blip right as the WebView wakes from background
-            // looks like (the scenario this is guarding against).
-            if (err instanceof ApiError) throw err;
-            await new Promise((resolve) => setTimeout(resolve, 800));
-            if (cancelled) return;
-            res = await api.post<AuthResponse>('/auth/telegram', { initData });
-          }
-          if (cancelled) return;
-          applySession(res);
-        } catch (err) {
-          if (cancelled) return;
-          console.error('Telegram auto-login failed:', err);
-          setTelegramAuthError(
-            err instanceof ApiError
-              ? `Не удалось войти через Telegram: ${err.message}`
-              : 'Не удалось войти через Telegram — проверь соединение и попробуй ещё раз.',
-          );
-        }
-      } else {
-        await refresh();
+      // Nothing below blocks the UI any more: the shell (AppChrome) renders
+      // immediately and this only fills in who's logged in. `loading` now
+      // means "we might still turn out to be signed in, don't show the
+      // signed-out state yet" — so it's dropped the moment we know a guest
+      // is a guest, instead of after a second of Telegram polling plus a
+      // refresh round-trip that was always going to 401.
+      if (isTelegramLaunch()) {
+        await loginWithTelegram();
+        if (!cancelled) setLoading(false);
+        return;
       }
+
+      if (!readSessionHint()) {
+        // Certain enough to paint the signed-out UI right now. The refresh
+        // below still runs — it just isn't allowed to hold up the paint —
+        // so a returning visitor whose localStorage was cleared still gets
+        // picked up a beat later rather than being stuck as a guest.
+        setLoading(false);
+        await refresh();
+        return;
+      }
+
+      await refresh();
       if (!cancelled) setLoading(false);
     }
 
@@ -165,6 +196,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [retryTick]);
+
+  // Safety net for the one case the synchronous check can miss: a Telegram
+  // client that neither leaves its launch parameters in the URL fragment nor
+  // has the SDK ready by first paint. Costs a guest nothing — it only looks
+  // again shortly after mount, and only while nobody is signed in.
+  useEffect(() => {
+    if (user || isTelegram) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled || user || isTelegram) return;
+      if (isTelegramLaunch()) setRetryTick((t) => t + 1);
+    }, 1200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [user, isTelegram]);
 
   const retryTelegramAuth = useCallback(() => {
     setLoading(true);
@@ -213,6 +261,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await api.post('/auth/logout').catch(() => undefined);
     setAccessToken(null);
     setUser(null);
+    writeSessionHint(false);
   }, []);
 
   const value = useMemo(

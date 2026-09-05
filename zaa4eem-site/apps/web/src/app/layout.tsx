@@ -3,6 +3,8 @@ import Script from 'next/script';
 import '../styles/tokens.css';
 import { AuthProvider } from '@/lib/auth-context';
 import { AppChrome } from '@/components/AppChrome';
+import { premiumFontClassNames } from '@/lib/premium-fonts';
+import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar';
 
 const SITE_DESCRIPTION = 'ZAA4EEM — идеи и мини-игры.';
 
@@ -46,18 +48,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru">
-      <head>
-        {/* Premium nickname font options (PremiumStyleFields) — the base UI
-            font stays the system stack in tokens.css; these are only ever
-            applied to a Premium user's own display name. */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@700&family=Playfair+Display:wght@700&family=Russo+One&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="ru" className={premiumFontClassNames}>
       <body>
         {/* Applies the saved theme before first paint — without this, the page
             would always flash the dark default for a frame before React
@@ -65,10 +56,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Script id="theme-init" strategy="beforeInteractive">
           {`try{var t=localStorage.getItem('zaa4eem_theme');if(t==='light')document.documentElement.setAttribute('data-theme','light');}catch(e){}`}
         </Script>
-        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
+        {/* afterInteractive, not beforeInteractive: this SDK is only ever
+            needed inside a Telegram Mini App, and blocking hydration on a
+            third-party script cost every ordinary browser visitor a chunk
+            of the first load. auth-context detects a Telegram launch from
+            the URL fragment (which is there before any script runs) and
+            waits for this file only in that case. */}
+        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="afterInteractive" />
         <AuthProvider>
           <AppChrome>{children}</AppChrome>
         </AuthProvider>
+        <ServiceWorkerRegistrar />
       </body>
     </html>
   );

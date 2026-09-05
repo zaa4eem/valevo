@@ -15,7 +15,6 @@ import { PremiumName } from '@/components/PremiumName';
 import { getRingClass } from '@/components/PremiumAvatar';
 import { PresenceDot } from '@/components/PresenceDot';
 import { PostCard } from '@/components/PostCard';
-import { shareProfileCard } from '@/lib/share-card';
 import '@/styles/premium.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== 'undefined' ? window.location.origin : '');
@@ -41,6 +40,8 @@ export default function PublicProfilePage() {
       const bestScore = profile.stats.bestScoresByGame.length
         ? Math.max(...profile.stats.bestScoresByGame.map((s) => s.value))
         : null;
+      // Canvas renderer pulled in on demand — see PostCard.onShare.
+      const { shareProfileCard } = await import('@/lib/share-card');
       await shareProfileCard(
         {
           displayName: profile.displayName,
@@ -231,6 +232,9 @@ export default function PublicProfilePage() {
                     <img
                       src={profile.avatarUrl}
                       alt={profile.displayName}
+                      width={88}
+                      height={88}
+                      decoding="async"
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   ) : (

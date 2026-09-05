@@ -12,7 +12,6 @@ import { Card } from '@/components/Card';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
 import { PremiumName } from '@/components/PremiumName';
 import { PresenceDot } from '@/components/PresenceDot';
-import { sharePostCard } from '@/lib/share-card';
 
 /** Date + time, everywhere a post's timestamp renders (feed, profile). */
 export function formatDate(iso: string) {
@@ -229,6 +228,10 @@ export function PostCard({
   async function onShare() {
     setSharing(true);
     try {
+      // Loaded on the click, not with the feed: the card renderer is a chunk
+      // of canvas drawing code that every visitor was downloading as part of
+      // the main bundle just in case someone pressed "Поделиться".
+      const { sharePostCard } = await import('@/lib/share-card');
       await sharePostCard({
         authorName: post.author.displayName,
         body: post.body,
@@ -368,11 +371,16 @@ export function PostCard({
             overflow: 'hidden',
           }}
         >
+          {/* Post images come in any aspect ratio, so the box reserves a
+              minimum height rather than exact dimensions — enough to stop
+              the card from collapsing and then jumping when the file lands. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={post.imageUrl}
             alt="Изображение к посту"
-            style={{ maxWidth: '100%', maxHeight: 420, objectFit: 'contain' }}
+            loading="lazy"
+            decoding="async"
+            style={{ maxWidth: '100%', maxHeight: 420, minHeight: 120, objectFit: 'contain' }}
           />
         </div>
       )}

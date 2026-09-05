@@ -202,16 +202,19 @@
   pointer-events: none;
 }
 
+/* The families come from next/font (lib/premium-fonts.ts) as CSS variables
+   rather than a render-blocking <link> to Google — the font file is only
+   fetched once a nickname actually using it is on screen. */
 .pfont-space {
-  font-family: 'Space Grotesk', var(--z-font-sans);
+  font-family: var(--z-font-premium-space), var(--z-font-sans);
   font-weight: 700;
 }
 .pfont-serif {
-  font-family: 'Playfair Display', serif;
+  font-family: var(--z-font-premium-serif), serif;
   font-weight: 700;
 }
 .pfont-pixel {
-  font-family: 'Russo One', var(--z-font-sans);
+  font-family: var(--z-font-premium-pixel), var(--z-font-sans);
 }
 
 @keyframes zp-emoji-bounce {

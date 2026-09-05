@@ -85,7 +85,9 @@ export default function AdminModerationPage() {
                 <img
                   src={post.imageUrl}
                   alt=""
-                  style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 'var(--z-radius-sm)', marginBottom: 10 }}
+                  loading="lazy"
+                  decoding="async"
+                  style={{ width: '100%', height: 320, maxHeight: 320, objectFit: 'cover', borderRadius: 'var(--z-radius-sm)', marginBottom: 10 }}
                 />
               )}
               {post.body && <p style={{ whiteSpace: 'pre-wrap' }}>{post.body}</p>}

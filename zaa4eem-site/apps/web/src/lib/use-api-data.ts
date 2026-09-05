@@ -15,6 +15,11 @@ export function useApiData<T>(path: string | null, deps: unknown[] = []) {
     if (!path) return;
     let cancelled = false;
     setError(false);
+    // Clear first: without this, moving from one profile to another kept the
+    // previous person's data on screen until the new request came back —
+    // briefly showing the wrong user's name and stats as if they were the
+    // one being viewed.
+    setData(null);
     api.get<T>(path).then(
       (result) => {
         if (!cancelled) setData(result);
@@ -26,8 +31,11 @@ export function useApiData<T>(path: string | null, deps: unknown[] = []) {
     return () => {
       cancelled = true;
     };
+    // `path` is tracked explicitly alongside the caller's own deps — it was
+    // possible to change the URL without changing deps, which left the hook
+    // showing data fetched for the previous path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [path, ...deps]);
 
   return { data, error };
 }

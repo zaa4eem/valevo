@@ -27,8 +27,21 @@ export function Avatar({
       }}
     >
       {avatarUrl ? (
+        // Intrinsic width/height (not just the CSS ones) so the browser
+        // reserves the space before the file arrives — an avatar popping in
+        // and shoving the name sideways is the most common source of layout
+        // shift in the feed. loading="lazy" keeps avatars far down a long
+        // list off the critical path.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={avatarUrl} alt={name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <img
+          src={avatarUrl}
+          alt={name}
+          width={size}
+          height={size}
+          loading="lazy"
+          decoding="async"
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
       ) : (
         name.charAt(0).toUpperCase()
       )}

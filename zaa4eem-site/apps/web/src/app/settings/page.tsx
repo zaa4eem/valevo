@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import {
   BANNER_OUTPUT_HEIGHT,
   BANNER_OUTPUT_WIDTH,
@@ -14,8 +15,15 @@ import { api, ApiError } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { Card } from '@/components/Card';
 import { PremiumStyleFields, type PremiumStyleValue } from '@/components/PremiumStyleFields';
-import { AvatarCropper } from '@/components/AvatarCropper';
-import { BannerCropper } from '@/components/BannerCropper';
+// Crop editors are modals that only exist after a file is picked — keeping
+// them out of the page bundle means opening Settings doesn't pay for code
+// most visits never run. ssr:false because both are canvas/pointer-driven.
+const AvatarCropper = dynamic(() => import('@/components/AvatarCropper').then((m) => m.AvatarCropper), {
+  ssr: false,
+});
+const BannerCropper = dynamic(() => import('@/components/BannerCropper').then((m) => m.BannerCropper), {
+  ssr: false,
+});
 
 function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; onLinked: (p: PublicProfile) => void }) {
   const [code, setCode] = useState<string | null>(null);
@@ -468,6 +476,9 @@ export default function SettingsPage() {
               <img
                 src={profile.avatarUrl}
                 alt={profile.displayName}
+                width={72}
+                height={72}
+                decoding="async"
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             ) : (

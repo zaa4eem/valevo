@@ -10,7 +10,6 @@ import { Leaderboard } from '@/components/Leaderboard';
 import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
 import { ZClicker } from '@/components/games/z-clicker/ZClicker';
-import { shareScoreCard } from '@/lib/share-card';
 
 const GAME_ICONS: Record<string, string> = {
   'neon-snake': '🐍',
@@ -77,6 +76,8 @@ export default function GameDetailPage() {
     if (lastScore === null || !game) return;
     setSharing(true);
     try {
+      // Canvas renderer pulled in on demand — see PostCard.onShare.
+      const { shareScoreCard } = await import('@/lib/share-card');
       await shareScoreCard(game.title, lastScore);
     } finally {
       setSharing(false);
