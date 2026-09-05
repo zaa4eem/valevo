@@ -4,6 +4,7 @@ import { ModerationState } from '@zaa4eem/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
+import { computePresence } from '../common/presence.util';
 
 const POST_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 
@@ -22,6 +23,7 @@ function serializePost(post: any, viewerId?: string, followingIds?: Set<string>)
       avatarUrl: post.author.avatarUrl,
       role: post.author.role,
       viewerIsFollowing: viewerId ? Boolean(followingIds?.has(post.author.id)) : undefined,
+      presence: computePresence(post.author.lastActiveAt),
       isPremium: post.author.isPremium,
       nameStyle: post.author.nameStyle,
       nameColor: post.author.nameColor,
@@ -68,6 +70,8 @@ export class PostsService {
     viewerIsOwner: boolean;
     cursor?: string;
     limit?: number;
+    authorId?: string;
+    sort?: 'date' | 'popularity';
   }) {
     const limit = opts.limit ?? 20;
     // The owner sees every post regardless of moderation state. Everyone else
@@ -76,20 +80,30 @@ export class PostsService {
     // state, so posting something that lands in PENDING_REVIEW (e.g. it has
     // an image, see PostsService.create) doesn't just vanish from the
     // poster's own feed; it still shows the "на проверке" state instead.
-    const where = opts.viewerIsOwner
-      ? { publishedAt: { not: null } }
+    const visibilityWhere: Prisma.PostWhereInput = opts.viewerIsOwner
+      ? {}
       : opts.viewerId
         ? {
-            publishedAt: { not: null },
             OR: [
               { moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] } },
               { authorId: opts.viewerId },
             ],
           }
-        : {
-            publishedAt: { not: null },
-            moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] },
-          };
+        : { moderationState: { in: [ModerationState.CLEAN, ModerationState.APPROVED] } };
+
+    const where: Prisma.PostWhereInput = {
+      publishedAt: { not: null },
+      ...(opts.authorId ? { authorId: opts.authorId } : {}),
+      ...visibilityWhere,
+    };
+
+    // Likes-only "popularity" — folding comments in too would need a
+    // combined-relation sort Prisma can't express without raw SQL, so this
+    // stays a deliberate simplification rather than a true "engagement" sort.
+    const orderBy: Prisma.PostOrderByWithRelationInput[] =
+      opts.sort === 'popularity'
+        ? [{ likes: { _count: 'desc' } }, { publishedAt: 'desc' }, { id: 'desc' }]
+        : [{ publishedAt: 'desc' }, { id: 'desc' }];
 
     const posts = await this.prisma.post.findMany({
       where,
@@ -98,7 +112,7 @@ export class PostsService {
         _count: { select: { likes: true, comments: true } },
         likes: opts.viewerId ? { where: { userId: opts.viewerId } } : false,
       },
-      orderBy: [{ publishedAt: 'desc' }, { id: 'desc' }],
+      orderBy,
       take: limit + 1,
       ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
     });

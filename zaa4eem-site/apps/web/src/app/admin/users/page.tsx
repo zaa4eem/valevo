@@ -212,7 +212,7 @@ export default function AdminUsersPage() {
                   </Link>
                 </td>
                 <td style={{ padding: '10px' }}>
-                  {u.role === 'OWNER' ? <span className="z-badge-owner">Owner</span> : 'Подписчик'}
+                  {u.role === 'OWNER' ? <span className="z-badge-owner">Владелец проекта</span> : 'Подписчик'}
                 </td>
                 <td style={{ padding: '10px' }}>
                   <span

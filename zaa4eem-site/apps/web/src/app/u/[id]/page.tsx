@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import type { PublicProfile } from '@zaa4eem/shared';
+import type { PaginatedPosts, Post, PublicProfile } from '@zaa4eem/shared';
 import { formatMemberNumber } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
@@ -13,6 +13,8 @@ import { StatTile } from '@/components/StatTile';
 import { Skeleton, SkeletonCircle, SkeletonText } from '@/components/Skeleton';
 import { PremiumName } from '@/components/PremiumName';
 import { getRingClass } from '@/components/PremiumAvatar';
+import { PresenceDot } from '@/components/PresenceDot';
+import { PostCard } from '@/components/PostCard';
 import { shareProfileCard } from '@/lib/share-card';
 import '@/styles/premium.css';
 
@@ -27,6 +29,10 @@ export default function PublicProfilePage() {
   const [followBusy, setFollowBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [ideaCreditsOpen, setIdeaCreditsOpen] = useState(false);
+  const [posts, setPosts] = useState<Post[] | null>(null);
+  const [postsNextCursor, setPostsNextCursor] = useState<string | null>(null);
+  const [postsError, setPostsError] = useState(false);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
 
   async function onShareProfile() {
     if (!profile) return;
@@ -88,6 +94,64 @@ export default function PublicProfilePage() {
       .catch(() => setNotFound(true));
   }, [params.id]);
 
+  const loadPosts = useCallback(async () => {
+    setPostsError(false);
+    try {
+      const page = await api.get<PaginatedPosts>(`/posts?authorId=${params.id}`);
+      setPosts(page.items);
+      setPostsNextCursor(page.nextCursor);
+    } catch {
+      setPostsError(true);
+    }
+  }, [params.id]);
+
+  useEffect(() => {
+    loadPosts();
+  }, [loadPosts]);
+
+  async function loadMorePosts() {
+    if (!postsNextCursor || loadingMorePosts) return;
+    setLoadingMorePosts(true);
+    try {
+      const page = await api.get<PaginatedPosts>(`/posts?authorId=${params.id}&cursor=${postsNextCursor}`);
+      setPosts([...(posts ?? []), ...page.items]);
+      setPostsNextCursor(page.nextCursor);
+    } catch {
+      // Leave the loaded posts as-is — "Показать ещё" stays put to retry.
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  }
+
+  function replacePost(updated: Post) {
+    setPosts((posts ?? []).map((p) => (p.id === updated.id ? updated : p)));
+  }
+
+  function removePostFromList(postId: string) {
+    setPosts((posts ?? []).filter((p) => p.id !== postId));
+  }
+
+  async function toggleFollowAuthor(authorId: string, currentlyFollowing: boolean) {
+    haptic('light');
+    setPosts(
+      (posts ?? []).map((p) =>
+        p.author.id === authorId
+          ? { ...p, author: { ...p.author, viewerIsFollowing: !currentlyFollowing } }
+          : p,
+      ),
+    );
+    try {
+      if (currentlyFollowing) await api.delete(`/users/${authorId}/follow`);
+      else await api.post(`/users/${authorId}/follow`);
+    } catch {
+      setPosts(
+        (posts ?? []).map((p) =>
+          p.author.id === authorId ? { ...p, author: { ...p.author, viewerIsFollowing: currentlyFollowing } } : p,
+        ),
+      );
+    }
+  }
+
   if (notFound) return <p style={{ color: 'var(--z-text-muted)' }}>Пользователь не найден.</p>;
 
   if (!profile) {
@@ -123,9 +187,11 @@ export default function PublicProfilePage() {
         <div
           style={{
             height: 96,
-            background: isOwner
-              ? 'linear-gradient(120deg, var(--z-accent-strong), var(--z-accent) 60%, var(--z-accent-soft))'
-              : 'linear-gradient(120deg, var(--z-surface-hover), var(--z-border))',
+            background: profile.bannerUrl
+              ? `center/cover url(${profile.bannerUrl})`
+              : isOwner
+                ? 'linear-gradient(120deg, var(--z-accent-strong), var(--z-accent) 60%, var(--z-accent-soft))'
+                : 'linear-gradient(120deg, var(--z-surface-hover), var(--z-border))',
           }}
         />
         <div style={{ padding: 20, marginTop: -48 }}>
@@ -137,7 +203,7 @@ export default function PublicProfilePage() {
                   that div's own overflow: hidden (used to crop the photo). */}
               <span
                 className={getRingClass(profile) || undefined}
-                style={{ display: 'inline-flex', borderRadius: '50%', flexShrink: 0 }}
+                style={{ display: 'inline-flex', borderRadius: '50%', flexShrink: 0, position: 'relative' }}
               >
                 <div
                   style={{
@@ -167,6 +233,7 @@ export default function PublicProfilePage() {
                     profile.displayName.charAt(0).toUpperCase()
                   )}
                 </div>
+                <PresenceDot presence={profile.presence} style={{ position: 'absolute', right: 2, bottom: 2 }} />
               </span>
               <div style={{ paddingBottom: 4 }}>
                 <span className="z-badge" style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-faint)' }}>
@@ -195,7 +262,7 @@ export default function PublicProfilePage() {
           <div style={{ marginTop: 12 }}>
             <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <PremiumName name={profile.displayName} premium={profile} />
-              {isOwner && <span className="z-badge-owner">Owner</span>}
+              {isOwner && <span className="z-badge-owner">Владелец проекта</span>}
               {profile.ideaCredits.length > 0 && (
                 <button
                   className="z-badge-idea-credit z-pop-on-active"
@@ -204,6 +271,16 @@ export default function PublicProfilePage() {
                   💡 Автор идеи
                 </button>
               )}
+              {profile.ideaAuthorLevel !== null && (
+                <span className="z-badge-idea-level" title="Уровень растёт с числом принятых идей">
+                  ⭐ Ур. {profile.ideaAuthorLevel}
+                </span>
+              )}
+              {profile.topGameBadges.map((badge) => (
+                <span key={badge.gameSlug} className="z-badge-top1" title={`Топ-1 в игре «${badge.gameTitle}»`}>
+                  🏆 Топ-1 {badge.gameTitle}
+                </span>
+              ))}
             </h1>
             {ideaCreditsOpen && profile.ideaCredits.length > 0 && (
               <div
@@ -299,6 +376,40 @@ export default function PublicProfilePage() {
           </Card>
         </div>
       )}
+
+      <div className="z-animate-in" style={{ marginTop: 24, animationDelay: '180ms' }}>
+        <h3 style={{ marginBottom: 12 }}>Посты</h3>
+        {postsError ? (
+          <p style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>Не удалось загрузить посты.</p>
+        ) : posts === null ? (
+          <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>Загрузка…</p>
+        ) : posts.length === 0 ? (
+          <p style={{ color: 'var(--z-text-faint)', fontSize: 'var(--z-fs-sm)' }}>Постов пока нет.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {posts.map((post, i) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                onChange={replacePost}
+                onDelete={removePostFromList}
+                onToggleFollowAuthor={toggleFollowAuthor}
+                index={i}
+              />
+            ))}
+            {postsNextCursor && (
+              <button
+                onClick={loadMorePosts}
+                disabled={loadingMorePosts}
+                className="z-btn-ghost z-pop-on-active"
+                style={{ alignSelf: 'center', opacity: loadingMorePosts ? 0.6 : 1 }}
+              >
+                {loadingMorePosts ? 'Загрузка…' : 'Показать ещё'}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

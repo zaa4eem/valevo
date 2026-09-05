@@ -54,6 +54,13 @@ export const updateProfileSchema = z.object({
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 
+/** online: heartbeat within 5 min · away: 5–30 min ago · offline: >30 min ago or never. */
+export const presenceValues = ['ONLINE', 'AWAY', 'OFFLINE'] as const;
+export type Presence = (typeof presenceValues)[number];
+
+export const topGameBadgeSchema = z.object({ gameSlug: z.string(), gameTitle: z.string() });
+export type TopGameBadge = z.infer<typeof topGameBadgeSchema>;
+
 /**
  * Sent alongside a GIF avatar upload (multipart form fields, hence
  * z.coerce) so the backend can crop+resize it with gifsicle — frame by
@@ -74,14 +81,27 @@ export const publicProfileSchema = z
     role: z.enum(['OWNER', 'SUBSCRIBER']),
     displayName: z.string(),
     avatarUrl: z.string().nullable(),
+    bannerUrl: z.string().nullable(),
     bio: z.string().nullable(),
     statusText: z.string().nullable(),
     hasTelegram: z.boolean(),
     telegramUsername: z.string().nullable(),
+    // Whether an email/password login is set — never the hash itself. Lets
+    // Settings' "Безопасность" section know if it should ask for the
+    // *current* password before accepting a new one (Telegram/Google-only
+    // accounts have none to check yet).
+    hasPassword: z.boolean(),
     createdAt: z.string(),
     followerCount: z.number().int().nonnegative(),
     followingCount: z.number().int().nonnegative(),
     viewerIsFollowing: z.boolean().optional(),
+    presence: z.enum(presenceValues),
+    // 1..999, derived from stats.ideasAcceptedCount (capped) — null if they've
+    // never had an idea accepted, so no badge renders at all.
+    ideaAuthorLevel: z.number().int().min(1).max(999).nullable(),
+    // Current #1 on a game's leaderboard, recomputed fresh on every profile
+    // fetch — never stored, so it moves the instant someone else takes the spot.
+    topGameBadges: z.array(topGameBadgeSchema),
     // Public by design — an invite code is meant to be shared, not a secret.
     referralCode: z.string(),
     usedTrialPremium: z.boolean(),

@@ -237,6 +237,34 @@ export class AuthService {
     await this.tokens.revokeAllForUser(userId);
   }
 
+  /**
+   * Settings → "Безопасность". Unlike resetPassword (a pre-login, "I might
+   * have lost control" flow), this is called from an active session — so
+   * only every *other* session gets signed out, not this one (see
+   * TokenService.revokeAllForUser's exceptRawToken).
+   */
+  async changePassword(
+    userId: string,
+    currentPassword: string | undefined,
+    newPassword: string,
+    currentRawRefreshToken?: string,
+  ): Promise<void> {
+    const user = await this.users.findById(userId);
+    if (!user) throw new UnauthorizedException('Пользователь не найден');
+
+    if (user.passwordHash) {
+      if (!currentPassword || !(await verifyPassword(currentPassword, user.passwordHash))) {
+        throw new UnauthorizedException('Неверный текущий пароль');
+      }
+    }
+    // No passwordHash yet (Telegram/Google-only account) — this is a
+    // first-time password *set*, so there's nothing to check it against.
+
+    const passwordHash = await hashPassword(newPassword);
+    await this.users.setPassword(userId, passwordHash);
+    await this.tokens.revokeAllForUser(userId, currentRawRefreshToken);
+  }
+
   private async issueSession(userId: string, role: string) {
     const [accessToken, refreshToken, profile] = await Promise.all([
       this.tokens.signAccessToken({ sub: userId, role }),

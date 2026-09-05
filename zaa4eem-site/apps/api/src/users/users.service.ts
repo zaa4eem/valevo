@@ -4,6 +4,13 @@ import { PrismaService } from '../prisma/prisma.service';
 import { IdeaStatus } from '@zaa4eem/shared';
 import { TelegramNotifyService } from '../common/telegram-notify.service';
 import { ensurePremiumFresh, grantTrialPremiumIfUnused } from '../common/premium.util';
+import { computePresence } from '../common/presence.util';
+import { GamesService } from '../games/games.service';
+import { ClickerService } from '../clicker/clicker.service';
+
+const CLICKER_SLUG = 'z-clicker';
+const CLICKER_TITLE = 'Z-Кликер';
+const MAX_IDEA_AUTHOR_LEVEL = 999;
 
 function serializeUserSummary(user: any) {
   return {
@@ -30,6 +37,8 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notify: TelegramNotifyService,
+    private readonly games: GamesService,
+    private readonly clicker: ClickerService,
   ) {}
 
   findById(id: string) {
@@ -158,11 +167,22 @@ export class UsersService {
     data: {
       displayName?: string;
       avatarUrl?: string | null;
+      bannerUrl?: string | null;
       bio?: string | null;
       statusText?: string | null;
     },
   ) {
     return this.prisma.user.update({ where: { id: userId }, data });
+  }
+
+  /**
+   * Called by the frontend's interaction-driven heartbeat (any click/tap on
+   * the site) — drives the online/away/offline presence indicator. A plain
+   * last-write-wins update is fine here: there's no invariant to protect,
+   * just a timestamp that only ever needs to be "recent enough".
+   */
+  async heartbeat(userId: string): Promise<void> {
+    await this.prisma.user.update({ where: { id: userId }, data: { lastActiveAt: new Date() } });
   }
 
   /**
@@ -256,14 +276,43 @@ export class UsersService {
     };
   }
 
+  /**
+   * Current #1 holder per game, recomputed live (never stored) so the
+   * "Топ-1" badge transfers the instant someone else takes the spot.
+   * Z-Кликер is checked separately (via ClickerService.leaderboard) since
+   * its economy lives on User.zCoins, not the Score table other games use.
+   */
+  private async getTopGameBadges(userId: string): Promise<{ gameSlug: string; gameTitle: string }[]> {
+    const badges: { gameSlug: string; gameTitle: string }[] = [];
+    const activeGames = await this.games.listActive();
+    for (const game of activeGames) {
+      if (game.slug === CLICKER_SLUG) continue;
+      const [top] = await this.games.leaderboardForGame(game.slug, 1);
+      if (top && top.userId === userId) badges.push({ gameSlug: game.slug, gameTitle: game.title });
+    }
+    const [clickerTop] = await this.clicker.leaderboard(1);
+    if (clickerTop && clickerTop.userId === userId) {
+      badges.push({ gameSlug: CLICKER_SLUG, gameTitle: CLICKER_TITLE });
+    }
+    return badges;
+  }
+
   /** Public profile + derived stats (FR-004). */
   async getPublicProfile(userId: string, viewerId?: string) {
     const raw = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!raw) return null;
     const user = await ensurePremiumFresh(this.prisma, raw);
 
-    const [ideasSubmittedCount, ideasAcceptedCount, scores, followerCount, followingCount, viewerFollow, ideaCredits] =
-      await Promise.all([
+    const [
+      ideasSubmittedCount,
+      ideasAcceptedCount,
+      scores,
+      followerCount,
+      followingCount,
+      viewerFollow,
+      ideaCredits,
+      topGameBadges,
+    ] = await Promise.all([
         this.prisma.idea.count({ where: { submitterId: userId } }),
         this.prisma.idea.count({
           where: {
@@ -284,6 +333,7 @@ export class UsersService {
             })
           : null,
         this.prisma.ideaCredit.findMany({ where: { creditedId: userId }, orderBy: { createdAt: 'desc' } }),
+        this.getTopGameBadges(userId),
       ]);
 
     const bestByGame = new Map<string, { gameSlug: string; gameTitle: string; value: number }>();
@@ -304,14 +354,19 @@ export class UsersService {
       role: user.role,
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
+      bannerUrl: user.bannerUrl,
       bio: user.bio,
       statusText: user.statusText,
       hasTelegram: user.telegramId !== null,
       telegramUsername: user.telegramUsername,
+      hasPassword: user.passwordHash !== null,
       createdAt: user.createdAt.toISOString(),
       followerCount,
       followingCount,
       viewerIsFollowing: viewerId ? Boolean(viewerFollow) : undefined,
+      presence: computePresence(user.lastActiveAt),
+      ideaAuthorLevel: ideasAcceptedCount > 0 ? Math.min(ideasAcceptedCount, MAX_IDEA_AUTHOR_LEVEL) : null,
+      topGameBadges,
       isPremium: user.isPremium,
       nameStyle: user.nameStyle,
       nameColor: user.nameColor,

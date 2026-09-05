@@ -3,7 +3,10 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   NotFoundException,
   Param,
   Patch,
@@ -24,6 +27,7 @@ import {
   updateProfileSchema,
   userListQuerySchema,
 } from '@zaa4eem/shared';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { CurrentUser, RequestUser } from '../auth/current-user.decorator';
@@ -31,6 +35,7 @@ import { UsersService } from './users.service';
 import { ModerationService } from '../moderation/moderation.service';
 import { matchesImageSignature } from '../common/image-signature';
 import { avatarUploadOptions } from './avatar-storage';
+import { bannerUploadOptions } from './banner-storage';
 import { cropGifInPlace } from './gif-crop.util';
 
 @Controller('users')
@@ -103,6 +108,42 @@ export class UsersController {
     const avatarUrl = `${origin}/uploads/avatars/${file.filename}`;
     await this.users.updateProfile(user.id, { avatarUrl });
     return this.users.getPublicProfile(user.id);
+  }
+
+  // Premium-only, unlike the avatar upload above — checked here (after the
+  // file already landed on disk, same as the signature check below) rather
+  // than in a guard, since the profile's current isPremium needs a fresh DB
+  // read anyway (ensurePremiumFresh, via getPublicProfile) to rule out a
+  // lapsed grant nobody's touched since it expired.
+  @UseGuards(JwtAuthGuard)
+  @Post('me/banner')
+  @UseInterceptors(FileInterceptor('banner', bannerUploadOptions))
+  async uploadBanner(@CurrentUser() user: RequestUser, @UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Файл не загружен');
+    const profile = await this.users.getPublicProfile(user.id);
+    if (!profile?.isPremium) {
+      await fs.promises.rm(file.path, { force: true });
+      throw new ForbiddenException('Баннер профиля доступен только Premium-пользователям');
+    }
+    if (!(await matchesImageSignature(file.path, file.mimetype))) {
+      await fs.promises.rm(file.path, { force: true });
+      throw new BadRequestException('Файл повреждён или не является изображением заявленного типа');
+    }
+    const origin = this.config.get<string>('API_PUBLIC_URL', 'http://localhost:3001');
+    const bannerUrl = `${origin}/uploads/banners/${file.filename}`;
+    await this.users.updateProfile(user.id, { bannerUrl });
+    return this.users.getPublicProfile(user.id);
+  }
+
+  // Fired by the frontend's interaction-driven heartbeat (auth-context.tsx) —
+  // throttled client-side to ~once/minute already, this is just a floor so a
+  // misbehaving tab can't hammer it.
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 6, ttl: 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('me/heartbeat')
+  async heartbeat(@CurrentUser() user: RequestUser) {
+    await this.users.heartbeat(user.id);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

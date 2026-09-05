@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { premiumFieldsSchema } from './users';
+import { premiumFieldsSchema, presenceValues } from './users';
 import { ModerationState } from '../enums';
 
 const moderationStateValues = Object.values(ModerationState) as [ModerationState, ...ModerationState[]];
@@ -43,6 +43,7 @@ export const postSchema = z.object({
       avatarUrl: z.string().nullable(),
       role: z.enum(['OWNER', 'SUBSCRIBER']),
       viewerIsFollowing: z.boolean().optional(),
+      presence: z.enum(presenceValues),
     })
     .merge(premiumFieldsSchema),
   likeCount: z.number().int().nonnegative(),
@@ -76,6 +77,11 @@ export type Comment = z.infer<typeof commentSchema>;
 export const postsQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  // Scopes the feed to one author's posts — used by the public profile page.
+  authorId: z.string().uuid().optional(),
+  // 'popularity' orders by like count — comments aren't folded in (would
+  // need a combined-relation raw-SQL order), so it's likes-only by design.
+  sort: z.enum(['date', 'popularity']).default('date'),
 });
 export type PostsQuery = z.infer<typeof postsQuerySchema>;
 

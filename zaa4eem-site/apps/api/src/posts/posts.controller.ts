@@ -44,12 +44,14 @@ export class PostsController {
   @UseGuards(OptionalJwtAuthGuard)
   @Get()
   list(@Query() query: unknown, @Req() req: Request & { user?: RequestUser }) {
-    const { cursor, limit } = postsQuerySchema.parse(query);
+    const { cursor, limit, authorId, sort } = postsQuerySchema.parse(query);
     return this.posts.listPublished({
       viewerId: req.user?.id,
       viewerIsOwner: req.user?.role === 'OWNER',
       cursor,
       limit,
+      authorId,
+      sort,
     });
   }
 

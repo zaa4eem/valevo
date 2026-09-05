@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  changePasswordSchema,
   updateProfileSchema,
   formatMemberNumber,
   type PublicProfile,
@@ -104,6 +105,146 @@ function TelegramLinkSettings({ profile, onLinked }: { profile: PublicProfile; o
   );
 }
 
+function BannerSettings({ profile, onSaved }: { profile: PublicProfile; onSaved: (p: PublicProfile) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('banner', file);
+      const updated = await api.upload<PublicProfile>('/users/me/banner', form);
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось загрузить баннер');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--z-border)' }}>
+      <div style={{ fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)', marginBottom: 10 }}>
+        Баннер профиля — показывается в шапке твоей страницы вместо градиента.
+      </div>
+      <div
+        style={{
+          height: 72,
+          borderRadius: 'var(--z-radius-md)',
+          background: profile.bannerUrl ? `center/cover url(${profile.bannerUrl})` : 'var(--z-bg-elevated)',
+          border: '1px solid var(--z-border)',
+          marginBottom: 10,
+        }}
+      />
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        onChange={onChange}
+        disabled={uploading}
+        style={{ display: 'none' }}
+        id="banner-input"
+      />
+      <label htmlFor="banner-input" className="z-btn-ghost z-pop-on-active" style={{ cursor: 'pointer' }}>
+        {uploading ? 'Загрузка…' : 'Изменить баннер'}
+      </label>
+      {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+function SecuritySettings({ hasPassword }: { hasPassword: boolean }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSaved(false);
+
+    const parsed = changePasswordSchema.safeParse({
+      currentPassword: hasPassword ? currentPassword : undefined,
+      newPassword,
+    });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Проверьте поля формы');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await api.post('/auth/change-password', parsed.data);
+      setCurrentPassword('');
+      setNewPassword('');
+      setSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось сменить пароль');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card hover className="z-animate-in" style={{ marginTop: 20 }}>
+      <h2 style={{ marginTop: 0, fontSize: 'var(--z-fs-lg)', display: 'flex', alignItems: 'center', gap: 8 }}>
+        🔒 Безопасность
+      </h2>
+      <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', marginTop: -8, marginBottom: 16 }}>
+        {hasPassword
+          ? 'Смена пароля завершает сеансы на всех остальных устройствах.'
+          : 'Пароль ещё не задан — можно установить его для входа по почте.'}
+      </p>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {hasPassword && (
+          <label>
+            <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
+              Текущий пароль
+            </div>
+            <input
+              className="z-input"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+        )}
+        <label>
+          <div style={{ marginBottom: 6, fontSize: 'var(--z-fs-sm)', color: 'var(--z-text-muted)' }}>
+            Новый пароль
+          </div>
+          <input
+            className="z-input"
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+        </label>
+        {error && <div style={{ color: 'var(--z-danger)', fontSize: 'var(--z-fs-sm)' }}>{error}</div>}
+        {saved && <div style={{ color: 'var(--z-accent)', fontSize: 'var(--z-fs-sm)' }}>Пароль обновлён!</div>}
+        <button
+          type="submit"
+          disabled={saving || !newPassword}
+          className="z-btn-accent z-pop-on-active"
+          style={{ alignSelf: 'flex-start', opacity: saving || !newPassword ? 0.6 : 1 }}
+        >
+          {saving ? 'Сохранение…' : hasPassword ? 'Сменить пароль' : 'Задать пароль'}
+        </button>
+      </form>
+    </Card>
+  );
+}
+
 function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved: (p: PublicProfile) => void }) {
   const [style, setStyle] = useState<PremiumStyleValue>({
     nameStyle: profile.nameStyle ?? 'NONE',
@@ -158,6 +299,7 @@ function PremiumSettings({ profile, onSaved }: { profile: PublicProfile; onSaved
       >
         {saving ? 'Сохранение…' : 'Сохранить'}
       </button>
+      <BannerSettings profile={profile} onSaved={onSaved} />
     </Card>
   );
 }
@@ -349,6 +491,8 @@ export default function SettingsPage() {
       </Card>
 
       <TelegramLinkSettings profile={profile} onLinked={setProfile} />
+
+      <SecuritySettings hasPassword={profile.hasPassword} />
 
       {profile.isPremium && <PremiumSettings profile={profile} onSaved={setProfile} />}
 

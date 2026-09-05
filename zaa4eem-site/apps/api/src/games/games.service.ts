@@ -61,7 +61,10 @@ export class GamesService implements OnModuleInit {
     const scores = await this.prisma.score.findMany({
       where: { gameId: game.id, reviewState: ScoreReviewState.NORMAL },
       include: { user: true },
-      orderBy: { value: 'desc' },
+      // Tiebreak by createdAt asc (earliest achiever ranks higher) — without
+      // it, rank #1 on an exact tie would depend on Postgres' arbitrary
+      // return order, which the "Топ-1" profile badge needs to never be.
+      orderBy: [{ value: 'desc' }, { createdAt: 'asc' }],
     });
 
     const bestPerUser = new Map<string, (typeof scores)[number]>();
@@ -73,7 +76,7 @@ export class GamesService implements OnModuleInit {
     }
 
     return [...bestPerUser.values()]
-      .sort((a, b) => b.value - a.value)
+      .sort((a, b) => b.value - a.value || a.createdAt.getTime() - b.createdAt.getTime())
       .slice(0, limit)
       .map((score, index) => ({
         rank: index + 1,

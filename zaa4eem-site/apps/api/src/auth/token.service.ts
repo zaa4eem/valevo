@@ -94,9 +94,17 @@ export class TokenService {
     });
   }
 
-  async revokeAllForUser(userId: string): Promise<void> {
+  /**
+   * exceptRawToken lets a logged-in change-password flow keep the *current*
+   * browser session alive while still nuking every other one — unlike
+   * resetPassword (an unauthenticated flow with no "current session" to
+   * preserve), changePassword is called from an active session whose
+   * refresh cookie rides along on the same request.
+   */
+  async revokeAllForUser(userId: string, exceptRawToken?: string): Promise<void> {
+    const exceptHash = exceptRawToken ? this.hashRefreshToken(exceptRawToken) : undefined;
     await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
+      where: { userId, revokedAt: null, ...(exceptHash ? { tokenHash: { not: exceptHash } } : {}) },
       data: { revokedAt: new Date() },
     });
   }

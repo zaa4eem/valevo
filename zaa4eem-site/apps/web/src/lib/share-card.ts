@@ -176,3 +176,86 @@ export async function shareProfileCard(data: ProfileCardData, profileUrl: string
   const text = `Профиль ${data.displayName} на ZAA4EEM: ${profileUrl}`;
   return shareCanvas(canvas, 'zaa4eem-profile.png', text);
 }
+
+export interface PostCardData {
+  authorName: string;
+  body: string;
+  likeCount: number;
+  commentCount: number;
+}
+
+/** Post text is arbitrary length — wrapped to a fixed width and clamped to a few lines so the card never overflows. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ');
+  const lines: string[] = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (ctx.measureText(candidate).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+      if (lines.length === maxLines) break;
+    } else {
+      line = candidate;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  if (lines.length === maxLines && words.join(' ').length > lines.join(' ').length) {
+    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/…$/, '')}…`;
+  }
+  return lines;
+}
+
+/** Renders a shareable card for one post — same visual language as the score/profile cards. */
+function renderPostCard(data: PostCardData): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 800;
+  canvas.height = 800;
+  const ctx = canvas.getContext('2d')!;
+
+  const bgGradient = ctx.createLinearGradient(0, 0, 800, 800);
+  bgGradient.addColorStop(0, '#122016');
+  bgGradient.addColorStop(0.6, '#0b0e0d');
+  ctx.fillStyle = bgGradient;
+  ctx.fillRect(0, 0, 800, 800);
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '900 32px Inter, sans-serif';
+  ctx.fillText(data.authorName, 60, 140);
+
+  ctx.fillStyle = '#5b6b65';
+  ctx.font = '600 22px Inter, sans-serif';
+  ctx.fillText('на ZAA4EEM', 60, 172);
+
+  ctx.fillStyle = '#f4f7f5';
+  ctx.font = '500 34px Inter, sans-serif';
+  const lines = wrapText(ctx, data.body, 680, 8);
+  lines.forEach((line, i) => ctx.fillText(line, 60, 260 + i * 46));
+
+  ctx.fillStyle = '#8fa39a';
+  ctx.font = '600 24px Inter, sans-serif';
+  ctx.fillText(`🤍 ${data.likeCount}   💬 ${data.commentCount}`, 60, 620);
+
+  ctx.strokeStyle = '#232b28';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(60, 660);
+  ctx.lineTo(740, 660);
+  ctx.stroke();
+
+  ctx.fillStyle = '#5b6b65';
+  ctx.font = '600 22px Inter, sans-serif';
+  ctx.fillText('Читай на', 60, 720);
+  ctx.fillStyle = '#4ade80';
+  ctx.font = '900 28px Inter, sans-serif';
+  ctx.fillText('ZAA4EEM', 200, 722);
+
+  return canvas;
+}
+
+export async function sharePostCard(data: PostCardData): Promise<'shared' | 'downloaded'> {
+  const canvas = renderPostCard(data);
+  const text = `Пост от ${data.authorName} на ZAA4EEM: ${SITE_URL}`;
+  return shareCanvas(canvas, 'zaa4eem-post.png', text);
+}

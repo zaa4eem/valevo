@@ -6,5 +6,7 @@ import { ShopController } from './shop.controller';
 @Module({
   providers: [ClickerService],
   controllers: [ClickerController, ShopController],
+  // UsersModule needs this for the "Топ-1 Z-Кликер" profile badge.
+  exports: [ClickerService],
 })
 export class ClickerModule {}

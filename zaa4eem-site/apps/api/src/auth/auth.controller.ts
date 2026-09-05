@@ -13,6 +13,7 @@ import {
 import type { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import {
+  changePasswordSchema,
   consumeTelegramLinkCodeSchema,
   forgotPasswordSchema,
   googleAuthSchema,
@@ -176,5 +177,16 @@ export class AuthController {
     const { token, password } = resetPasswordSchema.parse(body);
     await this.auth.resetPassword(token, password);
     return { message: 'Пароль обновлён — теперь можно войти с новым паролем.' };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  async changePassword(@CurrentUser() user: RequestUser, @Body() body: unknown, @Req() req: Request) {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(body);
+    const raw = req.cookies?.[REFRESH_COOKIE];
+    await this.auth.changePassword(user.id, currentPassword, newPassword, raw);
+    return { message: 'Пароль обновлён. Остальные устройства вышли из аккаунта.' };
   }
 }

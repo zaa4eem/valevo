@@ -138,7 +138,12 @@ export class ClickerService {
   async leaderboard(limit = 20) {
     const top = await this.prisma.user.findMany({
       where: { zCoins: { gt: 0 } },
-      orderBy: { zCoins: 'desc' },
+      // zCoins is a live balance with no "achieved at" timestamp to tiebreak
+      // on (unlike a game Score row) — memberNumber asc (earliest account)
+      // is an arbitrary but deterministic tiebreak, so rank #1 on an exact
+      // tie never depends on Postgres' unspecified return order (the
+      // "Топ-1 Z-Кликер" profile badge needs this to be unambiguous).
+      orderBy: [{ zCoins: 'desc' }, { memberNumber: 'asc' }],
       take: limit,
     });
     return top.map((user, index) => ({

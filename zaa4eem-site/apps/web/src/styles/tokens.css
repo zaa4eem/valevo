@@ -340,6 +340,49 @@ img {
   background: rgba(251, 113, 133, 0.22);
 }
 
+/* Idea-author level — derived from accepted-ideas count (1 accepted = level 1, capped at 999). */
+.z-badge-idea-level {
+  display: inline-block;
+  font-size: var(--z-fs-xs);
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+}
+
+/* Current #1 on a game's leaderboard — recomputed live on every profile fetch, so it moves the instant someone else takes the top spot. */
+.z-badge-top1 {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--z-fs-xs);
+  font-weight: 800;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #fde68a, #f59e0b 60%, #d97706);
+  color: #140f00;
+}
+
+/* Online/away/offline presence — overlaid on an avatar's corner. */
+.z-presence-dot {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--z-surface);
+  flex-shrink: 0;
+}
+.z-presence-dot--online {
+  background: #22c55e;
+}
+.z-presence-dot--away {
+  background: #eab308;
+}
+.z-presence-dot--offline {
+  background: var(--z-text-faint);
+}
+
 /* Navbar Z-Кликер balance — same pill language as .z-badge, sized for the navbar. */
 .z-navbar-zcoins {
   display: inline-flex;

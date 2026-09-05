@@ -83,6 +83,17 @@ model User {
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
+  // Premium-only cosmetic (ProfileService.uploadBanner) — shown behind the
+  // avatar on the public profile header. bannerUrl persists even if Premium
+  // later lapses (matches how nameStyle/ringStyle etc. already work); it
+  // just stops being *settable* until Premium is active again.
+  bannerUrl         String?
+  // Last time this user's browser sent a heartbeat (any click/keypress/tap)
+  // — drives the online/away/offline presence indicator, computed lazily
+  // from this timestamp (see common/presence.util.ts) rather than stored as
+  // an enum, so it's never stale.
+  lastActiveAt      DateTime?
+
   // Premium cosmetics — granted either by the owner (admin panel) or
   // self-service via the Z-Coin shop (ShopService.buyPremium). Either path
   // just flips isPremium; the style fields below are always the user's own

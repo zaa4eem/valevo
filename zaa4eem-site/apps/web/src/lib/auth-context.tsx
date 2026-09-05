@@ -171,6 +171,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setRetryTick((t) => t + 1);
   }, []);
 
+  // Drives the online/away/offline presence indicator (PresenceDot) — any
+  // click/keypress/tap counts as activity, throttled to at most once/minute
+  // so a busy session doesn't hammer the endpoint. lastSentAt is a ref (not
+  // state) purely to survive this effect re-running without itself
+  // triggering a re-run.
+  const lastHeartbeatSentAt = useRef(0);
+  useEffect(() => {
+    if (!user) return;
+
+    function sendHeartbeat() {
+      const now = Date.now();
+      if (now - lastHeartbeatSentAt.current < 60_000) return;
+      lastHeartbeatSentAt.current = now;
+      api.post('/users/me/heartbeat').catch(() => undefined);
+    }
+
+    sendHeartbeat();
+    const events: Array<keyof WindowEventMap> = ['click', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((event) => window.addEventListener(event, sendHeartbeat, { passive: true }));
+    return () => events.forEach((event) => window.removeEventListener(event, sendHeartbeat));
+  }, [user]);
+
   const login = useCallback(
     async (input: LoginInput) => {
       const res = await api.post<AuthResponse>('/auth/login', input);

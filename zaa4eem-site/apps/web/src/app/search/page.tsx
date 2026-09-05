@@ -134,7 +134,7 @@ export default function SearchPage() {
                         <Avatar name={u.displayName} avatarUrl={u.avatarUrl} size={36} />
                         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                           <span style={{ fontWeight: 700 }}>{u.displayName}</span>
-                          {u.role === 'OWNER' && <span className="z-badge-owner">Owner</span>}
+                          {u.role === 'OWNER' && <span className="z-badge-owner">Владелец проекта</span>}
                           <span style={{ fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
                             {formatMemberNumber(u.memberNumber)}
                           </span>

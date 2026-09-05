@@ -57,6 +57,15 @@ export const resetPasswordSchema = z.object({
 });
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+// Settings → "Безопасность". currentPassword is required unless the caller
+// (checked server-side via PublicProfile.hasPassword) has never set one yet
+// (Telegram/Google-only account setting a password for the first time).
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).optional(),
+  newPassword: z.string().min(8, 'Пароль должен быть не короче 8 символов'),
+});
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
 export const telegramLinkCodeResponseSchema = z.object({
   code: z.string(),
   expiresInMinutes: z.number().int().positive(),
