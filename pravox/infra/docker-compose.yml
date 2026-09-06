@@ -1,0 +1,108 @@
+name: pravox
+x-service:
+  image: pravox:local
+  env_file: .env
+  restart: unless-stopped
+  read_only: true
+  tmpfs: &id001
+  - /tmp
+  volumes: &id002
+  - app_data:/data
+  security_opt: &id003
+  - no-new-privileges:true
+  cap_drop: &id004
+  - ALL
+  logging: &id005
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+services:
+  web:
+    image: pravox:local
+    env_file: .env
+    restart: unless-stopped
+    read_only: true
+    tmpfs: *id001
+    volumes: *id002
+    security_opt: *id003
+    cap_drop: *id004
+    logging: *id005
+    build: ..
+    ports:
+    - 127.0.0.1:${APP_PORT:-8095}:8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    stop_grace_period: 45s
+  worker:
+    image: pravox:local
+    env_file: .env
+    restart: unless-stopped
+    read_only: true
+    tmpfs: *id001
+    volumes: *id002
+    security_opt: *id003
+    cap_drop: *id004
+    logging: *id005
+    command:
+    - python
+    - -m
+    - app.worker
+    depends_on:
+      web:
+        condition: service_healthy
+    stop_grace_period: 330s
+  bot:
+    image: pravox:local
+    env_file: .env
+    restart: unless-stopped
+    read_only: true
+    tmpfs: *id001
+    volumes: *id002
+    security_opt: *id003
+    cap_drop: *id004
+    logging: *id005
+    command:
+    - python
+    - -m
+    - app.bot
+    depends_on:
+      web:
+        condition: service_healthy
+    stop_grace_period: 45s
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NUM_PARALLEL: '1'
+      OLLAMA_MAX_LOADED_MODELS: '1'
+    volumes:
+    - ollama_data:/root/.ollama
+    mem_limit: 5g
+    cpus: 2.0
+    security_opt:
+    - no-new-privileges:true
+    healthcheck:
+      test:
+      - CMD
+      - ollama
+      - list
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+volumes:
+  app_data: null
+  ollama_data: null
