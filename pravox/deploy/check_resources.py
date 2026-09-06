@@ -7,7 +7,7 @@ if not Path('/proc/meminfo').exists():
     raise SystemExit('Local test installer expects a Linux server.')
 info = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
 available = int(info['MemAvailable'].split()[0]) * 1024
-docker_root = subprocess.check_output(['docker', 'info', '--format', '{{.DockerRootDir}}'], text=True).strip()
+docker_root = subprocess.check_output(['docker', 'info', '--format', '{{.DockerRootDir}}'], universal_newlines=True).strip()
 free = shutil.disk_usage(docker_root).free
 if available < 6 * 1024**3:
     raise SystemExit('Для Qwen3 4B требуется не менее 6 ГиБ доступной памяти с запасом для сайта. Установка остановлена; память сервера не изменена.')

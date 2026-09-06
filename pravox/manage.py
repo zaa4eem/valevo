@@ -20,7 +20,8 @@ def main():
             print('Backup created:',db.backup(Path(config.db_path).parent/'backups'));return
         if args.command=='smoke-ai':
             result=LegalAI(config).answer('Объясни отличие ничтожной сделки от оспоримой по ГК РФ, со ссылками на действующие нормы.','student',[])
-            print(json.dumps({'status':'ok','mode':'local_unverified_test' if config.local_ai else 'responses_with_search','sources':len(result.sources),'input_tokens':result.input_tokens,'output_tokens':result.output_tokens,'search_calls':result.search_calls},ensure_ascii=False));return
+            mode = 'local_unverified_test' if config.local_ai else ('gigachat_unverified' if config.ai_backend == 'gigachat' else 'responses_with_search')
+            print(json.dumps({'status':'ok','mode':mode,'sources':len(result.sources),'input_tokens':result.input_tokens,'output_tokens':result.output_tokens,'search_calls':result.search_calls},ensure_ascii=False));return
         me=tg.call('getMe')
         channel=tg.call('getChatMember',{'chat_id':config.channel,'user_id':me['id']})
         if channel.get('status') not in ('administrator','creator'):

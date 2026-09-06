@@ -16,6 +16,8 @@ class Config:
     ai_base: str = "https://api.openai.com/v1"
     ai_model: str = ""
     ai_backend: str = "responses"
+    gigachat_auth_key: str = field(default="", repr=False)
+    gigachat_scope: str = "GIGACHAT_API_PERS"
     ollama_url: str = "http://ollama:11434"
     auth_ttl: int = 3600
     free_requests: int = 3
@@ -38,6 +40,7 @@ class Config:
             "public_url": ("PUBLIC_URL", str), "ai_key": ("AI_API_KEY", str),
             "ai_base": ("AI_BASE_URL", str), "ai_model": ("AI_MODEL", str),
             "ai_backend": ("AI_BACKEND", str), "ollama_url": ("OLLAMA_URL", str),
+            "gigachat_auth_key": ("GIGACHAT_AUTH_KEY", str), "gigachat_scope": ("GIGACHAT_SCOPE", str),
             "ai_timeout": ("AI_TIMEOUT", int),
             "worker_threads": ("WORKER_THREADS", int), "history_days": ("HISTORY_DAYS", int),
             "operator_name": ("OPERATOR_NAME", str), "support_contact": ("SUPPORT_CONTACT", str),
@@ -63,7 +66,7 @@ class Config:
 
     @property
     def ai_ready(self):
-        return bool(self.ai_model and (self.ai_backend == "ollama" or self.ai_key))
+        return bool(self.ai_model and (self.ai_backend == "ollama" or self.ai_key or self.gigachat_auth_key))
 
     @property
     def local_ai(self):
@@ -88,13 +91,15 @@ class Config:
                 or not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)*", self.base_path)):
             problems.append("PUBLIC_URL: HTTPS URL with an optional safe path required")
         if not self.ai_ready:
-            problems.append("AI_API_KEY / AI_MODEL")
-        if self.ai_backend not in ("responses", "ollama"):
-            problems.append("AI_BACKEND: responses or ollama required")
+            problems.append("AI credentials / AI_MODEL")
+        if self.ai_backend not in ("responses", "ollama", "gigachat"):
+            problems.append("AI_BACKEND: responses, ollama or gigachat required")
         if self.local_ai and not self.ollama_url_valid:
             problems.append("OLLAMA_URL: local Ollama on port 11434 required")
-        if not self.local_ai and urlparse(self.ai_base).scheme != "https":
+        if self.ai_backend == "responses" and urlparse(self.ai_base).scheme != "https":
             problems.append("AI_BASE_URL: HTTPS required")
+        if self.ai_backend == "gigachat" and (not self.gigachat_auth_key or self.gigachat_scope not in ("GIGACHAT_API_PERS", "GIGACHAT_API_CORP")):
+            problems.append("GIGACHAT_AUTH_KEY / GIGACHAT_SCOPE")
         return problems
 
 

@@ -107,6 +107,9 @@ class LegalAI:
         if self.config.local_ai:
             from .local_ai import LocalAI
             return LocalAI(self.config).answer(question, mode, history)
+        if self.config.ai_backend == "gigachat":
+            from .gigachat_ai import GigaChatAI
+            return GigaChatAI(self.config).answer(question, mode, history)
         if urllib.parse.urlparse(self.config.ai_base).scheme != "https":
             raise UpstreamError("ai_configuration_invalid")
         context = [{"role": m["role"], "content": m["text"][:12000]} for m in history[-12:]]
