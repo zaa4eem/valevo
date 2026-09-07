@@ -3,6 +3,7 @@ import urllib.request
 import urllib.error
 import uuid
 from .errors import UpstreamError
+from .message_style import render_message
 
 
 class Telegram:
@@ -33,7 +34,7 @@ class Telegram:
         return subscribed, status
 
     def send(self, user_id, text, keyboard=None):
-        payload = {"chat_id": user_id, "text": text, "link_preview_options": {"is_disabled": True}}
+        payload = {"chat_id": user_id, "text": render_message(text), "parse_mode": "HTML", "link_preview_options": {"is_disabled": True}}
         if keyboard:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
         return self.call("sendMessage", payload)
@@ -56,28 +57,40 @@ class Telegram:
             raise UpstreamError("telegram_document_failed") from None
 
     def gate_keyboard(self):
-        return [[{"text": "Подписаться на правоХ", "url": self.config.channel_url}],
-                [{"text": "Проверить подписку", "callback_data": "check_membership"}]]
+        return [[{"text": "📣 Подписаться на канал", "url": self.config.channel_url}],
+                [{"text": "✅ Проверить подписку", "callback_data": "check_membership"}],
+                [{"text": "↩️ Главное меню", "callback_data": "nav:menu"}]]
 
     def menu_keyboard(self, admin=False):
-        rows = [[{"text": "Я гражданин", "callback_data": "mode:citizen"}, {"text": "Я студент", "callback_data": "mode:student"}]]
+        rows = [[{"text": "💬 Для жизни", "callback_data": "mode:citizen"}, {"text": "🎓 Для учёбы", "callback_data": "mode:student"}],
+                [{"text": "🗂 Мои диалоги", "callback_data": "nav:history"}, {"text": "💡 Примеры", "callback_data": "nav:examples"}],
+                [{"text": "⚙️ Данные и условия", "callback_data": "nav:settings"}]]
         if self.config.public_url.startswith("https://"):
-            rows.insert(0,[{"text": "Открыть приложение", "web_app": {"url": self.config.public_url.rstrip("/") + "/"}}])
+            rows.insert(0,[{"text": "🚀 Открыть приложение", "web_app": {"url": self.config.public_url.rstrip("/") + "/"}}])
             if admin:
-                rows.append([{"text": "Статистика", "web_app": {"url": self.config.public_url.rstrip("/") + "/#admin"}}])
+                rows.append([{"text": "📊 Статистика", "web_app": {"url": self.config.public_url.rstrip("/") + "/#admin"}}])
         return rows
 
 
 def split_message(text, limit=3500):
-    """Telegram counts UTF-16 code units, including surrogate pairs."""
-    chunks, current, length = [], [], 0
-    for char in text:
-        size = 2 if ord(char) > 0xFFFF else 1
-        if length + size > limit:
-            chunks.append("".join(current))
-            current, length = [], 0
-        current.append(char)
-        length += size
-    if current:
-        chunks.append("".join(current))
+    """Split before rendering HTML; prefer paragraphs and preserve every character."""
+    if limit < 2:
+        raise ValueError("limit must allow at least one UTF-16 surrogate pair")
+    chunks = []
+    while text:
+        length, end = 0, 0
+        for char in text:
+            size = 2 if ord(char) > 0xFFFF else 1
+            if length + size > limit:
+                break
+            length += size
+            end += 1
+        if end < len(text):
+            for separator in ("\n\n", "\n", " "):
+                boundary = text.rfind(separator, end // 2, end)
+                if boundary >= 0:
+                    end = boundary + len(separator)
+                    break
+        chunks.append(text[:end])
+        text = text[end:]
     return chunks

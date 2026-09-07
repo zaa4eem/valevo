@@ -151,12 +151,13 @@ class Service:
                 db.execute("INSERT INTO messages(conversation_id,user_id,role,text,sources,surface,created,job_id) VALUES(?,?,'assistant',?,?,?,?,?)", (job["conversation_id"],job["user_id"],answer.text,sources,job["surface"],now,job["id"]))
                 db.execute("UPDATE conversations SET updated=? WHERE id=?", (now,job["conversation_id"]))
                 if job["surface"] == "telegram":
-                    text = answer.text
+                    heading = "Уточним детали" if answer.kind == "clarify" else "Учебный разбор" if job["mode"] == "student" else "Разбор вопроса"
+                    text = "**" + heading + "**\n\n" + answer.text
                     if answer.sources:
-                        text += "\n\nИсточники:\n" + "\n".join(f"[{i+1}] {s['title']}\n{s['url']}" for i,s in enumerate(answer.sources))
+                        text += "\n\n**Источники**\n" + "\n\n".join(f"[{i+1}] {s['title']}\n{s['url']}" for i,s in enumerate(answer.sources))
                     used = db.execute("SELECT used FROM users WHERE id=?", (job["user_id"],)).fetchone()[0]
                     if counted and used == 3 and job["user_id"] != self.config.admin_id:
-                        text += "\n\nВы использовали 3 бесплатных запроса. Для следующего подпишитесь на " + self.config.channel_url + ". Дальнейшее общение бесплатно."
+                        text += "\n\n**Продолжим бесплатно**\nВы использовали первые 3 запроса. Чтобы задать следующий, подпишитесь на канал правоХ:\n" + self.config.channel_url + "\n\nОплата не требуется."
                     for part, chunk in enumerate(split_message(text)):
                         db.execute("INSERT INTO outbox(user_id,text,created,job_id,part) VALUES(?,?,?,?,?)", (job["user_id"],chunk,now,job["id"],part))
         except Exception as error:
@@ -164,7 +165,7 @@ class Service:
             with self.db.connection(write=True) as db:
                 changed = db.execute("UPDATE jobs SET state='failed',finished=?,error_code=?,latency=? WHERE id=? AND state='running'", (time.time(),code,time.time()-job["created"],job["id"])).rowcount
                 if changed and job["surface"] == "telegram":
-                    text = "Не удалось подготовить проверяемый ответ. Запрос не списан; попробуйте позже."
+                    text = "**Ответ пока не готов**\n\nНе удалось подготовить проверяемый ответ. Попробуйте отправить вопрос позже.\n\nЗапрос не списан."
                     db.execute("INSERT INTO outbox(user_id,text,created,job_id,part) VALUES(?,?,?,?,0)", (job["user_id"],text,time.time(),job["id"]))
         return True
 
