@@ -120,6 +120,60 @@ class ChatFlowStyleTests(unittest.TestCase):
         self.bot.deliver_one()
         self.assertIn("<b>Разбор вопроса</b>", self.tg.call.call_args.args[1]["text"])
 
+    def callback(self, data):
+        self.bot.handle({"callback_query": {"id": "ui", "data": data,
+                         "from": {"id": 17}, "message": {"chat": {"id": 17, "type": "private"}}}})
+
+    def test_navigation_and_examples_do_not_consume_requests(self):
+        self.message("/start")
+        for action in ("nav:menu", "nav:history", "nav:examples", "nav:settings", "nav:privacy"):
+            self.callback(action)
+        self.assertEqual(self.db.one("SELECT used FROM users WHERE id=17")["used"], 0)
+        self.assertEqual(self.db.one("SELECT count(*) n FROM jobs")["n"], 0)
+        self.assertFalse(self.db.one("SELECT consent FROM users WHERE id=17")["consent"])
+
+    def test_cancel_deletion_keeps_history(self):
+        self.message("/start")
+        self.db.execute("UPDATE users SET consent=1 WHERE id=17")
+        self.service.new_conversation(17, "student")
+        before = self.db.rows("SELECT id FROM conversations WHERE user_id=17")
+        self.callback("nav:delete")
+        self.callback("delete_cancel")
+        self.assertEqual(before, self.db.rows("SELECT id FROM conversations WHERE user_id=17"))
+        self.assertIn("Удаление отменено", self.tg.call.call_args.args[1]["text"])
+
+    def test_typing_is_throttled_and_stops_when_job_done(self):
+        self.message("/start")
+        self.db.execute("UPDATE users SET consent=1 WHERE id=17")
+        self.service.submit(17, "Вопрос", "typing-test", "telegram")
+        self.tg.call.reset_mock()
+        self.bot.refresh_typing()
+        self.tg.call.assert_not_called()
+        self.db.execute("UPDATE jobs SET state='running' WHERE user_id=17")
+        self.bot._typing_at = 0
+        self.bot.refresh_typing()
+        self.bot.refresh_typing()
+        self.tg.call.assert_called_once_with("sendChatAction", {"chat_id":17,"action":"typing"}, timeout=3)
+        self.db.execute("UPDATE jobs SET state='done' WHERE user_id=17")
+        self.bot._typing_at = 0
+        self.tg.call.reset_mock()
+        self.bot.refresh_typing()
+        self.tg.call.assert_not_called()
+
+    def test_typing_failure_does_not_fail_an_accepted_request(self):
+        from app.errors import UpstreamError
+        self.message("/start")
+        self.db.execute("UPDATE users SET consent=1 WHERE id=17")
+        def call(method, payload=None, **kwargs):
+            if method == "sendChatAction":
+                raise UpstreamError()
+            return {}
+        self.tg.call.side_effect = call
+        self.bot.handle({"update_id": 2, "message": {
+            "from": {"id": 17}, "chat": {"id": 17, "type": "private"}, "text": "Мой вопрос"}})
+        self.assertEqual(self.db.one("SELECT state FROM jobs")["state"], "queued")
+        self.assertEqual(self.db.one("SELECT used FROM users WHERE id=17")["used"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

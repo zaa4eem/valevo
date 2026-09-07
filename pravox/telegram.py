@@ -57,15 +57,18 @@ class Telegram:
             raise UpstreamError("telegram_document_failed") from None
 
     def gate_keyboard(self):
-        return [[{"text": "Подписаться на правоХ", "url": self.config.channel_url}],
-                [{"text": "Проверить подписку", "callback_data": "check_membership"}]]
+        return [[{"text": "📣 Подписаться на канал", "url": self.config.channel_url}],
+                [{"text": "✅ Проверить подписку", "callback_data": "check_membership"}],
+                [{"text": "↩️ Главное меню", "callback_data": "nav:menu"}]]
 
     def menu_keyboard(self, admin=False):
-        rows = [[{"text": "Для жизни", "callback_data": "mode:citizen"}, {"text": "Для учёбы", "callback_data": "mode:student"}]]
+        rows = [[{"text": "💬 Для жизни", "callback_data": "mode:citizen"}, {"text": "🎓 Для учёбы", "callback_data": "mode:student"}],
+                [{"text": "🗂 Мои диалоги", "callback_data": "nav:history"}, {"text": "💡 Примеры", "callback_data": "nav:examples"}],
+                [{"text": "⚙️ Данные и условия", "callback_data": "nav:settings"}]]
         if self.config.public_url.startswith("https://"):
-            rows.insert(0,[{"text": "Открыть приложение", "web_app": {"url": self.config.public_url.rstrip("/") + "/"}}])
+            rows.insert(0,[{"text": "🚀 Открыть приложение", "web_app": {"url": self.config.public_url.rstrip("/") + "/"}}])
             if admin:
-                rows.append([{"text": "Статистика", "web_app": {"url": self.config.public_url.rstrip("/") + "/#admin"}}])
+                rows.append([{"text": "📊 Статистика", "web_app": {"url": self.config.public_url.rstrip("/") + "/#admin"}}])
         return rows
 
 
