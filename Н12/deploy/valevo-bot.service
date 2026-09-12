@@ -1,0 +1,19 @@
+[Unit]
+Description=Valevo Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/valevo-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/valevo-bot/.venv/bin/python /opt/valevo-bot/main.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+User=valevo
+Group=valevo
+
+[Install]
+WantedBy=multi-user.target

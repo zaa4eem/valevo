@@ -1,0 +1,25 @@
+Set WshShell = WScript.CreateObject("WScript.Shell")
+
+' Получаем путь к папке, где лежит этот скрипт
+strFolder = WshShell.CurrentDirectory
+
+' Указываем путь к Python и путь к main.py
+' ПРИМЕЧАНИЕ: замени "python" на ПОЛНЫЙ путь к python.exe в твоем venv!
+' Например: "C:\Users\Artemkn\valevo_bot\.venv\Scripts\python.exe"
+strPython = strFolder & ""C:\Users\Artemkn\valevo_bot\.venv\Scripts\python.exe""
+strScript = strFolder & "\main.py"
+
+' Создаем ярлык на рабочем столе
+Set objShell = CreateObject("WScript.Shell")
+strDesktop = objShell.SpecialFolders("Desktop")
+Set objLink = objShell.CreateShortcut(strDesktop & "\ValevoBot.lnk")
+
+' Настройка ярлыка
+objLink.TargetPath = strPython
+objLink.Arguments = """" & strScript & """"
+objLink.WorkingDirectory = strFolder
+objLink.WindowStyle = 7  ' 7 = окно свернуто, 1 = обычное окно
+objLink.Description = "Запуск бота Валево"
+objLink.Save
+
+MsgBox "Ярлык создан на рабочем столе!", 64, "Готово"

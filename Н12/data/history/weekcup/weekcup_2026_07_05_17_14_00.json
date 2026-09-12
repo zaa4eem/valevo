@@ -1,0 +1,73 @@
+{
+  "closed_at": "2026-07-05T17:14:00.244371",
+  "top3": [
+    {
+      "place": 1,
+      "lap_id": 113,
+      "discipline": "Week CUP",
+      "username": "Flexorishe",
+      "telegram_id": 424884659,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "00:59.445",
+      "lap_time_ms": 59445,
+      "display_name": "Flexorishe",
+      "pilot_number": 662,
+      "yclients_client_id": 383815500
+    },
+    {
+      "place": 2,
+      "lap_id": 103,
+      "discipline": "Week CUP",
+      "username": "zaa4eem",
+      "telegram_id": 6021377014,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "01:02.382",
+      "lap_time_ms": 62382,
+      "display_name": "zaa4eem_dev",
+      "pilot_number": 13,
+      "yclients_client_id": 389169669
+    },
+    {
+      "place": 3,
+      "lap_id": 102,
+      "discipline": "Week CUP",
+      "username": "Proshkeen",
+      "telegram_id": 378655778,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "01:03.461",
+      "lap_time_ms": 63461,
+      "display_name": "Proshkeen",
+      "pilot_number": 159,
+      "yclients_client_id": 370756122
+    }
+  ],
+  "all_results": [
+    {
+      "discipline": "Week CUP",
+      "username": "Flexorishe",
+      "telegram_id": 424884659,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "00:59.445",
+      "lap_time_ms": 59445,
+      "created_at": "2026-06-19 18:19:39"
+    },
+    {
+      "discipline": "Week CUP",
+      "username": "zaa4eem",
+      "telegram_id": 6021377014,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "01:02.382",
+      "lap_time_ms": 62382,
+      "created_at": "2026-06-17 12:27:48"
+    },
+    {
+      "discipline": "Week CUP",
+      "username": "Proshkeen",
+      "telegram_id": 378655778,
+      "track": "LMU | Hypercar BMW | Sebring circuit",
+      "lap_time_text": "01:03.461",
+      "lap_time_ms": 63461,
+      "created_at": "2026-06-17 12:02:57"
+    }
+  ]
+}

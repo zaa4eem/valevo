@@ -1,0 +1,15 @@
+.git
+.env
+__pycache__
+*.pyc
+*.pyo
+*.log
+logs/*
+backups/*
+data/*
+valevo.db
+.venv/
+build/
+dist/
+*.exe
+.vscode/
