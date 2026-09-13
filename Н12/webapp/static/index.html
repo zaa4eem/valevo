@@ -1,1 +1,31 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no"><meta name="theme-color" content="#050706"><title>VALEVO</title><link rel="stylesheet" href="/assets/css/app.css"><script src="https://telegram.org/js/telegram-web-app.js"></script></head><body><div id="app"><header><div class="brand">VALEVO</div><div id="pilot" class="muted">загрузка…</div></header><nav><button data-view="leaders">🏆 Рейтинг</button><button data-view="roulette">🎰 Рулетка</button><button data-view="referrals">🎁 Друзья</button><button data-view="profile">👤 Профиль</button></nav><main id="view"></main></div><div id="toast"></div><script type="module" src="/assets/js/app.js"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#050706">
+  <meta name="color-scheme" content="dark">
+  <title>VALEVO</title>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">VALEVO<span>®</span></div>
+      <div id="pilot" class="muted">загрузка…</div>
+    </header>
+    <nav id="nav" aria-label="Навигация">
+      <button data-view="booking">🎟<span>Бронь</span></button>
+      <button data-view="leaders">🏆<span>Рейтинг</span></button>
+      <button data-view="roulette">🎰<span>Рулетка</span></button>
+      <button data-view="referrals">🎁<span>Друзья</span></button>
+      <button data-view="profile">👤<span>Профиль</span></button>
+      <button data-view="admin" id="admin-tab" hidden>⚙️<span>Админ</span></button>
+    </nav>
+    <main id="view" aria-live="polite"></main>
+  </div>
+  <div id="toast" role="status"></div>
+  <script type="module" src="/assets/js/app.js"></script>
+</body>
+</html>
