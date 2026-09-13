@@ -44,11 +44,12 @@ async def _request(method: str, url: str, *, session: aiohttp.ClientSession | No
 
     async def _do(sess: aiohttp.ClientSession):
         last_error: Exception | None = None
-        for attempt in range(3):
+        attempts = 3 if method.upper() in ('GET', 'HEAD', 'OPTIONS') else 1
+        for attempt in range(attempts):
             try:
                 async with sess.request(method, url, headers=get_headers(), timeout=REQUEST_TIMEOUT, **kwargs) as resp:
                     text = await resp.text()
-                    if resp.status in (429, 500, 502, 503, 504):
+                    if resp.status in (429, 500, 502, 503, 504) and attempt + 1 < attempts:
                         await asyncio.sleep(1.5 * (attempt + 1))
                         continue
                     try:
@@ -63,7 +64,8 @@ async def _request(method: str, url: str, *, session: aiohttp.ClientSession | No
                     return data
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_error = e
-                await asyncio.sleep(1.5 * (attempt + 1))
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(1.5 * (attempt + 1))
         if last_error:
             logger.error("YCLIENTS %s %s exception: %r", method, url, last_error)
         return {"success": False, "meta": {"message": repr(last_error)}}

@@ -1,542 +1,113 @@
 const tg = window.Telegram?.WebApp;
-tg?.ready();
-tg?.expand();
-try { tg?.setHeaderColor?.('#050706'); tg?.setBackgroundColor?.('#050706'); } catch (_) {}
-
-const initData = tg?.initData || '';
+tg?.ready(); tg?.expand();
 const view = document.querySelector('#view');
-const pilotEl = document.querySelector('#pilot');
-const adminTab = document.querySelector('#admin-tab');
-let me = null;
-let bookingRequestToken = null;
-let toastTimer = null;
-
-const apiHeaders = () => ({
-  'Authorization': `tma ${initData}`,
-  'Content-Type': 'application/json',
-});
-
-async function api(path, options = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(path, {
-      ...options,
-      signal: options.signal || controller.signal,
-      headers: { ...apiHeaders(), ...(options.headers || {}) },
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Ошибка ${response.status}`);
-    return data;
-  } catch (error) {
-    if (error?.name === 'AbortError') throw new Error('Сервер отвечает слишком долго. Повторите попытку.');
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rub = value => new Intl.NumberFormat('ru-RU', {style:'currency',currency:'RUB',maximumFractionDigits:2}).format(Number(value || 0)/100);
+const row = (label,value) => `<div class="row"><span>${label}</span><b>${value}</b></div>`;
+const button = (label,screen,cls='secondary') => `<button class="${cls}" data-go="${screen}">${label}</button>`;
+let me, current = 'home', navigation = 0, booking = null;
+async function api(path, options={}) {
+  const response = await fetch(path,{...options,headers:{'Authorization':`tma ${tg?.initData || ''}`,'Content-Type':'application/json',...(options.headers || {})}});
+  const data = await response.json().catch(()=>({}));
+  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : typeof data.detail === 'string' ? data.detail : `Не удалось выполнить запрос (${response.status}). Попробуйте ещё раз.`);
+  return data;
 }
-
-const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-}[ch]));
-const money = value => `${Number(value || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 })} ₽`;
-const lapTime = ms => {
-  if (!ms) return '—';
-  const m = Math.floor(ms / 60000);
-  const s = Math.floor((ms % 60000) / 1000);
-  const x = ms % 1000;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(x).padStart(3, '0')}`;
-};
-const dateTime = value => {
-  if (!value) return '—';
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? esc(value) : d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-};
-const statusLabel = status => ({
-  pending_admin: 'Ожидает подтверждения',
-  creating: 'Создаётся',
-  confirmed: 'Подтверждена',
-  user_confirmed: 'Вы придёте',
-  cancelling: 'Отменяется',
-  cancelled: 'Отменена',
-  rejected: 'Отклонена',
-  cancellation_failed: 'Ошибка отмены',
-  rollback_failed: 'Требует проверки',
-})[status] || status;
-const paymentLabel = state => ({ unpaid: 'Не оплачено', partial: 'Частично', paid: 'Оплачено' })[state] || state || '—';
-const token = () => crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-
-function toast(text, kind = 'normal') {
-  const el = document.querySelector('#toast');
-  clearTimeout(toastTimer);
-  el.textContent = text;
-  el.dataset.kind = kind;
-  el.style.display = 'block';
-  toastTimer = setTimeout(() => { el.style.display = 'none'; }, 3000);
+function toast(text) { const el=document.querySelector('#toast'); el.textContent=text; el.hidden=false; clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.hidden=true,5000); }
+function botFallback(text) { return `<div class="card"><p>${esc(text)}</p><p class="muted">Эта операция пока доступна в чате бота. Приложение не отправляет её автоматически.</p><button class="primary" data-bot>Открыть бота</button></div>`; }
+function bind() {
+  view.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>go(b.dataset.go));
+  view.querySelectorAll('[data-bot]').forEach(b=>b.onclick=()=>{if(tg?.initData)tg.close();else toast('Откройте чат бота VALEVO в Telegram.');});
 }
-
-function haptic(type = 'light') {
-  try { tg?.HapticFeedback?.impactOccurred?.(type); } catch (_) {}
+function show(html) { view.innerHTML=html; bind(); }
+function failure(error, retry) { show(`<div class="card error"><h2>Не удалось загрузить</h2><p>${esc(error.message)}</p><button id="retry">Повторить</button></div>`); document.querySelector('#retry').onclick=retry; }
+async function go(screen) {
+  current=screen; const version=++navigation;
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.view===screen));
+  show('<div class="card empty">Загрузка…</div>');
+  try { const html=await screens[screen](); if(version!==navigation)return; if(typeof html==='string')show(html); await after[screen]?.(); } catch(e) { if(version===navigation)failure(e,()=>go(screen)); }
 }
-
-async function confirmAction(text) {
-  if (tg?.showConfirm) return await new Promise(resolve => tg.showConfirm(text, resolve));
-  return window.confirm(text);
+function home() { return `<section class="card hero"><div class="kicker">VALEVO · SIM RACING CLUB</div><h1>Твой следующий<br>круг — здесь.</h1>${button('Забронировать заезд →','book','primary')}<div class="checker"></div></section><div class="two">${button('Мои бронирования','bookings')}${button('Общий зачёт','leaders')}</div><div class="card gold"><div class="kicker">КАРТОЧКА ПИЛОТА</div><h2>${esc(me.profile?.display_name || me.profile?.username || 'Добро пожаловать')}</h2>${row('Номер',esc(me.profile?.pilot_number || '—'))}${row('Рейтинг',esc(me.profile?.rating ?? '—'))}${button('Открыть карточку','profile')}</div>${button('Пригласить друга','referrals')}${button('Рулетка призов','roulette')}${button('Поддержка и информация','support')}`; }
+async function leaders() { const d=await api('/api/leaderboard'); return `<div class="kicker">РЕЗУЛЬТАТЫ КЛУБА</div><h1>Общий зачёт</h1><div class="card gold">${d.overall.length?d.overall.map(r=>row(`${esc(r.place)}. ${esc(r.name)}`,`${esc(r.points)} б.`)).join(''):'Пока нет результатов'}</div>${d.disciplines.map(b=>`<h2>${esc(b.name)}</h2><div class="card">${b.rows.length?b.rows.map(r=>row(`${esc(r.place)}. ${esc(r.name)}`,lap(r.best_ms))).join(''):'Нет результатов'}</div>`).join('')}`; }
+function lap(ms) { return `${Math.floor(ms/60000)}:${String(Math.floor(ms%60000/1000)).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`; }
+async function profile() { if(!me.registered)return '<h1>Карточка пилота</h1>'+botFallback('Зарегистрируйтесь в боте, чтобы бронировать заезды.'); const p=me.profile; return `<h1>Карточка пилота</h1><div class="card gold">${row('Пилот',esc(p.display_name||p.username))}${row('Номер',esc(p.pilot_number))}${row('Телефон',esc(p.phone||'—'))}${row('Рейтинг',esc(p.rating||0))}${row('Класс',esc(p.current_class||'—'))}</div>${button('Изменить имя','nickname')}${button('Мои заезды','results')}${button('Отправить время круга','submitlap')}`; }
+async function referrals() { const d=await api('/api/referrals'); return `<h1>Пригласи друга</h1><div class="card gold"><div class="number">${rub(d.bonus*100)} + ${rub(d.bonus*100)}</div><p>Друг регистрируется по вашей ссылке — вы оба получаете Valevo Bonus.</p><p class="link">${esc(d.link)}</p><button class="primary" id="copy" data-link="${esc(d.link)}">Скопировать ссылку</button></div><div class="card">${row('Приглашено',esc(d.stats.invited))}${row('Получено',rub(d.stats.earned*100))}</div>`; }
+async function roulette() { const d=await api('/api/roulette'); return `<h1>Рулетка призов</h1><div class="card gold">${row('Valevo Bonus',rub(d.balance*100))}<div id="prize-result" role="status"></div><button class="primary" id="spin">Крутить за ${rub(d.spin_cost*100)}</button></div><div class="prizes">${d.prizes.map(p=>`<div class="prize">${esc(p.emoji)} ${esc(p.title)}</div>`).join('')}</div>`; }
+function clubDate(date, timezone) { return new Intl.DateTimeFormat('sv-SE',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(date); }
+// Convert club wall time to a UTC instant, independent of the pilot's device timezone.
+function instant(day,time,timezone) {
+  const wanted = Date.parse(`${day}T${time}:00Z`); let result=wanted;
+  for(let i=0;i<3;i++) { const parts=new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(result)); const p=Object.fromEntries(parts.map(x=>[x.type,x.value])); const wall=Date.parse(`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}Z`); result+=wanted-wall; }
+  return new Date(result).toISOString();
 }
-
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (_) {
-    const area = document.createElement('textarea');
-    area.value = text;
-    document.body.appendChild(area);
-    area.select();
-    document.execCommand('copy');
-    area.remove();
-  }
-  toast('Скопировано');
-  haptic('light');
+async function book() {
+  if(!me.registered)return '<h1>Бронирование</h1>'+botFallback('Для бронирования нужна регистрация пилота.');
+  const options=await api('/api/booking/options');
+  const today=clubDate(new Date(),options.timezone);
+  booking={options,path:'time',day:today,time:'',duration:options.durations[0],selected:[],available:null,request:0,key:crypto.randomUUID()};
+  return bookingMarkup();
 }
-
-function renderError(error) {
-  view.innerHTML = `<div class="card error-card"><b>Не удалось загрузить</b><div class="muted top-gap">${esc(error?.message || error)}</div><button class="btn top-gap" id="retry">Повторить</button></div>`;
-  document.querySelector('#retry')?.addEventListener('click', () => go(currentScreen));
+function bookingMarkup() {
+ const b=booking,o=b.options;const dates=Array.from({length:o.days_ahead},(_,i)=>{const d=new Date(`${clubDate(new Date(),o.timezone)}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+i);return d.toISOString().slice(0,10);});
+ const times=[];for(let m=o.open_hour*60;m+b.duration<=(o.close_hour||24)*60;m+=30){const t=`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;if(Date.parse(instant(b.day,t,o.timezone))>Date.now())times.push(t);}
+ if(!times.includes(b.time))b.time=times[0]||'';
+ const schedule=`<div class="two"><div><label for="day">Дата</label><select id="day">${dates.map(d=>`<option ${d===b.day?'selected':''}>${d}</option>`).join('')}</select></div><div><label for="time">Время · ${esc(o.timezone)}</label><select id="time">${times.map(t=>`<option ${t===b.time?'selected':''}>${t}</option>`).join('')}</select></div></div><label for="duration">Продолжительность</label><select id="duration">${o.durations.map(d=>`<option value="${d}" ${d===b.duration?'selected':''}>${d} минут</option>`).join('')}</select>`;
+ const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика 700 ₽/час · подвижка 1 000 ₽/час</p><div class="floorplan">${o.places.map(p=>`<button class="seat" data-seat="${esc(p.key)}" aria-pressed="${b.selected.includes(p.key)}">${esc(p.title)}<small>${rub(p.hourly_rate_kopecks)}/час</small></button>`).join('')}</div><div class="legend"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
+ return `<div class="kicker">ВАШ ЗАЕЗД</div><h1>Бронирование</h1><div class="tabs"><button data-path="time" aria-pressed="${b.path==='time'}">Сначала дата и время</button><button data-path="seats" aria-pressed="${b.path==='seats'}">Сначала места</button></div>${b.path==='time'?schedule+seats:seats+schedule}<p id="availability" class="muted">Проверяем доступность…</p><div class="card gold" id="summary"></div><button class="primary" id="reserve" disabled>Отправить заявку</button><p class="muted">Заявка требует подтверждения клуба. Её статус появится в разделе «Мои бронирования».</p>`;
 }
-
-let currentScreen = 'booking';
-async function go(name) {
-  currentScreen = name;
-  view.innerHTML = '<div class="card skeleton">Загрузка…</div>';
-  document.querySelectorAll('nav button').forEach(button => button.classList.toggle('active', button.dataset.view === name));
-  try {
-    const fn = screens[name];
-    if (!fn) throw new Error('Экран не найден');
-    await fn();
-  } catch (error) {
-    renderError(error);
-  }
+function bindBooking() {
+ const b=booking;
+ view.querySelectorAll('[data-path]').forEach(el=>el.onclick=()=>{b.path=el.dataset.path;show(bookingMarkup());bindBooking();});
+ for(const id of ['day','time','duration'])document.getElementById(id).onchange=e=>{b[id]=id==='duration'?Number(e.target.value):e.target.value;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();};
+ view.querySelectorAll('[data-seat]').forEach(el=>el.onclick=()=>{const key=el.dataset.seat,p=b.options.places.find(p=>p.key===key);if(b.selected.includes(key))b.selected=b.selected.filter(k=>k!==key);else{if(b.selected.length>=3)return toast('Можно выбрать до 3 мест.');if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}b.key=crypto.randomUUID();updateBooking();});
+ document.querySelector('#reserve').onclick=submitBooking;
+ checkAvailability();
 }
-
-async function bootstrap() {
-  if (!initData) {
-    view.innerHTML = '<div class="card error-card"><b>Откройте VALEVO из Telegram</b><div class="muted top-gap">В браузере вне Telegram авторизация Mini App недоступна.</div></div>';
-    return;
-  }
-  me = await api('/api/me');
-  pilotEl.textContent = me.registered
-    ? (me.profile.display_name || me.profile.username || `#${me.profile.pilot_number || ''}`)
-    : 'нужна регистрация';
-  adminTab.hidden = !me.is_super_admin;
-  await go('booking');
+async function checkAvailability() {
+ const b=booking,version=++b.request; b.available=null; updateBooking();
+ if(!b.time){document.querySelector('#availability').textContent='На эту дату время закончилось. Выберите другой день.';return;}
+ try{const d=await api(`/api/booking/availability?${new URLSearchParams({start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration})}`);if(current!=='book'||booking!==b||version!==b.request)return;b.available=d.places;document.querySelector('#availability').textContent='Доступность проверена. Время указано по часовому поясу клуба.';updateBooking();}catch(e){if(current==='book'&&booking===b&&version===b.request){document.querySelector('#availability').textContent=e.message;toast('Не удалось проверить места. Измените время для повторной проверки.');}}
 }
-
-async function leaders() {
-  const data = await api('/api/leaderboard');
-  let html = '<div class="screen-head"><div><div class="eyebrow">СЕЗОН</div><h1 class="title">Общий рейтинг</h1></div><div class="pill">TOP-7</div></div>';
-  html += '<div class="card leaderboard-card">';
-  if (!data.overall.length) html += '<div class="muted">Пока нет результатов.</div>';
-  for (const row of data.overall) {
-    const medal = row.place === 1 ? '🥇' : row.place === 2 ? '🥈' : row.place === 3 ? '🥉' : `${row.place}.`;
-    html += `<div class="row leaderboard-row"><span><b class="place">${medal}</b> ${esc(row.name)}</span><span class="points">${row.points} б.</span></div>`;
-  }
-  html += '</div>';
-  for (const group of data.disciplines) {
-    html += `<h2 class="section-title">${esc(group.name)}</h2><div class="card">`;
-    if (!group.rows.length) html += '<div class="muted">Нет результатов</div>';
-    for (const row of group.rows) {
-      html += `<div class="row"><span>${row.place}. ${esc(row.name)}</span><span class="time">${lapTime(row.best_ms)}</span></div>`;
-    }
-    html += '</div>';
-  }
-  view.innerHTML = html;
+function updateBooking() {
+ const b=booking; const unavailable=k=>!b.available?.find(p=>p.key===k)?.available;
+ view.querySelectorAll('[data-seat]').forEach(el=>{el.setAttribute('aria-pressed',b.selected.includes(el.dataset.seat));el.disabled=b.available ? unavailable(el.dataset.seat)&&!b.selected.includes(el.dataset.seat) : b.path==='time';});
+ const chosen=b.options.places.filter(p=>b.selected.includes(p.key));
+ document.querySelector('#summary').innerHTML=row('Места',chosen.map(p=>esc(p.title)).join(', ')||'Не выбраны')+row('Заезд',`${esc(b.day)} · ${esc(b.time)||'—'} · ${b.duration} мин`)+row('Стоимость',`<span class="money">${rub(chosen.reduce((n,p)=>n+p.hourly_rate_kopecks*b.duration/60,0))}</span>`)+(b.available&&b.selected.some(unavailable)?'<p class="error">Выбранное место занято. Уберите его или измените время.</p>':'');
+ document.querySelector('#reserve').disabled=!b.time||!b.selected.length||!b.available||b.selected.some(unavailable);
 }
-
-async function referrals() {
-  const data = await api('/api/referrals');
-  view.innerHTML = `
-    <div class="screen-head"><div><div class="eyebrow">РЕФЕРАЛЬНАЯ ПРОГРАММА</div><h1 class="title">Пригласи друга</h1></div></div>
-    <div class="card referral-hero">
-      <div class="hero">${money(data.bonus)} <span>+ ${money(data.bonus)}</span></div>
-      <p>Друг регистрируется по твоей ссылке — бонус получаете вы оба.</p>
-      <div class="link">${esc(data.link)}</div>
-      <div class="actions"><button class="btn" id="copy-ref">Скопировать</button><button class="spin" id="share-ref">Поделиться</button></div>
-    </div>
-    <div class="stats">
-      <div class="card"><span class="muted">Приглашено</span><div class="metric">${Number(data.stats.invited || 0)}</div></div>
-      <div class="card"><span class="muted">Получено</span><div class="metric">${money(data.stats.earned || 0)}</div></div>
-    </div>`;
-  document.querySelector('#copy-ref').onclick = () => copyText(data.link);
-  document.querySelector('#share-ref').onclick = () => {
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(data.link)}&text=${encodeURIComponent('Залетай в VALEVO — получим бонус оба')}`;
-    tg?.openTelegramLink ? tg.openTelegramLink(shareUrl) : window.open(shareUrl, '_blank');
-  };
+async function submitBooking() {
+ const b=booking,btn=document.querySelector('#reserve');btn.disabled=true;btn.textContent='Отправляем…';
+ try{await api('/api/bookings',{method:'POST',body:JSON.stringify({place_keys:b.selected,start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration,idempotency_key:b.key})});toast('Заявка отправлена. Статус доступен в бронированиях.');go('bookings');}catch(e){toast(e.message);if(current==='book'){btn.textContent='Повторить отправку';await checkAvailability();}}
 }
-
-async function profile() {
-  if (!me?.registered) {
-    view.innerHTML = '<div class="card error-card"><b>Нужна регистрация</b><div class="muted top-gap">Зарегистрируйтесь через бота, затем вернитесь в Mini App.</div></div>';
-    return;
-  }
-  const p = me.profile;
-  view.innerHTML = `
-    <div class="screen-head"><div><div class="eyebrow">ПРОФИЛЬ</div><h1 class="title">${esc(p.display_name || p.username || 'Пилот')}</h1></div><div class="pilot-number">#${esc(p.pilot_number || '—')}</div></div>
-    <div class="card">
-      <div class="row"><span>Телефон</span><b>${esc(p.phone || '—')}</b></div>
-      <div class="row"><span>Рейтинг</span><b class="points">${esc(p.rating || 0)}</b></div>
-      ${p.current_class ? `<div class="row"><span>Класс</span><b>${esc(p.current_class)}</b></div>` : ''}
-      ${me.is_super_admin ? '<div class="row"><span>Доступ</span><b>Супер-админ</b></div>' : me.is_admin ? '<div class="row"><span>Доступ</span><b>Админ</b></div>' : ''}
-    </div>`;
+const statusNames={pending_admin:'Ожидает подтверждения',creating:'Создаётся',user_confirmed:'Подтверждено пилотом',cancelling:'Отменяется',reconciliation_required:'Требует проверки клуба',pending:'Ожидает подтверждения',confirmed:'Подтверждено',approved:'Подтверждено',cancelled:'Отменено',rejected:'Отклонено',failed:'Ошибка',cancellation_failed:'Ошибка отмены — свяжитесь с клубом'};
+async function bookings(admin=false) {
+ if(admin&&!me.is_super_admin)throw new Error('Недостаточно прав');
+ const d=await api(admin?'/api/admin/bookings':'/api/bookings');
+ return `<h1>${admin?'Заявки клуба':'Мои бронирования'}</h1>${d.bookings.length?d.bookings.map(b=>`<div class="card"><div class="kicker">БРОНЬ #${esc(b.id)}</div><h2>${esc(statusNames[b.status]||b.status)}</h2><p>${esc(new Date(b.start_at).toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}))} МСК · ${b.duration_minutes} мин</p><p>${b.items.map(i=>esc(i.place_title||i.place_key)).join(', ')}</p>${row('Стоимость',rub(b.quoted_kopecks))}${admin&&b.status==='pending_admin'?`<div class="two"><button data-action="approve" data-id="${b.id}">Подтвердить</button><button data-action="reject" data-id="${b.id}">Отклонить</button></div>`:!admin&&['pending_admin','confirmed','user_confirmed'].includes(b.status)?`<button class="secondary" data-action="cancel" data-id="${b.id}">Отменить бронь</button>`:''}</div>`).join(''):'<div class="card empty">Бронирований пока нет</div>'}${admin?'':button('Выбрать заезд','book','primary')}`;
 }
-
-async function roulette() {
-  const data = await api('/api/roulette');
-  let cells = '';
-  for (let loop = 0; loop < 5; loop++) {
-    for (const prize of data.prizes) cells += `<div class="cell"><div class="emoji">${prize.emoji}</div>${esc(prize.title)}</div>`;
-  }
-  view.innerHTML = `
-    <div class="screen-head"><div><div class="eyebrow">VALEVO BONUS</div><h1 class="title">Рулетка</h1></div><div class="pill" id="balance">${money(data.balance)}</div></div>
-    <div class="card">
-      <div class="roulette-window"><div class="reel" id="reel">${cells}</div></div>
-      <button class="spin" id="spin">🎰 Крутить за ${money(data.spin_cost)}</button>
-    </div>
-    <h2 class="section-title">Возможные призы</h2>
-    <div class="grid">${data.prizes.map(p => `<div class="prize">${p.emoji} ${esc(p.title)}</div>`).join('')}</div>`;
-  document.querySelector('#spin').onclick = async () => {
-    const button = document.querySelector('#spin');
-    button.disabled = true;
-    try {
-      const result = await api('/api/roulette/spin', { method: 'POST' });
-      const index = Math.max(0, data.prizes.findIndex(item => item.code === result.code));
-      const target = data.prizes.length * 3 + index;
-      const reel = document.querySelector('#reel');
-      reel.style.transition = 'transform 3.2s cubic-bezier(.12,.86,.15,1)';
-      reel.style.transform = `translateX(calc(50vw - ${target * 92 + 46}px))`;
-      setTimeout(() => {
-        document.querySelector('#balance').textContent = money(result.balance);
-        toast(`Выигрыш: ${result.title}`);
-        haptic('heavy');
-        button.disabled = false;
-      }, 3300);
-    } catch (error) {
-      toast(error.message, 'error');
-      button.disabled = false;
-    }
-  };
+function bindBookings(admin=false) {view.querySelectorAll('[data-action]').forEach(btn=>btn.onclick=async()=>{if(!window.confirm(btn.dataset.action==='cancel'?'Отменить это бронирование?':'Применить действие к заявке?'))return;btn.disabled=true;try{await api(`${admin?'/api/admin/bookings':'/api/bookings'}/${btn.dataset.id}/${btn.dataset.action}`,{method:'POST'});go(admin?'requests':'bookings');}catch(e){toast(e.message);btn.disabled=false;}});}
+async function finance() {if(!me.is_super_admin)throw new Error('Недостаточно прав');return `<h1>Итоги клуба</h1><div class="two"><div><label for="date-from">С даты</label><input id="date-from" type="date" value="${clubDate(new Date(),'Europe/Moscow').slice(0,8)}01"></div><div><label for="date-to">По дату</label><input id="date-to" type="date" value="${clubDate(new Date(),'Europe/Moscow')}"></div></div><label for="source">Источник</label><select id="source"><option value="">Весь Telegram</option><option value="bot">Бот</option><option value="miniapp">Mini App</option></select><button class="secondary" id="load-finance">Показать</button><div id="finance-data"></div>`;}
+async function loadFinance() {const holder=document.querySelector('#finance-data');holder.innerHTML='<p>Загрузка…</p>';try{const q=new URLSearchParams({date_from:document.querySelector('#date-from').value,date_to:document.querySelector('#date-to').value});const source=document.querySelector('#source').value;if(source)q.set('source',source);const d=await api('/api/admin/finance?'+q);if(current!=='finance')return;holder.innerHTML=`<div class="card gold">${row('Стоимость подтверждённых броней',rub(d.turnover_kopecks))}${row('Разработчику · расчётные 10%',rub(d.commission_kopecks))}${row('Клубу · расчётная доля',rub(d.club_kopecks))}</div><div class="card"><h2>Стоимость заездов по дням</h2>${chart(d.daily)}${row('Подтверждено бронирований',esc(d.booking_count))}${row('Место-часов',esc(d.hours))}</div>${d.missing_prices?`<p class="error">В ${esc(d.missing_prices)} старых бронях тариф не был сохранён. Они учтены в количестве и часах, но не в сумме.</p>`:""}<p class="muted">Расчёт по подтверждённым бронированиям на выбранные даты. Отменённые брони исключены. Фактические платежи не учитываются.</p>`;}catch(e){holder.innerHTML=`<p class="error">${esc(e.message)}</p>`;}}
+function chart(days) {
+ if(!days.length)return '<p class="muted">Нет подтверждённых броней за выбранный период</p>';
+ const max=Math.max(1,...days.map(d=>Math.abs(d.turnover_kopecks))),negative=days.some(d=>d.turnover_kopecks<0),baseline=negative?85:120,scale=negative?55:90,step=270/days.length;
+ return `<svg viewBox="0 0 320 170" role="img" aria-label="Стоимость подтверждённых броней по дням в рублях"><text x="0" y="12">${esc(rub(max))}</text><line x1="35" y1="${baseline}" x2="320" y2="${baseline}" stroke="#9db4d5"/><text x="0" y="${baseline+4}">0 ₽</text>${days.map((d,i)=>{const height=Math.abs(d.turnover_kopecks)/max*scale;return `<rect x="${35+i*step}" y="${d.turnover_kopecks<0?baseline:baseline-height}" width="${Math.max(1,step*.7)}" height="${height}" fill="${d.turnover_kopecks<0?'#ffcc33':'#32c8ff'}"><title>${esc(d.date)}: ${esc(rub(d.turnover_kopecks))}</title></rect>`;}).join('')}<text x="35" y="163">${esc(days[0].date)}</text><text x="320" y="163" text-anchor="end">${esc(days.at(-1).date)}</text></svg><details><summary>Данные по дням</summary>${days.map(d=>row(esc(d.date),rub(d.turnover_kopecks))).join('')}</details>`;
 }
+function staff() {if(!me.is_admin&&!me.is_super_admin)throw new Error('Недостаточно прав');return `<h1>Управление клубом</h1>${button('Добавить время пилота','adminlap')}${me.is_super_admin?button('Заявки на бронирование','requests')+button('Итоги клуба','finance')+button('Найти пилота','pilots')+button('Трассы','tracks')+button('Эталонные времена','benchmarks'):''}${botFallback('Модерация результатов, изменение данных пилотов, рассылки, закрытие Week CUP и поддержка доступны в меню администратора бота.')}`;}
+async function nickname(){return `<h1>Имя пилота</h1><form id="nickname-form" class="card"><label for="display-name">Имя в рейтинге</label><input id="display-name" maxlength="64" required value="${esc(me.profile.display_name||'')}"><button class="primary secondary">Сохранить</button></form>`;}
+async function adminlap(){if(!me.is_admin&&!me.is_super_admin)throw new Error('Недостаточно прав');const d=await api('/api/disciplines');window.lapDisciplines=d.disciplines;return `<h1>Время пилота</h1><form id="lap-form" class="card"><label for="pilot-number">Номер пилота</label><input id="pilot-number" type="number" min="1" required><label for="discipline">Дисциплина</label><select id="discipline">${d.disciplines.map(x=>`<option>${esc(x.name)}</option>`).join('')}</select><label for="track">Трасса</label><select id="track"></select><label for="lap-time">Время круга · мм:сс.мс</label><input id="lap-time" placeholder="02:00.597" required><button class="primary secondary">Сохранить результат</button></form>`;}
+const screens={home,leaders,profile,referrals,roulette,book,bookings,requests:()=>bookings(true),finance,staff,nickname,adminlap,results,pilots,tracks,benchmarks,submitlap:()=>'<h1>Новый круг</h1>'+botFallback('Отправьте время и фото или видео подтверждения через бота. Администратор проверит результат.'),support:()=>'<h1>Клуб на связи</h1>'+botFallback('Откройте бота, чтобы написать в поддержку или посмотреть информацию о клубе.')};
+const after={pilots:bindPilots,tracks:()=>bindTrackEditor(false),benchmarks:()=>bindTrackEditor(true),book:()=>document.querySelector('#reserve')&&bindBooking(),bookings:()=>bindBookings(),requests:()=>bindBookings(true),finance:()=>{document.querySelector('#load-finance').onclick=loadFinance;return loadFinance();},referrals:()=>{document.querySelector('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(e.target.dataset.link);toast('Ссылка скопирована');}catch{toast('Не удалось скопировать. Выделите ссылку вручную.');}};},roulette:()=>{document.querySelector('#spin').onclick=async e=>{const btn=e.target;btn.disabled=true;try{const d=await api('/api/roulette/spin',{method:'POST'});document.querySelector('#prize-result').innerHTML=`<h2>${esc(d.title)}</h2><p>Остаток: ${rub(d.balance*100)}</p>`;toast(`Выигрыш: ${d.title}`);}catch(e){toast(e.message);}finally{btn.disabled=false;}};},nickname:()=>{document.querySelector('#nickname-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{await api('/api/profile',{method:'PATCH',body:JSON.stringify({display_name:document.querySelector('#display-name').value})});me=await api('/api/me');go('profile');}catch(e){toast(e.message);btn.disabled=false;}};},adminlap:()=>{let lapKey=crypto.randomUUID();document.querySelector('#lap-form').oninput=()=>lapKey=crypto.randomUUID();const discipline=document.querySelector('#discipline');const tracks=()=>document.querySelector('#track').innerHTML=(window.lapDisciplines.find(x=>x.name===discipline.value)?.tracks||[]).map(x=>`<option>${esc(x)}</option>`).join('');discipline.onchange=tracks;tracks();document.querySelector('#lap-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{const saved=await api('/api/admin/laps',{method:'POST',body:JSON.stringify({idempotency_key:lapKey,pilot_number:Number(document.querySelector('#pilot-number').value),discipline:discipline.value,track:document.querySelector('#track').value,lap_time:document.querySelector('#lap-time').value})});toast(saved.warning||'Результат сохранён');go('staff');}catch(e){toast(e.message);btn.disabled=false;}};}};
+async function start(){document.querySelector('.brand').onclick=e=>{e.preventDefault();if(me)go('home');};try{me=await api('/api/me');document.querySelector('#pilot').textContent=me.profile?.display_name||me.profile?.username||'Добро пожаловать в клуб';document.querySelector('#role').textContent=me.is_super_admin?'СУПЕР-АДМИН':me.is_admin?'АДМИН':'ПИЛОТ';document.querySelector('nav').innerHTML=[['home','⌂','Главная'],['book','▦','Бронь'],['leaders','🏆','Зачёт'],['profile','◉','Пилот']].map(([s,i,t])=>`<button data-view="${s}"><b>${i}</b>${t}</button>`).join('');document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));if(me.is_admin||me.is_super_admin){document.querySelector('#staff').innerHTML=button('Управление клубом','staff');document.querySelector('#staff button').onclick=()=>go('staff');}go('home');}catch(e){failure(e,start);}}
 
-function isoDateLocal(date) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+async function results() {
+ const d=await api('/api/results'),last=d.last_result;
+ return `<h1>Мои заезды</h1><div class="card gold">${row('Принято результатов',esc(d.total_results))}${row('Подиумов',esc(d.podiums))}${row('Золото / серебро / бронза',`${esc(d.gold)} / ${esc(d.silver)} / ${esc(d.bronze)}`)}</div><div class="card"><h2>Последний круг</h2>${last?`<div class="kicker">${esc(last.discipline)} · ${esc(last.track)}</div><p class="number">${esc(last.lap_time_text)}</p><p class="muted">${esc(last.created_at)}</p>`:'Пока нет принятых результатов'}</div><div class="card">${row('Любимая дисциплина',esc(d.favorite_discipline||'—'))}${row('Любимая трасса',esc(d.favorite_track||'—'))}${row('Дисциплин',esc(d.disciplines_count))}</div>${button('Отправить время круга','submitlap')}`;
 }
-
-function intervalsOverlap(startAt, endAt, intervals) {
-  const start = startAt.getTime();
-  const end = endAt.getTime();
-  return intervals.some(interval => {
-    const a = new Date(interval.start).getTime();
-    const b = new Date(interval.end).getTime();
-    return Number.isFinite(a) && Number.isFinite(b) && a < end && b > start;
-  });
-}
-
-async function bookingScreen() {
-  if (!me?.registered) {
-    view.innerHTML = '<div class="card error-card"><b>Сначала зарегистрируйтесь в боте</b><div class="muted top-gap">После регистрации бронирование появится здесь автоматически.</div></div>';
-    return;
-  }
-  const [cfg, placesData, mine] = await Promise.all([
-    api('/api/booking/config'), api('/api/booking/places'), api('/api/booking/mine')
-  ]);
-  const today = new Date();
-  const maxDay = new Date(today); maxDay.setDate(maxDay.getDate() + Math.max(0, Number(cfg.days_ahead || 1) - 1));
-  const todayIso = isoDateLocal(today);
-  const maxIso = isoDateLocal(maxDay);
-
-  let html = `
-    <div class="screen-head"><div><div class="eyebrow">КЛУБ VALEVO</div><h1 class="title">Бронирование</h1></div><div class="pill">12:00–00:00</div></div>
-    <div class="card booking-form">
-      <div class="form-grid">
-        <label>Тип<select id="btype"><option value="static">Статика</option><option value="motion">Подвижка</option></select></label>
-        <label>Дата<input id="bdate" type="date" min="${todayIso}" max="${maxIso}" value="${todayIso}"></label>
-        <label>Время<input id="btime" type="time" min="${cfg.open_time}" value="18:00" step="1800"></label>
-        <label>Длительность<select id="bduration">${cfg.duration_options.map(x => `<option value="${x}">${x} мин</option>`).join('')}</select></label>
-      </div>
-      <div id="places"></div>
-      <div class="quote" id="availability">Выберите место</div>
-      <div class="quote" id="quote">Выберите место</div>
-      <button class="spin" id="book-submit">Отправить заявку</button>
-      <div class="muted micro top-gap">Финальная проверка занятости выполняется сервером перед созданием заявки.</div>
-    </div>`;
-
-  html += '<h2 class="section-title">Мои брони</h2>';
-  if (!mine.bookings.length) html += '<div class="card muted">Броней пока нет.</div>';
-  for (const b of mine.bookings) {
-    const places = b.items.map(x => esc(x.place_title)).join(', ');
-    const finance = b.finance || {};
-    const problem = ['cancellation_failed', 'rollback_failed'].includes(b.status);
-    html += `
-      <div class="card booking-card ${problem ? 'problem-card' : ''}">
-        <div class="row"><b>#${b.id} · ${places}</b><span class="badge ${problem ? 'danger' : ''}">${esc(statusLabel(b.status))}</span></div>
-        <div class="row"><span>${dateTime(b.start_at)}</span><b>${b.quoted_total_rub == null ? '—' : money(b.quoted_total_rub)}</b></div>
-        ${b.finance ? `<div class="row"><span>${paymentLabel(finance.payment_state)}</span><b>${money(finance.net_rub)} / ${money(finance.quoted_total_rub)}</b></div>` : ''}
-        ${b.last_error && problem ? `<div class="error-note">Администратор уже видит ошибку. Слот не освобождён до успешной очистки.</div>` : ''}
-        ${['pending_admin', 'confirmed', 'user_confirmed', 'cancellation_failed'].includes(b.status) ? `<button class="btn danger-btn cancel-booking" data-id="${b.id}">Отменить бронь</button>` : ''}
-      </div>`;
-  }
-  view.innerHTML = html;
-
-  const typeEl = document.querySelector('#btype');
-  const dateEl = document.querySelector('#bdate');
-  const timeEl = document.querySelector('#btime');
-  const durationEl = document.querySelector('#bduration');
-  const placesEl = document.querySelector('#places');
-  const quoteEl = document.querySelector('#quote');
-  const availabilityEl = document.querySelector('#availability');
-  let availabilityCache = null;
-  let availabilityKey = '';
-
-  const selectedKeys = () => [...placesEl.querySelectorAll('input:checked')].map(input => input.value);
-
-  function renderPlaces() {
-    const rows = placesData.places.filter(item => item.type === typeEl.value);
-    placesEl.innerHTML = `<div class="field-title">Места · максимум ${cfg.max_places_per_booking}</div><div class="choices">${rows.map(item => `<label class="choice"><input type="checkbox" name="place" value="${esc(item.key)}"><span>${esc(item.title)}</span></label>`).join('')}</div>`;
-    placesEl.querySelectorAll('input').forEach(input => {
-      input.onchange = async () => {
-        const checked = [...placesEl.querySelectorAll('input:checked')];
-        if (checked.length > cfg.max_places_per_booking) {
-          input.checked = false;
-          toast(`Максимум ${cfg.max_places_per_booking} места`);
-        }
-        bookingRequestToken = null;
-        await Promise.all([updateQuote(), updateAvailability()]);
-      };
-    });
-  }
-
-  async function loadAvailability() {
-    const key = dateEl.value;
-    if (availabilityCache && availabilityKey === key) return availabilityCache;
-    availabilityEl.textContent = 'Проверяем занятость…';
-    availabilityCache = await api(`/api/booking/availability?date=${encodeURIComponent(key)}`);
-    availabilityKey = key;
-    return availabilityCache;
-  }
-
-  async function updateAvailability() {
-    const keys = selectedKeys();
-    if (!keys.length) { availabilityEl.textContent = 'Выберите место'; return; }
-    try {
-      const data = await loadAvailability();
-      const start = new Date(`${dateEl.value}T${timeEl.value}:00`);
-      const end = new Date(start.getTime() + Number(durationEl.value) * 60000);
-      const busy = keys.filter(key => intervalsOverlap(start, end, data.places?.[key] || []));
-      if (busy.length) {
-        availabilityEl.innerHTML = '<span class="danger-text">⚠️ Выбранный интервал пересекается с занятой бронью</span>';
-      } else {
-        availabilityEl.innerHTML = '<span class="ok-text">● По текущим данным места свободны</span>';
-      }
-    } catch (error) {
-      availabilityEl.textContent = `Не удалось проверить заранее: ${error.message}`;
-    }
-  }
-
-  async function updateQuote() {
-    const count = selectedKeys().length;
-    if (!count) { quoteEl.textContent = 'Выберите место'; return; }
-    try {
-      const q = await api('/api/booking/quote', {
-        method: 'POST',
-        body: JSON.stringify({ place_type: typeEl.value, duration_minutes: Number(durationEl.value), places_count: count })
-      });
-      quoteEl.innerHTML = `Тариф <b>${money(q.tariff_rub_per_hour)}/ч</b> · Итого <b>${money(q.quoted_total_rub)}</b>`;
-    } catch (error) {
-      quoteEl.textContent = error.message;
-    }
-  }
-
-  typeEl.onchange = async () => { bookingRequestToken = null; renderPlaces(); availabilityCache = null; await Promise.all([updateQuote(), updateAvailability()]); };
-  dateEl.onchange = async () => { bookingRequestToken = null; availabilityCache = null; await updateAvailability(); };
-  timeEl.onchange = async () => { bookingRequestToken = null; await updateAvailability(); };
-  durationEl.onchange = async () => { bookingRequestToken = null; await Promise.all([updateQuote(), updateAvailability()]); };
-  renderPlaces();
-
-  document.querySelector('#book-submit').onclick = async () => {
-    const button = document.querySelector('#book-submit');
-    const keys = selectedKeys();
-    if (!keys.length) { toast('Выберите хотя бы одно место'); return; }
-    if (!dateEl.value || !timeEl.value) { toast('Укажите дату и время'); return; }
-    if (!bookingRequestToken) bookingRequestToken = token();
-    button.disabled = true;
-    try {
-      const result = await api('/api/booking', {
-        method: 'POST',
-        body: JSON.stringify({
-          place_type: typeEl.value,
-          place_keys: keys,
-          date: dateEl.value,
-          time: timeEl.value,
-          duration_minutes: Number(durationEl.value),
-          request_token: bookingRequestToken,
-        })
-      });
-      bookingRequestToken = null;
-      toast(`Заявка #${result.booking.id} отправлена`);
-      haptic('medium');
-      await bookingScreen();
-    } catch (error) {
-      toast(error.message, 'error');
-      button.disabled = false;
-    }
-  };
-
-  document.querySelectorAll('.cancel-booking').forEach(button => {
-    button.onclick = async () => {
-      if (!(await confirmAction('Отменить эту бронь?'))) return;
-      button.disabled = true;
-      try {
-        await api(`/api/booking/${button.dataset.id}/cancel`, { method: 'POST' });
-        toast('Бронь отменена');
-        haptic('medium');
-        await bookingScreen();
-      } catch (error) {
-        toast(error.message, 'error');
-        button.disabled = false;
-      }
-    };
-  });
-}
-
-async function admin() {
-  if (!me?.is_super_admin) {
-    view.innerHTML = '<div class="card error-card">Нет доступа.</div>';
-    return;
-  }
-  const [bookings, problems, fin, audit] = await Promise.all([
-    api('/api/admin/bookings'),
-    api('/api/admin/bookings/problems'),
-    api('/api/admin/finance?limit=100'),
-    api('/api/admin/audit?limit=30'),
-  ]);
-  const s = fin.summary;
-  let html = `
-    <div class="screen-head"><div><div class="eyebrow">SUPER ADMIN</div><h1 class="title">Управление</h1></div><div class="pill">${problems.bookings.length ? `⚠ ${problems.bookings.length}` : 'OK'}</div></div>
-    <div class="stats">
-      <div class="card"><span class="muted">Оплаты</span><div class="metric">${money(s.payments_rub)}</div></div>
-      <div class="card"><span class="muted">Возвраты</span><div class="metric">${money(s.refunds_rub)}</div></div>
-      <div class="card"><span class="muted">Чистыми</span><div class="metric">${money(s.net_rub)}</div></div>
-      <div class="card"><span class="muted">Комиссия</span><div class="metric">${money(s.commission_rub)}</div></div>
-    </div>`;
-
-  if (problems.bookings.length) {
-    html += '<h2 class="section-title danger-text">Требуют вмешательства</h2>';
-    for (const b of problems.bookings) {
-      html += `<div class="card problem-card"><div class="row"><b>#${b.id} · ${esc(statusLabel(b.status))}</b><span>${money(b.quoted_total_rub)}</span></div><div class="muted">${esc(b.display_name || 'Клиент')} · ${dateTime(b.start_at)}</div><div class="error-note">${esc(b.last_error || 'Ошибка внешнего сервиса')}</div><button class="btn cleanup" data-id="${b.id}">Повторить безопасную очистку</button></div>`;
-    }
-  }
-
-  html += `
-    <h2 class="section-title">Настройки финансов</h2>
-    <div class="card">
-      <div class="form-grid">
-        <label>Статика, ₽/ч<input id="t-static" type="number" min="1" step="50" value="${Number(fin.tariffs.static || 0)}"></label>
-        <label>Подвижка, ₽/ч<input id="t-motion" type="number" min="1" step="50" value="${Number(fin.tariffs.motion || 0)}"></label>
-        <label>Комиссия, %<input id="commission" type="number" min="0" max="100" step="0.1" value="${Number(fin.commission_percent || 0)}"></label>
-      </div>
-      <button class="btn" id="save-fin-settings">Сохранить настройки</button>
-    </div>
-    <h2 class="section-title">Зарегистрировать операцию</h2>
-    <div class="card">
-      <div class="form-grid">
-        <label>№ брони<input id="f-booking" type="number" min="1"></label>
-        <label>Операция<select id="f-type"><option value="payment">Оплата</option><option value="refund">Возврат</option></select></label>
-        <label>Сумма, ₽<input id="f-amount" type="number" min="0.01" step="0.01"></label>
-        <label>Способ<select id="f-method"><option value="card">Карта</option><option value="cash">Наличные</option><option value="transfer">Перевод</option><option value="other">Другое</option></select></label>
-      </div>
-      <label>Комментарий<input id="f-note" maxlength="500"></label>
-      <button class="spin top-gap" id="post-finance">Записать в журнал</button>
-    </div>`;
-
-  html += '<h2 class="section-title">Новые заявки</h2>';
-  if (!bookings.bookings.length) html += '<div class="card muted">Новых заявок нет.</div>';
-  for (const b of bookings.bookings) {
-    html += `<div class="card"><div class="row"><b>#${b.id} · ${esc(b.display_name || 'Клиент')}</b><b>${money(b.quoted_total_rub)}</b></div><div class="row"><span>${b.items.map(x => esc(x.place_title)).join(', ')}</span><span>${dateTime(b.start_at)}</span></div><div class="actions"><button class="btn approve" data-id="${b.id}">✅ Подтвердить</button><button class="btn reject danger-btn" data-id="${b.id}">❌ Отклонить</button></div></div>`;
-  }
-
-  html += '<h2 class="section-title">Финансовый журнал</h2>';
-  if (!fin.entries.length) html += '<div class="card muted">Операций пока нет.</div>';
-  for (const entry of fin.entries) {
-    html += `<div class="card"><div class="row"><b>${entry.entry_type === 'payment' ? 'Оплата' : 'Возврат'} · бронь #${entry.booking_id}</b><b class="${entry.entry_type === 'refund' ? 'negative' : 'points'}">${entry.entry_type === 'refund' ? '-' : '+'}${money(entry.amount_rub)}</b></div><div class="row"><span>${esc(entry.display_name || 'Клиент')} · ${esc(entry.payment_method)}</span><span>${dateTime(entry.created_at)}</span></div><div class="row"><span>Комиссия ${Number(entry.commission_percent || 0)}%</span><b>${money(entry.commission_rub)}</b></div>${entry.note ? `<div class="muted">${esc(entry.note)}</div>` : ''}</div>`;
-  }
-
-  html += '<h2 class="section-title">Аудит админ-действий</h2><div class="card">';
-  if (!audit.entries.length) html += '<div class="muted">Записей пока нет.</div>';
-  for (const entry of audit.entries) {
-    html += `<div class="row"><span><b>${esc(entry.action)}</b><br><span class="muted">${esc(entry.entity_type)} ${esc(entry.entity_id || '')} · admin ${entry.actor_id}</span></span><span class="micro">${dateTime(entry.created_at)}</span></div>`;
-  }
-  html += '</div>';
-  view.innerHTML = html;
-
-  document.querySelector('#save-fin-settings').onclick = async () => {
-    const button = document.querySelector('#save-fin-settings');
-    if (!(await confirmAction('Сохранить новые тарифы и процент комиссии? Старые брони не будут пересчитаны.'))) return;
-    button.disabled = true;
-    try {
-      await api('/api/admin/tariffs/static', { method: 'PUT', body: JSON.stringify({ rub_per_hour: Number(document.querySelector('#t-static').value) }) });
-      await api('/api/admin/tariffs/motion', { method: 'PUT', body: JSON.stringify({ rub_per_hour: Number(document.querySelector('#t-motion').value) }) });
-      await api('/api/admin/finance/commission', { method: 'PUT', body: JSON.stringify({ percent: Number(document.querySelector('#commission').value) }) });
-      toast('Настройки сохранены');
-      await admin();
-    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
-  };
-
-  document.querySelector('#post-finance').onclick = async () => {
-    const button = document.querySelector('#post-finance');
-    const bookingId = Number(document.querySelector('#f-booking').value);
-    const amount = Number(document.querySelector('#f-amount').value);
-    const type = document.querySelector('#f-type').value;
-    if (!bookingId || !amount) { toast('Укажите бронь и сумму'); return; }
-    if (!(await confirmAction(`${type === 'payment' ? 'Зарегистрировать оплату' : 'Зарегистрировать возврат'} ${money(amount)} по брони #${bookingId}?`))) return;
-    button.disabled = true;
-    try {
-      const result = await api(`/api/admin/bookings/${bookingId}/finance`, {
-        method: 'POST',
-        body: JSON.stringify({
-          entry_type: type,
-          amount_rub: amount,
-          payment_method: document.querySelector('#f-method').value,
-          note: document.querySelector('#f-note').value,
-          operation_key: token(),
-        })
-      });
-      toast(`Операция записана. Баланс: ${money(result.finance.net_rub)}`);
-      haptic('medium');
-      await admin();
-    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
-  };
-
-  document.querySelectorAll('.approve').forEach(button => button.onclick = async () => {
-    button.disabled = true;
-    try { await api(`/api/admin/bookings/${button.dataset.id}/approve`, { method: 'POST' }); toast('Бронь подтверждена'); await admin(); }
-    catch (error) { toast(error.message, 'error'); button.disabled = false; }
-  });
-  document.querySelectorAll('.reject').forEach(button => button.onclick = async () => {
-    if (!(await confirmAction(`Отклонить заявку #${button.dataset.id}?`))) return;
-    button.disabled = true;
-    try { await api(`/api/admin/bookings/${button.dataset.id}/reject`, { method: 'POST' }); toast('Заявка отклонена'); await admin(); }
-    catch (error) { toast(error.message, 'error'); button.disabled = false; }
-  });
-  document.querySelectorAll('.cleanup').forEach(button => button.onclick = async () => {
-    if (!(await confirmAction(`Повторить очистку внешних записей брони #${button.dataset.id}? Слот останется заблокирован, если хотя бы одно удаление снова не пройдёт.`))) return;
-    button.disabled = true;
-    try { const result = await api(`/api/admin/bookings/${button.dataset.id}/retry-cleanup`, { method: 'POST' }); toast(`Восстановлено: ${statusLabel(result.status)}`); await admin(); }
-    catch (error) { toast(error.message, 'error'); button.disabled = false; }
-  });
-}
-
-const screens = { booking: bookingScreen, leaders, roulette, referrals, profile, admin };
-document.querySelectorAll('nav button').forEach(button => button.onclick = () => go(button.dataset.view));
-bootstrap().catch(renderError);
+function requireSuper(){if(!me.is_super_admin)throw new Error('Недостаточно прав');}
+function pilots(){requireSuper();return `<h1>Пилоты клуба</h1><form id="pilot-search" class="card"><label for="search-number">Номер пилота</label><input id="search-number" type="number" min="1" required><button class="primary secondary">Найти</button></form><div id="pilot-result"></div>`;}
+function bindPilots(){document.querySelector('#pilot-search').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button'),holder=document.querySelector('#pilot-result');btn.disabled=true;try{const d=await api('/api/super/pilots?'+new URLSearchParams({pilot_number:document.querySelector('#search-number').value}));holder.innerHTML=d.pilots.map(p=>`<div class="card gold"><h2>Карточка пилота</h2>${row('Имя',esc(p.display_name||p.username||'—'))}${row('Номер',esc(p.pilot_number))}${row('Телефон',esc(p.phone||'—'))}${row('Рейтинг',esc(p.rating||0))}${row('Класс',esc(p.current_class||'—'))}</div>`).join('')||'<div class="card empty">Пилот не найден</div>';if(d.pilots.length)holder.innerHTML+=botFallback('Изменение данных пилота и бонусного баланса доступно в боте.');bind();}catch(e){holder.innerHTML=`<p class="error">${esc(e.message)}</p>`;}finally{btn.disabled=false;}};}
+let editingDisciplines=[];
+async function trackEditor(benchmark){requireSuper();const d=await api('/api/disciplines');editingDisciplines=d.disciplines;return `<h1>${benchmark?'Эталонные времена':'Трассы клуба'}</h1>${benchmark?`<p class="muted">Текущий месяц: ${esc(d.month_key)}. Эталон задаётся для класса.</p>`:''}<form id="track-form" class="card"><label for="edit-discipline">${benchmark?'Класс':'Дисциплина'}</label><select id="edit-discipline">${d.disciplines.map(x=>`<option>${esc(x.name)}</option>`).join('')}</select><label for="edit-track">Трасса</label>${benchmark?'<select id="edit-track"></select>':'<input id="edit-track" required maxlength="200" placeholder="Название новой трассы">'}${benchmark?'<label for="benchmark-time">Эталон · мм:сс.мс</label><input id="benchmark-time" required placeholder="01:18.565">':''}<button class="primary secondary">${benchmark?'Сохранить эталон':'Добавить трассу'}</button></form><div id="track-list"></div>${benchmark?`<div class="card"><h2>Текущие эталоны</h2>${Object.entries(d.benchmarks||{}).map(([name,b])=>row(esc(name),`${esc(b.track||'—')} · ${b.benchmark_ms?lap(b.benchmark_ms):esc(b.lap_time_text||'—')}`)).join('')||'Эталоны пока не заданы'}</div>`:''}`;}
+function tracks(){return trackEditor(false);} function benchmarks(){return trackEditor(true);}
+function bindTrackEditor(benchmark){const discipline=document.querySelector('#edit-discipline'),list=document.querySelector('#track-list');function refresh(){const all=editingDisciplines.find(d=>d.name===discipline.value)?.tracks||[];if(benchmark)document.querySelector('#edit-track').innerHTML=all.map(t=>`<option>${esc(t)}</option>`).join('');else{list.innerHTML='<div class="card">'+(all.map(t=>`<div class="row"><span>${esc(t)}</span><button data-remove-track="${esc(t)}">Удалить</button></div>`).join('')||'Трасс пока нет')+'</div>';list.querySelectorAll('[data-remove-track]').forEach(btn=>btn.onclick=async()=>{if(!confirm(`Удалить трассу «${btn.dataset.removeTrack}»?`))return;btn.disabled=true;try{await api('/api/super/tracks',{method:'DELETE',body:JSON.stringify({discipline:discipline.value,track:btn.dataset.removeTrack})});go('tracks');}catch(e){toast(e.message);btn.disabled=false;}});}}discipline.onchange=refresh;refresh();document.querySelector('#track-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button'),track=document.querySelector('#edit-track').value;btn.disabled=true;try{await api(benchmark?'/api/super/benchmarks':'/api/super/tracks',{method:benchmark?'PUT':'POST',body:JSON.stringify(benchmark?{class_name:discipline.value,track,lap_time:document.querySelector('#benchmark-time').value}:{discipline:discipline.value,track})});toast(benchmark?'Эталон сохранён':'Трасса добавлена');go(benchmark?'benchmarks':'tracks');}catch(e){toast(e.message);btn.disabled=false;}};}
+start();

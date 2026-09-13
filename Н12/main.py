@@ -184,6 +184,11 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
+    from services.booking_notifications import process_notifications
+    scheduler.add_job(process_notifications, 'interval', seconds=30, args=[bot],
+                      id='booking_notifications', replace_existing=True,
+                      max_instances=1, coalesce=True)
+
     if not scheduler.running:
         scheduler.start()
 

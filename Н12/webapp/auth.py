@@ -19,7 +19,12 @@ class TelegramWebAppUser:
 def validate_init_data(init_data: str) -> dict[str,str]:
     if not BOT_TOKEN: raise InitDataError('BOT_TOKEN не настроен на сервере')
     if not init_data: raise InitDataError('initData отсутствует')
-    data=dict(parse_qsl(init_data, keep_blank_values=True))
+    if len(init_data) > 16384:
+        raise InitDataError('initData превышает допустимый размер')
+    pairs = parse_qsl(init_data, keep_blank_values=True)
+    data = dict(pairs)
+    if len(data) != len(pairs):
+        raise InitDataError('Повторяющиеся поля initData')
     received_hash=data.pop('hash',None)
     if not received_hash: raise InitDataError('В initData отсутствует hash')
     secret=hmac.new(b'WebAppData', BOT_TOKEN.encode(), hashlib.sha256).digest()
@@ -33,6 +38,10 @@ def validate_init_data(init_data: str) -> dict[str,str]:
 
 def authenticate(init_data: str) -> TelegramWebAppUser:
     fields=validate_init_data(init_data)
-    try: payload=json.loads(fields['user']); uid=int(payload['id'])
+    try:
+        payload=json.loads(fields['user'])
+        if not isinstance(payload, dict) or type(payload.get('id')) is not int or payload['id'] <= 0:
+            raise ValueError('Invalid user id')
+        uid=payload['id']
     except Exception as exc: raise InitDataError('Некорректные данные пользователя') from exc
     return TelegramWebAppUser(uid,payload.get('username'),payload.get('first_name'),payload.get('last_name'),uid in ADMIN_IDS or uid in SUPER_ADMIN_IDS,uid in SUPER_ADMIN_IDS)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import html
+import hashlib
+import json
 import logging
 import re
 from datetime import date, datetime, time, timedelta
@@ -27,6 +29,7 @@ from config import SUPER_ADMIN_IDS, BASE_DIR, MOSCOW_TZ, YCLIENTS_COMPANY_ID
 from database.db import get_db, get_pilot_by_telegram_id
 from keyboards.menu import get_menu
 from services.yclients_service import BASE_URL, REQUEST_TIMEOUT, _request, get_headers, normalize_phone
+from services.booking_notifications import ensure_schema as ensure_notification_schema, enqueue
 from utils.chat_hygiene import schedule_fade_delete
 from utils.error_reporter import report_admin_error
 from utils.message_style import DIVIDER, header
@@ -59,8 +62,9 @@ BOOKING_DAYS_AHEAD = 14
 DURATION_OPTIONS = (30, 60, 90, 120, 180)
 OPEN_TIME = time(12, 0)
 CLOSE_TIME = time(0, 0)  # 00:00 следующего дня
-BLOCKING_STATUSES = ("pending_admin", "creating", "confirmed", "user_confirmed")
+BLOCKING_STATUSES = ("pending_admin", "creating", "confirmed", "user_confirmed", "cancelling", "cancellation_failed", "reconciliation_required")
 USER_CANCELLABLE_STATUSES = ("pending_admin", "confirmed", "user_confirmed")
+HOURLY_RATES = {"static": 70000, "motion": 100000}
 
 
 class BookingFlow(StatesGroup):
@@ -76,6 +80,8 @@ class BookingFlow(StatesGroup):
 # ============================================================================
 async def ensure_booking_schema() -> None:
     db = await get_db()
+    await db.execute("BEGIN IMMEDIATE")
+    await ensure_notification_schema(db)
     await db.execute(
         """
         CREATE TABLE IF NOT EXISTS booking_requests_v2 (
@@ -130,6 +136,17 @@ async def ensure_booking_schema() -> None:
 
     cursor = await db.execute("PRAGMA table_info(booking_requests_v2)")
     columns = [row[1] for row in await cursor.fetchall()]
+    for name, definition in {
+        "source": "TEXT NOT NULL DEFAULT 'bot'",
+        "hourly_rate_kopecks": "INTEGER NOT NULL DEFAULT 0",
+        "quoted_kopecks": "INTEGER NOT NULL DEFAULT 0",
+        "commission_bps": "INTEGER NOT NULL DEFAULT 1000",
+        "idempotency_key": "TEXT",
+        "request_fingerprint": "TEXT",
+    }.items():
+        if name not in columns:
+            await db.execute(f"ALTER TABLE booking_requests_v2 ADD COLUMN {name} {definition}")
+    await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_booking_retry ON booking_requests_v2(telegram_id, source, idempotency_key) WHERE idempotency_key IS NOT NULL")
     if "experience_granted" not in columns:
         await db.execute(
             "ALTER TABLE booking_requests_v2 ADD COLUMN experience_granted INTEGER NOT NULL DEFAULT 0"
@@ -173,6 +190,7 @@ async def _set_booking_status(
     error: str | None = None,
 ) -> None:
     db = await get_db()
+    await db.execute("BEGIN IMMEDIATE")
     await db.execute(
         """
         UPDATE booking_requests_v2
@@ -182,8 +200,21 @@ async def _set_booking_status(
         """,
         (status, admin_id, error, booking_id),
     )
+    await _queue_status_notifications(db, booking_id, status)
     await db.commit()
     await db.close()
+
+
+async def _queue_status_notifications(db, booking_id, status):
+    cur = await db.execute('SELECT telegram_id,source FROM booking_requests_v2 WHERE id=?', (booking_id,))
+    row = await cur.fetchone()
+    if not row or row[1] != 'miniapp':
+        return
+    if status in ('confirmed','rejected','cancelled','cancelled_by_user','cancellation_failed'):
+        await enqueue(db, booking_id, row[0], status)
+    if status in ('reconciliation_required','cancellation_failed'):
+        for admin_id in SUPER_ADMIN_IDS:
+            await enqueue(db, booking_id, admin_id, status)
 
 
 async def _claim_for_admin(booking_id: int, admin_id: int) -> bool:
@@ -207,6 +238,7 @@ async def _reject_if_pending(booking_id: int, admin_id: int) -> bool:
     чтобы отклонение не могло затереть заявку, которую параллельно
     уже подтверждает другой администратор."""
     db = await get_db()
+    await db.execute("BEGIN IMMEDIATE")
     cur = await db.execute(
         """
         UPDATE booking_requests_v2
@@ -216,6 +248,8 @@ async def _reject_if_pending(booking_id: int, admin_id: int) -> bool:
         (admin_id, booking_id),
     )
     changed = cur.rowcount == 1
+    if changed:
+        await _queue_status_notifications(db, booking_id, 'rejected')
     await db.commit()
     await db.close()
     return changed
@@ -288,11 +322,41 @@ async def _create_pending_booking(
     start_at: datetime,
     end_at: datetime,
     duration_minutes: int,
+    source: str = "bot",
+    idempotency_key: str | None = None,
 ) -> tuple[bool, int | None, str | None]:
+    if (not 1 <= len(place_keys) <= MAX_PLACES_PER_BOOKING
+        or len(set(place_keys)) != len(place_keys)
+        or place_type not in HOURLY_RATES
+        or any(key not in BOOKING_PLACES or BOOKING_PLACES[key]['type'] != place_type for key in place_keys)):
+        return False, None, "Выберите до трёх разных мест одного типа"
+    if (duration_minutes not in DURATION_OPTIONS or start_at.tzinfo is None or end_at.tzinfo is None
+        or end_at - start_at != timedelta(minutes=duration_minutes) or source not in ('bot', 'miniapp')):
+        return False, None, "Некорректное время или длительность"
+    start_at, end_at = start_at.astimezone(TZ), end_at.astimezone(TZ)
+    if idempotency_key is not None and not 8 <= len(idempotency_key) <= 128:
+        return False, None, "Некорректный ключ запроса"
+    fingerprint = hashlib.sha256(json.dumps([sorted(place_keys), start_at.isoformat(), duration_minutes]).encode()).hexdigest()
     staff_ids = [int(BOOKING_PLACES[key]["staff_id"]) for key in place_keys]
     db = await get_db()
     try:
         await db.execute("BEGIN IMMEDIATE")
+
+        if idempotency_key:
+            cur = await db.execute("SELECT id, request_fingerprint FROM booking_requests_v2 WHERE telegram_id=? AND source=? AND idempotency_key=?", (int(pilot['telegram_id']), source, idempotency_key))
+            previous = await cur.fetchone()
+            if previous:
+                await db.rollback()
+                if previous[1] != fingerprint:
+                    return False, None, "Ключ запроса уже использован для другой брони"
+                return True, int(previous[0]), None
+
+        now = datetime.now(TZ)
+        if (start_at <= now or not 0 <= (start_at.date() - now.date()).days < BOOKING_DAYS_AHEAD
+            or start_at.time() < OPEN_TIME or start_at.second or start_at.microsecond
+            or start_at.minute % 30 or end_at > datetime.combine(start_at.date() + timedelta(days=1), CLOSE_TIME, TZ)):
+            await db.rollback()
+            return False, None, "Выберите будущее время в часы работы клуба"
 
         placeholders = ",".join("?" for _ in staff_ids)
         status_placeholders = ",".join("?" for _ in BLOCKING_STATUSES)
@@ -329,8 +393,9 @@ async def _create_pending_booking(
             """
             INSERT INTO booking_requests_v2 (
                 telegram_id, username, phone, display_name, yclients_client_id,
-                place_type, start_at, end_at, duration_minutes, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_admin')
+                place_type, start_at, end_at, duration_minutes, status,
+                source, hourly_rate_kopecks, quoted_kopecks, commission_bps, idempotency_key, request_fingerprint
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_admin', ?, ?, ?, 1000, ?, ?)
             """,
             (
                 int(pilot["telegram_id"]),
@@ -342,6 +407,11 @@ async def _create_pending_booking(
                 start_at.isoformat(),
                 end_at.isoformat(),
                 duration_minutes,
+                source,
+                HOURLY_RATES[place_type],
+                HOURLY_RATES[place_type] * duration_minutes * len(place_keys) // 60,
+                idempotency_key,
+                fingerprint,
             ),
         )
         booking_id = int(cur.lastrowid)
@@ -364,12 +434,15 @@ async def _create_pending_booking(
                 ),
             )
 
+        if source == 'miniapp':
+            for recipient_id in SUPER_ADMIN_IDS:
+                await enqueue(db, booking_id, recipient_id, 'pending_admin')
         await db.commit()
         return True, booking_id, None
     except Exception as exc:
         await db.rollback()
         logger.exception("Не удалось создать заявку бронирования")
-        return False, None, str(exc)
+        return False, None, "Не удалось сохранить заявку. Повторите запрос позднее."
     finally:
         await db.close()
 
@@ -1228,13 +1301,46 @@ async def admin_reject_booking(callback: CallbackQuery) -> None:
         await callback.message.edit_text(_message_html(callback.message) + "\n\n❌ <b>Отклонено</b>")
     except Exception:
         pass
+    if booking.get('source') != 'miniapp':
+        try:
+            await callback.bot.send_message(
+                booking["telegram_id"],
+                "❌ Администратор отклонил заявку на бронирование. Выберите другое время или места.",
+            )
+        except Exception:
+            pass
+
+
+async def approve_booking(booking_id: int, admin_id: int) -> tuple[bool, str | None]:
+    """One approval path for Telegram and HTTP; uncertain writes never retry blindly."""
+    if not await _claim_for_admin(booking_id, admin_id):
+        return False, "Заявка уже обрабатывается или обработана"
+    booking = await _fetch_booking(booking_id)
     try:
-        await callback.bot.send_message(
-            booking["telegram_id"],
-            "❌ Администратор отклонил заявку на бронирование. Выберите другое время или места.",
-        )
+        start_at = datetime.fromisoformat(booking['start_at']).astimezone(TZ)
+        end_at = datetime.fromisoformat(booking['end_at']).astimezone(TZ)
+        if start_at <= datetime.now(TZ):
+            await _set_booking_status(booking_id, 'rejected', error='Время заявки прошло')
+            return False, "Время заявки уже прошло"
+        local = await _local_conflicts([int(x['staff_id']) for x in booking['items']], start_at, end_at, exclude_booking_id=booking_id)
+        remote, error = await _remote_conflicts([x['place_key'] for x in booking['items']], start_at, end_at)
+        if local or remote or error:
+            await _set_booking_status(booking_id, 'pending_admin', error=error or 'Место занято')
+            return False, "Не удалось подтвердить доступность мест. Повторите позднее."
+        for item in booking['items']:
+            record_id, error = await _create_yclients_record(booking, item)
+            if error or record_id is None:
+                # Timeout may mean that the remote side already created a record.
+                # Keep known IDs and seats reserved for manual reconciliation.
+                await _set_booking_status(booking_id, 'reconciliation_required', error=error or 'Нет id записи')
+                return False, "Нужна сверка записей с YCLIENTS. Повторная запись заблокирована."
+            await _save_yclients_record(booking_id, int(item['id']), record_id)
+        await _set_booking_status(booking_id, 'confirmed', admin_id=admin_id)
+        return True, None
     except Exception:
-        pass
+        logger.exception('Неопределённый результат подтверждения брони %s', booking_id)
+        await _set_booking_status(booking_id, 'reconciliation_required', error='Ошибка подтверждения; требуется сверка')
+        return False, "Нужна сверка записей с YCLIENTS"
 
 
 @router.callback_query(F.data.startswith("bkadm:approve:"))
@@ -1243,69 +1349,17 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
         await callback.answer("Нет доступа", show_alert=True)
         return
     booking_id = int(callback.data.rsplit(":", 1)[1])
-    if not await _claim_for_admin(booking_id, callback.from_user.id):
-        await callback.answer("Заявка уже обрабатывается или обработана", show_alert=True)
+    ok, error = await approve_booking(booking_id, callback.from_user.id)
+    if not ok:
+        await callback.answer(error or "Не удалось подтвердить бронь", show_alert=True)
         return
-
-    booking = await _fetch_booking(booking_id)
-    if not booking:
-        await callback.answer("Заявка не найдена", show_alert=True)
-        return
-
-    start_at = datetime.fromisoformat(booking["start_at"]).astimezone(TZ)
-    end_at = datetime.fromisoformat(booking["end_at"]).astimezone(TZ)
-    place_keys = [item["place_key"] for item in booking["items"]]
-    staff_ids = [int(item["staff_id"]) for item in booking["items"]]
-
-    local = await _local_conflicts(staff_ids, start_at, end_at, exclude_booking_id=booking_id)
-    if local:
-        await _set_booking_status(booking_id, "pending_admin", error="Локальное пересечение")
-        await callback.answer(f"Уже занято: {local[0]['place_title']}", show_alert=True)
-        return
-
-    remote, remote_error = await _remote_conflicts(place_keys, start_at, end_at)
-    if remote_error:
-        await _set_booking_status(booking_id, "pending_admin", error=remote_error)
-        await callback.answer("Сервис не отвечает. Заявка оставлена на повторное подтверждение.", show_alert=True)
-        return
-    if remote:
-        await _set_booking_status(booking_id, "pending_admin", error="Занято")
-        await callback.answer("Занято: " + ", ".join(remote), show_alert=True)
-        return
-
-    created: list[tuple[int, int]] = []
-    failure: str | None = None
-    for item in booking["items"]:
-        record_id, error = await _create_yclients_record(booking, item)
-        if error or record_id is None:
-            failure = error or "Неизвестная ошибка Сервиса"
-            break
-        created.append((int(item["id"]), record_id))
-        await _save_yclients_record(booking_id, int(item["id"]), record_id)
-
-    if failure:
-        rollback_errors = []
-        for item_id, record_id in created:
-            ok, delete_error = await _delete_yclients_record(record_id)
-            if ok:
-                await _clear_yclients_record(item_id)
-            else:
-                rollback_errors.append(delete_error or str(record_id))
-        full_error = failure
-        if rollback_errors:
-            full_error += " | Ошибка отката: " + "; ".join(rollback_errors)
-        await _set_booking_status(booking_id, "pending_admin", error=full_error)
-        await callback.answer("Сервис не создал записи. Можно попробовать подтвердить ещё раз.", show_alert=True)
-        return
-
-    await _set_booking_status(booking_id, "confirmed", admin_id=callback.from_user.id)
     booking = await _fetch_booking(booking_id)
     await callback.answer("Подтверждено")
     try:
         await callback.message.edit_text(_message_html(callback.message) + "\n\n✅ <b>Подтверждено и создано в Сервисе</b>")
     except Exception:
         pass
-    if booking:
+    if booking and booking.get('source') != 'miniapp':
         try:
             await callback.bot.send_message(
                 booking["telegram_id"],
@@ -1321,6 +1375,17 @@ async def admin_approve_booking(callback: CallbackQuery) -> None:
 # ОТМЕНА И НАПОМИНАНИЕ ЗА ЧАС
 # ============================================================================
 async def _cancel_booking(booking: dict[str, Any], *, cancelled_status: str = "cancelled") -> tuple[bool, str | None]:
+    # Claim before external I/O: cancellation must not race approval or another cancellation.
+    db = await get_db()
+    try:
+        cur = await db.execute("UPDATE booking_requests_v2 SET status='cancelling', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending_admin','confirmed','user_confirmed','cancellation_failed')", (booking['id'],))
+        claimed = cur.rowcount == 1
+        await db.commit()
+    finally:
+        await db.close()
+    if not claimed:
+        return False, "Бронь уже обрабатывается или отменена"
+    booking = await _fetch_booking(booking['id'])
     errors = []
     for item in booking.get("items", []):
         record_id = item.get("yclients_record_id")
@@ -1329,6 +1394,8 @@ async def _cancel_booking(booking: dict[str, Any], *, cancelled_status: str = "c
         ok, error = await _delete_yclients_record(record_id)
         if not ok:
             errors.append(error or str(record_id))
+        else:
+            await _clear_yclients_record(item['id'])
     if errors:
         await _set_booking_status(booking["id"], "cancellation_failed", error="; ".join(errors))
         return False, "; ".join(errors)
@@ -1368,6 +1435,16 @@ async def user_cancel_booking(callback: CallbackQuery) -> None:
     await callback.message.edit_text("❌ Бронь отменена. Записи удалены из Сервиса.")
 
 
+async def confirm_attendance(booking_id: int, telegram_id: int) -> bool:
+    db = await get_db()
+    try:
+        cur = await db.execute("UPDATE booking_requests_v2 SET status='user_confirmed',updated_at=CURRENT_TIMESTAMP WHERE id=? AND telegram_id=? AND status IN ('confirmed','user_confirmed')", (booking_id, telegram_id))
+        await db.commit()
+        return cur.rowcount == 1
+    finally:
+        await db.close()
+
+
 @router.callback_query(F.data.startswith("bkrem:confirm:"))
 async def reminder_confirm(callback: CallbackQuery) -> None:
     booking_id = int(callback.data.rsplit(":", 1)[1])
@@ -1378,7 +1455,9 @@ async def reminder_confirm(callback: CallbackQuery) -> None:
     if booking["status"] not in {"confirmed", "user_confirmed"}:
         await callback.answer("Бронь уже изменена", show_alert=True)
         return
-    await _set_booking_status(booking_id, "user_confirmed")
+    if not await confirm_attendance(booking_id, callback.from_user.id):
+        await callback.answer("Бронь уже изменена", show_alert=True)
+        return
     await callback.answer("Подтверждено")
     await callback.message.edit_text("✅ Спасибо! Ждём вас в клубе.")
 
