@@ -1,3 +1,4 @@
+import {createSpinController, animateReel} from './roulette.mjs?v=20260914';
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 const view = document.querySelector('#view');
@@ -7,10 +8,21 @@ const row = (label,value) => `<div class="row"><span>${label}</span><b>${value}<
 const button = (label,screen,cls='secondary') => `<button class="${cls}" data-go="${screen}">${label}</button>`;
 let me, current = 'home', navigation = 0, booking = null;
 async function api(path, options={}) {
-  const response = await fetch(path,{...options,headers:{'Authorization':`tma ${tg?.initData || ''}`,'Content-Type':'application/json',...(options.headers || {})}});
-  const data = await response.json().catch(()=>({}));
-  if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : typeof data.detail === 'string' ? data.detail : `Не удалось выполнить запрос (${response.status}). Попробуйте ещё раз.`);
-  return data;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),30000);
+  try {
+    const response=await fetch(path,{...options,signal:controller.signal,headers:{'Authorization':`tma ${tg?.initData || ''}`,'Content-Type':'application/json',...(options.headers || {})}});
+    const data=await response.json().catch(()=>{throw new Error('Сервер вернул некорректный ответ. Повторите запрос.');});
+    if(!response.ok){
+      const error=new Error(typeof data.error==='string'?data.error:typeof data.detail==='string'?data.detail:`Не удалось выполнить запрос (${response.status}).`);
+      error.retryable=data.retryable;error.status=response.status;throw error;
+    }
+    return data;
+  } catch(error) {
+    if(error.name==='AbortError')throw new Error('Сервер долго отвечает. Проверьте результат перед повторной операцией.');
+    if(error instanceof TypeError)throw new Error('Нет связи с сервером. Проверьте интернет и повторите запрос.');
+    throw error;
+  } finally {clearTimeout(timer);}
 }
 function toast(text) { const el=document.querySelector('#toast'); el.textContent=text; el.hidden=false; clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.hidden=true,5000); }
 function botFallback(text) { return `<div class="card"><p>${esc(text)}</p><p class="muted">Эта операция пока доступна в чате бота. Приложение не отправляет её автоматически.</p><button class="primary" data-bot>Открыть бота</button></div>`; }
@@ -31,7 +43,47 @@ async function leaders() { const d=await api('/api/leaderboard'); return `<div c
 function lap(ms) { return `${Math.floor(ms/60000)}:${String(Math.floor(ms%60000/1000)).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`; }
 async function profile() { if(!me.registered)return '<h1>Карточка пилота</h1>'+botFallback('Зарегистрируйтесь в боте, чтобы бронировать заезды.'); const p=me.profile; return `<h1>Карточка пилота</h1><div class="card gold">${row('Пилот',esc(p.display_name||p.username))}${row('Номер',esc(p.pilot_number))}${row('Телефон',esc(p.phone||'—'))}${row('Рейтинг',esc(p.rating||0))}${row('Класс',esc(p.current_class||'—'))}</div>${button('Изменить имя','nickname')}${button('Мои заезды','results')}${button('Отправить время круга','submitlap')}`; }
 async function referrals() { const d=await api('/api/referrals'); return `<h1>Пригласи друга</h1><div class="card gold"><div class="number">${rub(d.bonus*100)} + ${rub(d.bonus*100)}</div><p>Друг регистрируется по вашей ссылке — вы оба получаете Valevo Bonus.</p><p class="link">${esc(d.link)}</p><button class="primary" id="copy" data-link="${esc(d.link)}">Скопировать ссылку</button></div><div class="card">${row('Приглашено',esc(d.stats.invited))}${row('Получено',rub(d.stats.earned*100))}</div>`; }
-async function roulette() { const d=await api('/api/roulette'); return `<h1>Рулетка призов</h1><div class="card gold">${row('Valevo Bonus',rub(d.balance*100))}<div id="prize-result" role="status"></div><button class="primary" id="spin">Крутить за ${rub(d.spin_cost*100)}</button></div><div class="prizes">${d.prizes.map(p=>`<div class="prize">${esc(p.emoji)} ${esc(p.title)}</div>`).join('')}</div>`; }
+let rouletteData, spinController;
+const prizeCell=p=>`<div class="reel-cell"><span>${esc(p.emoji)}</span><b>${esc(p.title)}</b></div>`;
+function getSpinController(){
+  if(!spinController){
+    const storageKey=`valevo-spin-${me.profile?.telegram_id || tg?.initDataUnsafe?.user?.id || 'pilot'}`;
+    const safe=fn=>{try{return fn();}catch{return null;}};
+    spinController=createSpinController(key=>api('/api/roulette/spin',{method:'POST',body:JSON.stringify({idempotency_key:key})}),{
+      loadKey:()=>safe(()=>localStorage.getItem(storageKey)),saveKey:key=>safe(()=>localStorage.setItem(storageKey,key)),
+      clearKey:()=>safe(()=>localStorage.removeItem(storageKey)),newKey:()=>crypto.randomUUID()
+    });
+  }
+  return spinController;
+}
+async function roulette() {
+  rouletteData=await api('/api/roulette');const d=rouletteData,c=getSpinController();
+  return `<h1>Рулетка призов</h1><p class="muted">Используйте Valevo Bonus — выигрывайте бонусы и рейтинг.</p><div class="card gold roulette-card"><div id="roulette-balance">${row('Valevo Bonus',rub(d.balance*100))}</div><div class="reel-window" id="reel-window" aria-hidden="true"><div class="reel-pointer"></div><div class="reel-strip" id="reel-strip">${d.prizes.slice(0,5).map(prizeCell).join('')}</div></div><div id="prize-result" role="status" aria-live="polite"></div><button class="primary" id="spin">${c.recovering?'Проверить предыдущий спин':`Крутить за ${rub(d.spin_cost*100)}`}</button><p class="muted spin-help">Стоимость одного спина — ${rub(d.spin_cost*100)} бонусами.</p></div><h2>Возможные призы</h2><div class="prizes">${d.prizes.map(p=>`<div class="prize">${esc(p.emoji)} ${esc(p.title)}</div>`).join('')}</div>`;
+}
+function bindRoulette(){
+  const btn=document.querySelector('#spin'),holder=document.querySelector('#prize-result'),strip=document.querySelector('#reel-strip'),viewport=document.querySelector('#reel-window'),balance=document.querySelector('#roulette-balance'),catalog=rouletteData.prizes;
+  let animating=false;
+  btn.onclick=async()=>{
+    if(animating)return;animating=true;btn.disabled=true;btn.textContent='Получаем результат…';holder.textContent='';viewport.classList.add('waiting');
+    try {
+      const result=await getSpinController().spin();
+      if(!btn.isConnected)return;
+      viewport.classList.remove('waiting');btn.textContent='Рулетка вращается…';
+      await animateReel(strip,viewport,catalog,result,prizeCell);
+      if(!btn.isConnected)return;
+      const status=result.prize_status==='queued'?'Приз ожидает начисления. Повторно крутить для получения не нужно.':result.prize_status==='failed'?'Приз зафиксирован, но начисление не завершено. Обратитесь к администратору.':'Приз начислен!';
+      holder.innerHTML=`<div class="spin-win"><span>${esc(result.emoji)}</span><h2>${esc(result.title)}</h2><p>${status}</p></div>`;
+      balance.innerHTML=row('Valevo Bonus',result.balance==null?'Обновляется':rub(result.balance*100));
+      getSpinController().acknowledge();
+      tg?.HapticFeedback?.notificationOccurred(result.prize_status==='ok'?'success':'warning');
+    } catch(error) {
+      if(btn.isConnected)holder.textContent=error.message;
+    } finally {
+      animating=false;viewport.classList.remove('waiting');btn.disabled=false;
+      btn.textContent=getSpinController().recovering?'Проверить предыдущий спин':'Крутить ещё';
+    }
+  };
+}
 function clubDate(date, timezone) { return new Intl.DateTimeFormat('sv-SE',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(date); }
 // Convert club wall time to a UTC instant, independent of the pilot's device timezone.
 function instant(day,time,timezone) {
@@ -96,7 +148,7 @@ function staff() {if(!me.is_admin&&!me.is_super_admin)throw new Error('Недо�
 async function nickname(){return `<h1>Имя пилота</h1><form id="nickname-form" class="card"><label for="display-name">Имя в рейтинге</label><input id="display-name" maxlength="64" required value="${esc(me.profile.display_name||'')}"><button class="primary secondary">Сохранить</button></form>`;}
 async function adminlap(){if(!me.is_admin&&!me.is_super_admin)throw new Error('Недостаточно прав');const d=await api('/api/disciplines');window.lapDisciplines=d.disciplines;return `<h1>Время пилота</h1><form id="lap-form" class="card"><label for="pilot-number">Номер пилота</label><input id="pilot-number" type="number" min="1" required><label for="discipline">Дисциплина</label><select id="discipline">${d.disciplines.map(x=>`<option>${esc(x.name)}</option>`).join('')}</select><label for="track">Трасса</label><select id="track"></select><label for="lap-time">Время круга · мм:сс.мс</label><input id="lap-time" placeholder="02:00.597" required><button class="primary secondary">Сохранить результат</button></form>`;}
 const screens={home,leaders,profile,referrals,roulette,book,bookings,requests:()=>bookings(true),finance,staff,nickname,adminlap,results,pilots,tracks,benchmarks,submitlap:()=>'<h1>Новый круг</h1>'+botFallback('Отправьте время и фото или видео подтверждения через бота. Администратор проверит результат.'),support:()=>'<h1>Клуб на связи</h1>'+botFallback('Откройте бота, чтобы написать в поддержку или посмотреть информацию о клубе.')};
-const after={pilots:bindPilots,tracks:()=>bindTrackEditor(false),benchmarks:()=>bindTrackEditor(true),book:()=>document.querySelector('#reserve')&&bindBooking(),bookings:()=>bindBookings(),requests:()=>bindBookings(true),finance:()=>{document.querySelector('#load-finance').onclick=loadFinance;return loadFinance();},referrals:()=>{document.querySelector('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(e.target.dataset.link);toast('Ссылка скопирована');}catch{toast('Не удалось скопировать. Выделите ссылку вручную.');}};},roulette:()=>{document.querySelector('#spin').onclick=async e=>{const btn=e.target;btn.disabled=true;try{const d=await api('/api/roulette/spin',{method:'POST'});document.querySelector('#prize-result').innerHTML=`<h2>${esc(d.title)}</h2><p>Остаток: ${rub(d.balance*100)}</p>`;toast(`Выигрыш: ${d.title}`);}catch(e){toast(e.message);}finally{btn.disabled=false;}};},nickname:()=>{document.querySelector('#nickname-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{await api('/api/profile',{method:'PATCH',body:JSON.stringify({display_name:document.querySelector('#display-name').value})});me=await api('/api/me');go('profile');}catch(e){toast(e.message);btn.disabled=false;}};},adminlap:()=>{let lapKey=crypto.randomUUID();document.querySelector('#lap-form').oninput=()=>lapKey=crypto.randomUUID();const discipline=document.querySelector('#discipline');const tracks=()=>document.querySelector('#track').innerHTML=(window.lapDisciplines.find(x=>x.name===discipline.value)?.tracks||[]).map(x=>`<option>${esc(x)}</option>`).join('');discipline.onchange=tracks;tracks();document.querySelector('#lap-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{const saved=await api('/api/admin/laps',{method:'POST',body:JSON.stringify({idempotency_key:lapKey,pilot_number:Number(document.querySelector('#pilot-number').value),discipline:discipline.value,track:document.querySelector('#track').value,lap_time:document.querySelector('#lap-time').value})});toast(saved.warning||'Результат сохранён');go('staff');}catch(e){toast(e.message);btn.disabled=false;}};}};
+const after={pilots:bindPilots,tracks:()=>bindTrackEditor(false),benchmarks:()=>bindTrackEditor(true),book:()=>document.querySelector('#reserve')&&bindBooking(),bookings:()=>bindBookings(),requests:()=>bindBookings(true),finance:()=>{document.querySelector('#load-finance').onclick=loadFinance;return loadFinance();},referrals:()=>{document.querySelector('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(e.target.dataset.link);toast('Ссылка скопирована');}catch{toast('Не удалось скопировать. Выделите ссылку вручную.');}};},roulette:bindRoulette,nickname:()=>{document.querySelector('#nickname-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{await api('/api/profile',{method:'PATCH',body:JSON.stringify({display_name:document.querySelector('#display-name').value})});me=await api('/api/me');go('profile');}catch(e){toast(e.message);btn.disabled=false;}};},adminlap:()=>{let lapKey=crypto.randomUUID();document.querySelector('#lap-form').oninput=()=>lapKey=crypto.randomUUID();const discipline=document.querySelector('#discipline');const tracks=()=>document.querySelector('#track').innerHTML=(window.lapDisciplines.find(x=>x.name===discipline.value)?.tracks||[]).map(x=>`<option>${esc(x)}</option>`).join('');discipline.onchange=tracks;tracks();document.querySelector('#lap-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{const saved=await api('/api/admin/laps',{method:'POST',body:JSON.stringify({idempotency_key:lapKey,pilot_number:Number(document.querySelector('#pilot-number').value),discipline:discipline.value,track:document.querySelector('#track').value,lap_time:document.querySelector('#lap-time').value})});toast(saved.warning||'Результат сохранён');go('staff');}catch(e){toast(e.message);btn.disabled=false;}};}};
 async function start(){document.querySelector('.brand').onclick=e=>{e.preventDefault();if(me)go('home');};try{me=await api('/api/me');document.querySelector('#pilot').textContent=me.profile?.display_name||me.profile?.username||'Добро пожаловать в клуб';document.querySelector('#role').textContent=me.is_super_admin?'СУПЕР-АДМИН':me.is_admin?'АДМИН':'ПИЛОТ';document.querySelector('nav').innerHTML=[['home','⌂','Главная'],['book','▦','Бронь'],['leaders','🏆','Зачёт'],['profile','◉','Пилот']].map(([s,i,t])=>`<button data-view="${s}"><b>${i}</b>${t}</button>`).join('');document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));if(me.is_admin||me.is_super_admin){document.querySelector('#staff').innerHTML=button('Управление клубом','staff');document.querySelector('#staff button').onclick=()=>go('staff');}go('home');}catch(e){failure(e,start);}}
 
 async function results() {

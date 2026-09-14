@@ -1,5 +1,8 @@
 from __future__ import annotations
 import html
+import logging
+import mimetypes
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -7,6 +10,7 @@ from aiogram import Bot
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from config import BOT_TOKEN, REFERRAL_BONUS_RUB
 from data.tournament import CLASS_LADDER
 from database.db import get_all_pilot_display_names, get_pilot_by_telegram_id, get_referral_stats
@@ -16,6 +20,7 @@ from services.yclients_service import get_valevo_bonus_balance
 from webapp.auth import InitDataError, TelegramWebAppUser, authenticate
 
 STATIC=Path(__file__).resolve().parent/'static'
+mimetypes.add_type('text/javascript','.mjs')
 _bot: Bot|None=None
 @asynccontextmanager
 async def lifespan(_app):
@@ -28,6 +33,39 @@ async def lifespan(_app):
     yield
     await _bot.session.close()
 app=FastAPI(title='VALEVO Mini App', lifespan=lifespan)
+
+
+@app.middleware('http')
+async def response_safety(request: Request, call_next):
+    request_id=uuid.uuid4().hex
+    try:
+        response=await call_next(request)
+    except Exception:
+        logging.getLogger(__name__).exception('Mini App request failed: %s %s [%s]',request.method,request.url.path,request_id)
+        response=JSONResponse({'error':'Не удалось завершить запрос. Проверьте результат операции перед повтором.','request_id':request_id},status_code=500)
+    if request.url.path.startswith('/api/'):
+        response.headers['Cache-Control']='no-store'
+    elif request.url.path=='/':
+        response.headers['Cache-Control']='no-cache'
+    response.headers['X-Content-Type-Options']='nosniff'
+    response.headers['Referrer-Policy']='no-referrer'
+    response.headers['X-Request-ID']=request_id
+    return response
+
+
+@app.get('/api/ready')
+async def readiness():
+    from database.db import get_db
+    db=None
+    try:
+        db=await get_db()
+        await db.execute('SELECT 1 FROM pilots LIMIT 1')
+        await db.execute('SELECT 1 FROM booking_requests_v2 LIMIT 1')
+        return {'ok':True}
+    except Exception:
+        return JSONResponse({'ok':False,'error':'База данных недоступна'},status_code=503)
+    finally:
+        if db is not None: await db.close()
 
 def current_user(authorization: str|None=Header(default=None)) -> TelegramWebAppUser:
     if not authorization or not authorization.lower().startswith('tma '): raise HTTPException(401,'Откройте приложение из Telegram')
@@ -72,13 +110,17 @@ async def roulette(user:TelegramWebAppUser=Depends(current_user)):
     p=await get_pilot_by_telegram_id(user.id); balance=0.0
     if p and p.get('yclients_client_id'):
         try: balance=float(await get_valevo_bonus_balance(p['yclients_client_id']) or 0)
-        except Exception: balance=0.0
+        except Exception: raise HTTPException(503,'Не удалось получить бонусный баланс. Попробуйте позже.')
     return {'spin_cost':SPIN_COST_RUB,'balance':round(balance,2),'prizes':prize_catalog()}
 
+class SpinRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=128, pattern=r'^[a-zA-Z0-9_-]+$')
+
+
 @app.post('/api/roulette/spin')
-async def roulette_spin(user:TelegramWebAppUser=Depends(current_user)):
-    try: return {'ok':True,**(await spin(user.id))}
-    except SpinError as exc: return JSONResponse({'ok':False,'error':str(exc)},status_code=409)
+async def roulette_spin(payload: 'SpinRequest', user:TelegramWebAppUser=Depends(current_user)):
+    try: return {'ok':True,**(await spin(user.id,payload.idempotency_key))}
+    except SpinError as exc: return JSONResponse({'ok':False,'error':str(exc),'retryable':exc.retryable},status_code=409)
 
 from services.miniapp_booking import create_booking_router
 from webapp.finance_api import create_finance_router

@@ -44,6 +44,7 @@ if __name__ == '__main__':
                 '/api/bookings': dict(bookings=[]),
                 '/api/admin/bookings': dict(bookings=[]),
                 '/api/leaderboard': dict(overall=[],disciplines=[]),
+                '/api/roulette': dict(balance=5000,spin_cost=1000,prizes=[dict(code=f'rating_{i}',emoji='🏎️',title=f'+{i} рейтинга',kind='rating',value=i) for i in [10,20,35,50,75,120]]),
                 '/api/disciplines': dict(disciplines=[dict(name='GT3',tracks=['Monza'])],benchmarks={},month_key='2026-09'),
                 '/api/super/pilots': dict(pilots=[profile]),
                 '/api/results': dict(total_results=1,podiums=0,gold=0,silver=0,bronze=0,last_result=None,disciplines_count=1),
@@ -56,10 +57,12 @@ if __name__ == '__main__':
                 file=(STATIC/name).resolve()
                 if not file.is_relative_to(STATIC.resolve()) or not file.is_file():
                     self.send_error(404);return
-                payload=file.read_bytes();mime='text/css' if file.suffix=='.css' else 'text/javascript' if file.suffix=='.js' else 'text/html'
+                payload=file.read_bytes();mime='text/css' if file.suffix=='.css' else 'text/javascript' if file.suffix in ('.js','.mjs') else 'text/html'
             self.send_response(200);self.send_header('Content-Type',mime+'; charset=utf-8');self.end_headers();self.wfile.write(payload)
         def do_POST(self):
             self.rfile.read(int(self.headers.get('Content-Length',0)))
+            if self.path=='/api/roulette/spin':
+                self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(dict(code='rating_50',emoji='🏎️',title='+50 рейтинга',kind='rating',value=50,balance=4000,prize_status='ok')).encode());return
             self.send_response(409);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'error':'Тестовая ошибка: заявка не создана'}).encode())
     HTTPServer(('127.0.0.1', int(os.getenv('VALEVO_FIXTURE_PORT','8766'))),Fixture).serve_forever()
 
@@ -73,6 +76,7 @@ def test_runtime_timezone_refunds_auth_and_role_guard():
         pytest.skip('Node is required for frontend runtime contract')
     source = (STATIC / 'js/app.js').read_text(encoding='utf-8')
     source = source.rsplit('start();', 1)[0]
+    source = '\n'.join(line for line in source.splitlines() if not line.startswith('import '))
     script = """
 const assert=require('node:assert/strict');
 global.window={Telegram:{WebApp:{initData:'signed-test-data',ready:()=>{},expand:()=>{}}}};

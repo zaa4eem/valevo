@@ -2,6 +2,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import uuid
+from services.roulette_requests import run_spin, record_selection, RequestPending, RequestRejected
 
 from database.db import get_pilot_by_telegram_id, record_roulette_spin, update_pilot_rating
 from services.yclients_auto import issue_or_queue_valevo_bonus
@@ -35,7 +37,11 @@ _WEIGHTS=[p[5] for p in PRIZES]
 _locks: dict[int, asyncio.Lock] = {}
 
 class SpinError(Exception):
-    pass
+    retryable = True
+
+
+class SpinRejected(SpinError):
+    retryable = False
 
 def prize_catalog():
     return [{"code":c,"emoji":e,"title":t,"kind":k,"value":v} for c,e,t,k,v,_ in PRIZES]
@@ -43,21 +49,35 @@ def prize_catalog():
 def _lock(tid:int):
     return _locks.setdefault(tid, asyncio.Lock())
 
-async def spin(telegram_id:int)->dict:
+async def spin(telegram_id:int, request_key:str|None=None)->dict:
+    request_key = request_key or str(uuid.uuid4())
+    try:
+        return await run_spin(telegram_id, request_key, lambda: _spin(telegram_id, request_key))
+    except RequestRejected as exc:
+        raise SpinRejected(str(exc)) from exc
+    except RequestPending as exc:
+        raise SpinError(str(exc)) from exc
+
+
+async def _spin(telegram_id:int, request_key:str)->dict:
     async with _lock(telegram_id):
         pilot=await get_pilot_by_telegram_id(telegram_id)
         if not pilot:
-            raise SpinError("Пилот не найден")
+            raise RequestRejected("Пилот не найден")
         client_id=pilot.get("yclients_client_id")
         if not client_id:
-            raise SpinError("Профиль ещё не синхронизирован с клубной системой")
-        balance=await get_valevo_bonus_balance(client_id)
+            raise RequestRejected("Профиль ещё не синхронизирован с клубной системой")
+        try:
+            balance=await get_valevo_bonus_balance(client_id)
+        except Exception as exc:
+            raise RequestRejected("Не удалось проверить баланс. Попробуйте позже.") from exc
         if balance < SPIN_COST_RUB:
-            raise SpinError(f"Недостаточно средств: нужно {SPIN_COST_RUB} ₽, на счету {balance:g} ₽")
-        charge=await change_valevo_bonus(client_id,-SPIN_COST_RUB,title="Рулетка: списание за спин")
-        if not charge.get("ok"):
-            raise SpinError("YCLIENTS временно недоступен, попробуйте позже")
+            raise RequestRejected(f"Недостаточно средств: нужно {SPIN_COST_RUB} ₽, на счету {balance:g} ₽")
         code,emoji,title,kind,value,_=random.choices(PRIZES,weights=_WEIGHTS,k=1)[0]
+        await record_selection(telegram_id, request_key, {'code':code,'emoji':emoji,'title':title,'kind':kind,'value':value,'prize_status':'unconfirmed','client_id':client_id})
+        charge=await change_valevo_bonus(client_id,-SPIN_COST_RUB,title=f"Рулетка: списание за спин {request_key}")
+        if not charge.get("ok"):
+            raise SpinError("Клубная система не подтвердила списание. Обратитесь к администратору для проверки спина.")
         status="ok"
         if kind=="rating":
             try:
@@ -69,5 +89,8 @@ async def spin(telegram_id:int)->dict:
             payout=await issue_or_queue_valevo_bonus(telegram_id,client_id,value,f"Рулетка: приз «{title}»","roulette_prize")
             status="ok" if payout.get("ok") else "queued"
         await record_roulette_spin(telegram_id,SPIN_COST_RUB,code,kind,value,status)
-        new_balance=await get_valevo_bonus_balance(client_id)
+        try:
+            new_balance=await get_valevo_bonus_balance(client_id)
+        except Exception:
+            new_balance=None
         return {"code":code,"emoji":emoji,"title":title,"kind":kind,"value":value,"prize_status":status,"balance":new_balance}

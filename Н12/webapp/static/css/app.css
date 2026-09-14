@@ -4,3 +4,17 @@
 .floorplan{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-areas:'. m2 m1 lounge' 'wc s6 . .' '. s5 s4 s3';gap:10px;padding:18px 10px;position:relative}
 .seat[data-seat=motion_2]{grid-area:m2}.seat[data-seat=motion_1]{grid-area:m1}.seat[data-seat=static_4]{grid-area:s6}.seat[data-seat=static_3]{grid-area:s5}.seat[data-seat=static_2]{grid-area:s4}.seat[data-seat=static_1]{grid-area:s3}
 .floorplan:before{content:'WC / ВХОД';grid-area:wc;color:var(--muted);font-size:9px;align-self:center;text-align:center}.floorplan:after{content:'ЗОНА ОТДЫХА';grid-area:lounge;color:var(--muted);font-size:9px;align-self:center;text-align:center}.seat{font-size:11px;overflow-wrap:anywhere}.seat small{font-size:9px}
+/* Prize reel: fixed cell geometry keeps the server-selected prize centered. */
+.roulette-card{overflow:hidden}.reel-window{position:relative;overflow:hidden;margin:22px -8px 18px;height:144px;background:#020719;border-block:1px solid #1688db;isolation:isolate}
+.reel-window:after{content:'';position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg,#020719,transparent 22%,transparent 78%,#020719);z-index:2}
+.reel-strip{position:relative;display:flex;gap:10px;width:max-content;padding:12px 0;will-change:transform}
+.reel-cell{flex:0 0 120px;width:120px;height:118px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px;text-align:center;border:1px solid #167eba;border-radius:12px;background:linear-gradient(145deg,#123361,#071125);font-size:13px;line-height:1.3}
+.reel-cell span{font-size:32px}.reel-cell.winner{border-color:#ffe06d;box-shadow:inset 0 0 24px #ffc93a30;color:#ffe895}
+.reel-pointer{position:absolute;left:50%;top:0;bottom:0;width:2px;transform:translateX(-50%);background:#ffe06d;z-index:3;box-shadow:0 0 14px #ffd75f}
+.reel-pointer:before{content:'';position:absolute;top:0;left:-7px;border-left:8px solid transparent;border-right:8px solid transparent;border-top:12px solid #ffe06d}
+.spin-win{text-align:center;padding:8px 0 16px;animation:prize-reveal .4s ease-out}.spin-win>span{font-size:36px}.spin-win h2{color:#ffe895}.spin-help{text-align:center;font-size:12px}
+.reel-window.waiting .reel-strip{animation:reel-wait 1s ease-in-out infinite alternate}
+@keyframes reel-wait{to{opacity:.4;transform:translateX(-20px)}}
+@keyframes prize-reveal{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #ffe06d;outline-offset:3px}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;scroll-behavior:auto!important;transition:none!important}}
