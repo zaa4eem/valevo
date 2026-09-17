@@ -65,6 +65,22 @@ CLOSE_TIME = time(0, 0)  # 00:00 следующего дня
 BLOCKING_STATUSES = ("pending_admin", "creating", "confirmed", "user_confirmed", "cancelling", "cancellation_failed", "reconciliation_required")
 USER_CANCELLABLE_STATUSES = ("pending_admin", "confirmed", "user_confirmed")
 HOURLY_RATES = {"static": 70000, "motion": 100000}
+# Будни 12:00–17:00 — сниженный тариф. Действует на весь слот, если на это время
+# приходится start_at (как и обычный тариф, который тоже не дробится по часам брони).
+HAPPY_HOUR_RATES = {"static": 60000, "motion": 80000}
+HAPPY_HOUR_WEEKDAYS = range(0, 5)  # Mon=0 .. Fri=4
+HAPPY_HOUR_START = time(12, 0)
+HAPPY_HOUR_END = time(17, 0)
+
+
+def _is_happy_hour(start_at: datetime) -> bool:
+    local = start_at.astimezone(TZ)
+    return local.weekday() in HAPPY_HOUR_WEEKDAYS and HAPPY_HOUR_START <= local.time() < HAPPY_HOUR_END
+
+
+def _hourly_rate_kopecks(billed_type: str, start_at: datetime) -> int:
+    table = HAPPY_HOUR_RATES if _is_happy_hour(start_at) else HOURLY_RATES
+    return table[billed_type]
 
 
 class BookingFlow(StatesGroup):
@@ -143,6 +159,7 @@ async def ensure_booking_schema() -> None:
         "commission_bps": "INTEGER NOT NULL DEFAULT 1000",
         "idempotency_key": "TEXT",
         "request_fingerprint": "TEXT",
+        "billed_as_static": "INTEGER NOT NULL DEFAULT 0",
     }.items():
         if name not in columns:
             await db.execute(f"ALTER TABLE booking_requests_v2 ADD COLUMN {name} {definition}")
@@ -324,12 +341,17 @@ async def _create_pending_booking(
     duration_minutes: int,
     source: str = "bot",
     idempotency_key: str | None = None,
+    bill_as_static: bool = False,
 ) -> tuple[bool, int | None, str | None]:
     if (not 1 <= len(place_keys) <= MAX_PLACES_PER_BOOKING
         or len(set(place_keys)) != len(place_keys)
         or place_type not in HOURLY_RATES
         or any(key not in BOOKING_PLACES or BOOKING_PLACES[key]['type'] != place_type for key in place_keys)):
         return False, None, "Выберите до трёх разных мест одного типа"
+    # Подвижку можно забронировать по тарифу статики (место остаётся тем же физическим
+    # юнитом — просто не будет двигаться). Обратное — бронировать статику по тарифу
+    # подвижки — не имеет смысла и запросом не поддерживается.
+    billed_type = "static" if (place_type == "motion" and bill_as_static) else place_type
     if (duration_minutes not in DURATION_OPTIONS or start_at.tzinfo is None or end_at.tzinfo is None
         or end_at - start_at != timedelta(minutes=duration_minutes) or source not in ('bot', 'miniapp')):
         return False, None, "Некорректное время или длительность"
@@ -389,13 +411,15 @@ async def _create_pending_booking(
                 f"{conflict[0]} уже занято{period} или ожидает подтверждения администратора.",
             )
 
+        rate_kopecks = _hourly_rate_kopecks(billed_type, start_at)
         cur = await db.execute(
             """
             INSERT INTO booking_requests_v2 (
                 telegram_id, username, phone, display_name, yclients_client_id,
                 place_type, start_at, end_at, duration_minutes, status,
-                source, hourly_rate_kopecks, quoted_kopecks, commission_bps, idempotency_key, request_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_admin', ?, ?, ?, 1000, ?, ?)
+                source, hourly_rate_kopecks, quoted_kopecks, commission_bps, idempotency_key, request_fingerprint,
+                billed_as_static
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_admin', ?, ?, ?, 1000, ?, ?, ?)
             """,
             (
                 int(pilot["telegram_id"]),
@@ -408,10 +432,11 @@ async def _create_pending_booking(
                 end_at.isoformat(),
                 duration_minutes,
                 source,
-                HOURLY_RATES[place_type],
-                HOURLY_RATES[place_type] * duration_minutes * len(place_keys) // 60,
+                rate_kopecks,
+                rate_kopecks * duration_minutes * len(place_keys) // 60,
                 idempotency_key,
                 fingerprint,
+                int(billed_type == "static" and place_type == "motion"),
             ),
         )
         booking_id = int(cur.lastrowid)
@@ -804,13 +829,14 @@ def _duration_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def _confirm_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="✅ Отправить заявку", callback_data="bk:submit")],
-            [InlineKeyboardButton(text="❌ Отмена", callback_data="bk:cancel")],
-        ]
-    )
+def _confirm_keyboard(place_type: str, bill_as_static: bool = False) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    if place_type == "motion":
+        label = "☑️ Бронировать как статика (без движения)" if bill_as_static else "⬜ Бронировать как статика (без движения)"
+        rows.append([InlineKeyboardButton(text=label, callback_data="bk:billas")])
+    rows.append([InlineKeyboardButton(text="✅ Отправить заявку", callback_data="bk:submit")])
+    rows.append([InlineKeyboardButton(text="❌ Отмена", callback_data="bk:cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _admin_keyboard(booking_id: int) -> InlineKeyboardMarkup:
@@ -879,12 +905,25 @@ def _selection_summary(data: dict[str, Any]) -> str:
     start_at = datetime.fromisoformat(data["start_at"]).astimezone(TZ)
     end_at = datetime.fromisoformat(data["end_at"]).astimezone(TZ)
     places = ", ".join(BOOKING_PLACES[key]["title"] for key in data["selected_places"])
+    place_type = str(data["place_type"])
+    bill_as_static = bool(data.get("bill_as_static")) and place_type == "motion"
+    billed_type = "static" if bill_as_static else place_type
+    rate = _hourly_rate_kopecks(billed_type, start_at)
+    duration = int(data["duration_minutes"])
+    count = len(data["selected_places"])
+    total_rub = rate * duration * count // 60 / 100
+    price_line = f"💳 Стоимость: <b>{total_rub:g} ₽</b>"
+    if _is_happy_hour(start_at):
+        price_line += " (счастливые часы)"
+    if bill_as_static:
+        price_line += "\n🔧 Подвижка бронируется по тарифу статики"
     return (
         header("📋", "Проверьте заявку") + "\n\n"
         f"🖥 Места: <b>{places}</b>\n"
         f"📅 Дата: <b>{start_at.strftime('%d.%m.%Y')}</b>\n"
         f"⏰ Время: <b>{start_at.strftime('%H:%M')}–{end_at.strftime('%H:%M')}</b>\n"
-        f"⌛ Длительность: <b>{data['duration_minutes']} мин</b>\n\n"
+        f"⌛ Длительность: <b>{data['duration_minutes']} мин</b>\n"
+        f"{price_line}\n\n"
         "После отправки администратор подтвердит или отклонит заявку."
     )
 
@@ -1204,11 +1243,34 @@ async def booking_choose_duration(callback: CallbackQuery, state: FSMContext) ->
     await state.update_data(
         duration_minutes=duration,
         end_at=end_at.isoformat(),
+        bill_as_static=False,
     )
     await state.set_state(BookingFlow.confirming)
     await callback.answer()
     final_data = await state.get_data()
-    await callback.message.edit_text(_selection_summary(final_data), reply_markup=_confirm_keyboard())
+    await callback.message.edit_text(
+        _selection_summary(final_data),
+        reply_markup=_confirm_keyboard(str(final_data["place_type"]), False),
+    )
+
+
+@router.callback_query(BookingFlow.confirming, F.data == "bk:billas")
+async def booking_toggle_bill_as_static(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if data.get("place_type") != "motion":
+        await callback.answer()
+        return
+    bill_as_static = not bool(data.get("bill_as_static"))
+    await state.update_data(bill_as_static=bill_as_static)
+    data["bill_as_static"] = bill_as_static
+    await callback.answer()
+    try:
+        await callback.message.edit_text(
+            _selection_summary(data),
+            reply_markup=_confirm_keyboard(str(data["place_type"]), bill_as_static),
+        )
+    except Exception:
+        pass
 
 
 @router.callback_query(BookingFlow.confirming, F.data == "bk:submit")
@@ -1244,6 +1306,7 @@ async def booking_submit(callback: CallbackQuery, state: FSMContext) -> None:
         start_at=start_at,
         end_at=end_at,
         duration_minutes=int(data["duration_minutes"]),
+        bill_as_static=bool(data.get("bill_as_static")),
     )
     if not ok or not booking_id:
         await callback.answer(error or "Не удалось создать заявку", show_alert=True)

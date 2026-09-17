@@ -95,15 +95,33 @@ async function book() {
   if(!me.registered)return '<h1>Бронирование</h1>'+botFallback('Для бронирования нужна регистрация пилота.');
   const options=await api('/api/booking/options');
   const today=clubDate(new Date(),options.timezone);
-  booking={options,path:'time',day:today,time:'',duration:options.durations[0],selected:[],available:null,request:0,key:crypto.randomUUID()};
+  booking={options,path:'time',day:today,time:'',duration:options.durations[0],selected:[],available:null,request:0,key:crypto.randomUUID(),billAsStatic:false};
   return bookingMarkup();
+}
+function isHappyHour(b) {
+  const hh=b.options.happy_hour; if(!hh||!b.day||!b.time) return false;
+  const jsWeekdays=hh.weekdays.map(w=>(w+1)%7);
+  const day=new Date(`${b.day}T00:00:00`).getDay();
+  return jsWeekdays.includes(day) && b.time>=hh.start && b.time<hh.end;
+}
+function seatRate(p,b,happy) {
+  const asStatic=p.type==='motion'&&b.billAsStatic;
+  const table=asStatic?b.options.places.find(x=>x.type==='static'):p;
+  return {price:happy?table.happy_hour_kopecks:table.hourly_rate_kopecks, full:table.hourly_rate_kopecks, asStatic};
 }
 function bookingMarkup() {
  const b=booking,o=b.options;const dates=Array.from({length:o.days_ahead},(_,i)=>{const d=new Date(`${clubDate(new Date(),o.timezone)}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+i);return d.toISOString().slice(0,10);});
  const times=[];for(let m=o.open_hour*60;m+b.duration<=(o.close_hour||24)*60;m+=30){const t=`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;if(Date.parse(instant(b.day,t,o.timezone))>Date.now())times.push(t);}
  if(!times.includes(b.time))b.time=times[0]||'';
  const schedule=`<div class="two"><div><label for="day">Дата</label><select id="day">${dates.map(d=>`<option ${d===b.day?'selected':''}>${d}</option>`).join('')}</select></div><div><label for="time">Время · ${esc(o.timezone)}</label><select id="time">${times.map(t=>`<option ${t===b.time?'selected':''}>${t}</option>`).join('')}</select></div></div><label for="duration">Продолжительность</label><select id="duration">${o.durations.map(d=>`<option value="${d}" ${d===b.duration?'selected':''}>${d} минут</option>`).join('')}</select>`;
- const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика 700 ₽/час · подвижка 1 000 ₽/час</p><div class="floorplan">${o.places.map(p=>`<button class="seat" data-seat="${esc(p.key)}" aria-pressed="${b.selected.includes(p.key)}">${esc(p.title)}<small>${rub(p.hourly_rate_kopecks)}/час</small></button>`).join('')}</div><div class="legend"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
+ const happy=isHappyHour(b);
+ const staticPlace=o.places.find(p=>p.type==='static'), motionPlace=o.places.find(p=>p.type==='motion');
+ const happyBanner=happy?`<div class="happy-banner">⚡ Счастливые часы: будни 12:00–17:00 — статика ${rub(staticPlace.happy_hour_kopecks)}, подвижка ${rub(motionPlace.happy_hour_kopecks)}/час</div>`:'';
+ const zones=`<div class="zone zone-wc">WC</div><div class="zone zone-door">ВХОД</div><div class="zone zone-desk">СТОЙКА АДМИНИСТРАТОРА</div><div class="zone zone-lounge">ЛАУНЖ-ЗОНА</div>`;
+ const seatCards=o.places.map(p=>{const r=seatRate(p,b,happy);const priceHtml=happy?`${rub(r.price)}/час<span class="was">${rub(r.full)}</span>`:`${rub(r.price)}/час`;return `<button class="seat" data-seat="${esc(p.key)}" aria-pressed="${b.selected.includes(p.key)}">${esc(p.title)}<small class="p">${priceHtml}</small></button>`;}).join('');
+ const motionSelected=b.selected.some(k=>b.options.places.find(p=>p.key===k)?.type==='motion');
+ const motionToggle=`<button class="chip-toggle" id="bill-as-static" aria-pressed="${b.billAsStatic?'true':'false'}">${b.billAsStatic?'✓ ':''}Подвижка как статика</button><p class="muted" style="margin:6px 0 0">Платформа не будет двигаться, но останется тем же местом — просто по цене статики.</p>`;
+ const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика ${rub(staticPlace.hourly_rate_kopecks)}/час · подвижка ${rub(motionPlace.hourly_rate_kopecks)}/час</p>${happyBanner}<div class="floorplan">${zones}${seatCards}</div><div style="margin-top:10px">${motionToggle}</div>${!motionSelected&&b.billAsStatic?'<p class="muted">Применится, если выберете места подвижки.</p>':''}<div class="legend" style="margin-top:10px"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
  return `<div class="kicker">ВАШ ЗАЕЗД</div><h1>Бронирование</h1><div class="tabs"><button data-path="time" aria-pressed="${b.path==='time'}">Сначала дата и время</button><button data-path="seats" aria-pressed="${b.path==='seats'}">Сначала места</button></div>${b.path==='time'?schedule+seats:seats+schedule}<p id="availability" class="muted">Проверяем доступность…</p><div class="card gold" id="summary"></div><button class="primary" id="reserve" disabled>Отправить заявку</button><p class="muted">Заявка требует подтверждения клуба. Её статус появится в разделе «Мои бронирования».</p>`;
 }
 function bindBooking() {
@@ -111,6 +129,7 @@ function bindBooking() {
  view.querySelectorAll('[data-path]').forEach(el=>el.onclick=()=>{b.path=el.dataset.path;show(bookingMarkup());bindBooking();});
  for(const id of ['day','time','duration'])document.getElementById(id).onchange=e=>{b[id]=id==='duration'?Number(e.target.value):e.target.value;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();};
  view.querySelectorAll('[data-seat]').forEach(el=>el.onclick=()=>{const key=el.dataset.seat,p=b.options.places.find(p=>p.key===key);if(b.selected.includes(key))b.selected=b.selected.filter(k=>k!==key);else{if(b.selected.length>=3)return toast('Можно выбрать до 3 мест.');if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}b.key=crypto.randomUUID();updateBooking();});
+ document.querySelector('#bill-as-static').onclick=()=>{b.billAsStatic=!b.billAsStatic;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();};
  document.querySelector('#reserve').onclick=submitBooking;
  checkAvailability();
 }
@@ -121,14 +140,22 @@ async function checkAvailability() {
 }
 function updateBooking() {
  const b=booking; const unavailable=k=>!b.available?.find(p=>p.key===k)?.available;
- view.querySelectorAll('[data-seat]').forEach(el=>{el.setAttribute('aria-pressed',b.selected.includes(el.dataset.seat));el.disabled=b.available ? unavailable(el.dataset.seat)&&!b.selected.includes(el.dataset.seat) : b.path==='time';});
+ const happy=isHappyHour(b);
+ view.querySelectorAll('[data-seat]').forEach(el=>{
+   el.setAttribute('aria-pressed',b.selected.includes(el.dataset.seat));
+   el.disabled=b.available ? unavailable(el.dataset.seat)&&!b.selected.includes(el.dataset.seat) : b.path==='time';
+   const p=b.options.places.find(p=>p.key===el.dataset.seat);const r=seatRate(p,b,happy);
+   const priceEl=el.querySelector('.p');if(priceEl)priceEl.innerHTML=happy?`${rub(r.price)}/час<span class="was">${rub(r.full)}</span>`:`${rub(r.price)}/час`;
+ });
  const chosen=b.options.places.filter(p=>b.selected.includes(p.key));
- document.querySelector('#summary').innerHTML=row('Места',chosen.map(p=>esc(p.title)).join(', ')||'Не выбраны')+row('Заезд',`${esc(b.day)} · ${esc(b.time)||'—'} · ${b.duration} мин`)+row('Стоимость',`<span class="money">${rub(chosen.reduce((n,p)=>n+p.hourly_rate_kopecks*b.duration/60,0))}</span>`)+(b.available&&b.selected.some(unavailable)?'<p class="error">Выбранное место занято. Уберите его или измените время.</p>':'');
+ const total=chosen.reduce((n,p)=>n+seatRate(p,b,happy).price*b.duration/60,0);
+ const places=chosen.map(p=>esc(p.title)+(p.type==='motion'&&b.billAsStatic?' (как статика)':'')).join(', ')||'Не выбраны';
+ document.querySelector('#summary').innerHTML=row('Места',places)+row('Заезд',`${esc(b.day)} · ${esc(b.time)||'—'} · ${b.duration} мин${happy?' · счастливые часы':''}`)+row('Стоимость',`<span class="money">${rub(total)}</span>`)+(b.available&&b.selected.some(unavailable)?'<p class="error">Выбранное место занято. Уберите его или измените время.</p>':'');
  document.querySelector('#reserve').disabled=!b.time||!b.selected.length||!b.available||b.selected.some(unavailable);
 }
 async function submitBooking() {
  const b=booking,btn=document.querySelector('#reserve');btn.disabled=true;btn.textContent='Отправляем…';
- try{await api('/api/bookings',{method:'POST',body:JSON.stringify({place_keys:b.selected,start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration,idempotency_key:b.key})});toast('Заявка отправлена. Статус доступен в бронированиях.');go('bookings');}catch(e){toast(e.message);if(current==='book'){btn.textContent='Повторить отправку';await checkAvailability();}}
+ try{await api('/api/bookings',{method:'POST',body:JSON.stringify({place_keys:b.selected,start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration,idempotency_key:b.key,bill_as_static:b.billAsStatic})});toast('Заявка отправлена. Статус доступен в бронированиях.');go('bookings');}catch(e){toast(e.message);if(current==='book'){btn.textContent='Повторить отправку';await checkAvailability();}}
 }
 const statusNames={pending_admin:'Ожидает подтверждения',creating:'Создаётся',user_confirmed:'Подтверждено пилотом',cancelling:'Отменяется',reconciliation_required:'Требует проверки клуба',pending:'Ожидает подтверждения',confirmed:'Подтверждено',approved:'Подтверждено',cancelled:'Отменено',rejected:'Отклонено',failed:'Ошибка',cancellation_failed:'Ошибка отмены — свяжитесь с клубом'};
 async function bookings(admin=false) {
@@ -149,7 +176,7 @@ async function nickname(){return `<h1>Имя пилота</h1><form id="nickname
 async function adminlap(){if(!me.is_admin&&!me.is_super_admin)throw new Error('Недостаточно прав');const d=await api('/api/disciplines');window.lapDisciplines=d.disciplines;return `<h1>Время пилота</h1><form id="lap-form" class="card"><label for="pilot-number">Номер пилота</label><input id="pilot-number" type="number" min="1" required><label for="discipline">Дисциплина</label><select id="discipline">${d.disciplines.map(x=>`<option>${esc(x.name)}</option>`).join('')}</select><label for="track">Трасса</label><select id="track"></select><label for="lap-time">Время круга · мм:сс.мс</label><input id="lap-time" placeholder="02:00.597" required><button class="primary secondary">Сохранить результат</button></form>`;}
 const screens={home,leaders,profile,referrals,roulette,book,bookings,requests:()=>bookings(true),finance,staff,nickname,adminlap,results,pilots,tracks,benchmarks,submitlap:()=>'<h1>Новый круг</h1>'+botFallback('Отправьте время и фото или видео подтверждения через бота. Администратор проверит результат.'),support:()=>'<h1>Клуб на связи</h1>'+botFallback('Откройте бота, чтобы написать в поддержку или посмотреть информацию о клубе.')};
 const after={pilots:bindPilots,tracks:()=>bindTrackEditor(false),benchmarks:()=>bindTrackEditor(true),book:()=>document.querySelector('#reserve')&&bindBooking(),bookings:()=>bindBookings(),requests:()=>bindBookings(true),finance:()=>{document.querySelector('#load-finance').onclick=loadFinance;return loadFinance();},referrals:()=>{document.querySelector('#copy').onclick=async e=>{try{await navigator.clipboard.writeText(e.target.dataset.link);toast('Ссылка скопирована');}catch{toast('Не удалось скопировать. Выделите ссылку вручную.');}};},roulette:bindRoulette,nickname:()=>{document.querySelector('#nickname-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{await api('/api/profile',{method:'PATCH',body:JSON.stringify({display_name:document.querySelector('#display-name').value})});me=await api('/api/me');go('profile');}catch(e){toast(e.message);btn.disabled=false;}};},adminlap:()=>{let lapKey=crypto.randomUUID();document.querySelector('#lap-form').oninput=()=>lapKey=crypto.randomUUID();const discipline=document.querySelector('#discipline');const tracks=()=>document.querySelector('#track').innerHTML=(window.lapDisciplines.find(x=>x.name===discipline.value)?.tracks||[]).map(x=>`<option>${esc(x)}</option>`).join('');discipline.onchange=tracks;tracks();document.querySelector('#lap-form').onsubmit=async e=>{e.preventDefault();const btn=e.target.querySelector('button');btn.disabled=true;try{const saved=await api('/api/admin/laps',{method:'POST',body:JSON.stringify({idempotency_key:lapKey,pilot_number:Number(document.querySelector('#pilot-number').value),discipline:discipline.value,track:document.querySelector('#track').value,lap_time:document.querySelector('#lap-time').value})});toast(saved.warning||'Результат сохранён');go('staff');}catch(e){toast(e.message);btn.disabled=false;}};}};
-async function start(){document.querySelector('.brand').onclick=e=>{e.preventDefault();if(me)go('home');};try{me=await api('/api/me');document.querySelector('#pilot').textContent=me.profile?.display_name||me.profile?.username||'Добро пожаловать в клуб';document.querySelector('#role').textContent=me.is_super_admin?'СУПЕР-АДМИН':me.is_admin?'АДМИН':'ПИЛОТ';document.querySelector('nav').innerHTML=[['home','⌂','Главная'],['book','▦','Бронь'],['leaders','🏆','Зачёт'],['profile','◉','Пилот']].map(([s,i,t])=>`<button data-view="${s}"><b>${i}</b>${t}</button>`).join('');document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));if(me.is_admin||me.is_super_admin){document.querySelector('#staff').innerHTML=button('Управление клубом','staff');document.querySelector('#staff button').onclick=()=>go('staff');}go('home');}catch(e){failure(e,start);}}
+async function start(){document.querySelector('.brand').onclick=e=>{e.preventDefault();if(me)go('home');};try{me=await api('/api/me');document.querySelector('#pilot').textContent=me.profile?.display_name||me.profile?.username||'Добро пожаловать в клуб';document.querySelector('#role').textContent=me.is_super_admin?'СУПЕР-АДМИН':me.is_admin?'АДМИН':'ПИЛОТ';document.querySelector('nav').innerHTML=[['home','⌂','Главная'],['book','▦','Бронь'],['roulette','🎯','Рулетка'],['leaders','🏆','Зачёт'],['profile','◉','Пилот']].map(([s,i,t])=>`<button data-view="${s}"><b>${i}</b>${t}</button>`).join('');document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>go(b.dataset.view));if(me.is_admin||me.is_super_admin){document.querySelector('#staff').innerHTML=button('Управление клубом','staff');document.querySelector('#staff button').onclick=()=>go('staff');}go('home');}catch(e){failure(e,start);}}
 
 async function results() {
  const d=await api('/api/results'),last=d.last_result;

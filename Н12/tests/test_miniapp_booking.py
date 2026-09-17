@@ -20,6 +20,73 @@ def selection():
                 start_at=start, end_at=start + timedelta(minutes=90), duration_minutes=90)
 
 
+def _next_start(hour, weekday_ok):
+    now = datetime.now(b.TZ)
+    for offset in range(1, b.BOOKING_DAYS_AHEAD):
+        candidate = (now + timedelta(days=offset)).replace(hour=hour, minute=0, second=0, microsecond=0)
+        if weekday_ok(candidate.weekday()):
+            return candidate
+    raise AssertionError('no matching day within booking window')
+
+
+def test_happy_hour_discounts_weekday_afternoon_booking(store):
+    async def run():
+        start = _next_start(14, lambda wd: wd < 5)  # будний день
+        args = dict(pilot={'telegram_id': 11, 'phone': '70000000001', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='happy-static')
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['hourly_rate_kopecks'] == 60000
+        assert booking['quoted_kopecks'] == 60000
+        assert booking['billed_as_static'] == 0
+    asyncio.run(run())
+
+
+def test_weekend_afternoon_keeps_regular_rate(store):
+    async def run():
+        start = _next_start(14, lambda wd: wd >= 5)  # выходной
+        args = dict(pilot={'telegram_id': 12, 'phone': '70000000002', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='weekend-static')
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['hourly_rate_kopecks'] == 70000
+    asyncio.run(run())
+
+
+def test_bill_as_static_prices_motion_seat_at_static_rate(store):
+    async def run():
+        start = (datetime.now(b.TZ) + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        args = dict(pilot={'telegram_id': 13, 'phone': '70000000003', 'display_name': 'Pilot'},
+                    username='pilot', place_type='motion', place_keys=['motion_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='bill-as-static', bill_as_static=True)
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['place_type'] == 'motion'
+        assert booking['hourly_rate_kopecks'] == 70000  # тариф статики, не подвижки
+        assert booking['billed_as_static'] == 1
+        assert booking['items'][0]['staff_id'] == b.BOOKING_PLACES['motion_1']['staff_id']  # тот же физический юнит
+    asyncio.run(run())
+
+
+def test_bill_as_static_ignored_for_static_places(store):
+    async def run():
+        start = (datetime.now(b.TZ) + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        args = dict(pilot={'telegram_id': 14, 'phone': '70000000004', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='static-noop', bill_as_static=True)
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['billed_as_static'] == 0
+        assert booking['hourly_rate_kopecks'] == 70000
+    asyncio.run(run())
+
+
 def test_quote_and_retry_are_persisted_atomically(store):
     async def run():
         args = selection()

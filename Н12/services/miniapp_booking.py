@@ -15,6 +15,7 @@ class BookingInput(BaseModel):
     start_at: datetime
     duration_minutes: int
     idempotency_key: str = Field(min_length=8, max_length=128)
+    bill_as_static: bool = False
 
 
 def window(start_at, duration_minutes):
@@ -31,7 +32,8 @@ def window(start_at, duration_minutes):
 
 
 def public_booking(row, admin=False):
-    fields = ['id', 'start_at', 'end_at', 'duration_minutes', 'place_type', 'status', 'source', 'quoted_kopecks', 'created_at']
+    fields = ['id', 'start_at', 'end_at', 'duration_minutes', 'place_type', 'status', 'source', 'quoted_kopecks',
+              'hourly_rate_kopecks', 'billed_as_static', 'created_at']
     if admin:
         fields += ['telegram_id', 'display_name', 'phone']
     result = {k: row.get(k) for k in fields}
@@ -64,9 +66,14 @@ def create_booking_router(current_user):
 
     @router.get('/api/booking/options')
     async def options(user=Depends(current_user)):
-        return {'places': [{'key': k, 'title': v['title'], 'type': v['type'], 'hourly_rate_kopecks': b.HOURLY_RATES[v['type']]} for k, v in b.BOOKING_PLACES.items()],
+        return {'places': [{'key': k, 'title': v['title'], 'type': v['type'],
+                             'hourly_rate_kopecks': b.HOURLY_RATES[v['type']],
+                             'happy_hour_kopecks': b.HAPPY_HOUR_RATES[v['type']],
+                             'billable_as_static': v['type'] == 'motion'} for k, v in b.BOOKING_PLACES.items()],
                 'durations': list(b.DURATION_OPTIONS), 'days_ahead': b.BOOKING_DAYS_AHEAD,
-                'timezone': str(b.TZ), 'open_hour': 12, 'close_hour': 24, 'today': datetime.now(b.TZ).date().isoformat()}
+                'timezone': str(b.TZ), 'open_hour': 12, 'close_hour': 24, 'today': datetime.now(b.TZ).date().isoformat(),
+                'happy_hour': {'weekdays': list(b.HAPPY_HOUR_WEEKDAYS), 'start': b.HAPPY_HOUR_START.strftime('%H:%M'),
+                                'end': b.HAPPY_HOUR_END.strftime('%H:%M')}}
 
     @router.get('/api/booking/availability')
     async def availability(start_at: datetime, duration_minutes: int, user=Depends(current_user)):
@@ -118,7 +125,8 @@ def create_booking_router(current_user):
                 raise HTTPException(409, 'Выбранное место уже занято')
         ok, bid, error = await b._create_pending_booking(pilot=pilot, username=user.username,
             place_type=place_type, place_keys=data.place_keys, start_at=start, end_at=end,
-            duration_minutes=data.duration_minutes, source='miniapp', idempotency_key=data.idempotency_key)
+            duration_minutes=data.duration_minutes, source='miniapp', idempotency_key=data.idempotency_key,
+            bill_as_static=data.bill_as_static and place_type == 'motion')
         if not ok:
             raise HTTPException(409, error)
         return public_booking(await b._fetch_booking(bid))
