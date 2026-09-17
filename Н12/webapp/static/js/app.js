@@ -41,7 +41,42 @@ async function go(screen) {
 function home() { return `<section class="card hero"><div class="kicker">VALEVO · SIM RACING CLUB</div><h1>Твой следующий<br>круг — здесь.</h1>${button('Забронировать заезд →','book','primary')}<div class="checker"></div></section><div class="two">${button('Мои бронирования','bookings')}${button('Общий зачёт','leaders')}</div><div class="card gold"><div class="kicker">КАРТОЧКА ПИЛОТА</div><h2>${esc(me.profile?.display_name || me.profile?.username || 'Добро пожаловать')}</h2>${row('Номер',esc(me.profile?.pilot_number || '—'))}${row('Рейтинг',esc(me.profile?.rating ?? '—'))}${button('Открыть карточку','profile')}</div>${button('Пригласить друга','referrals')}${button('Рулетка призов','roulette')}${button('Поддержка и информация','support')}`; }
 async function leaders() { const d=await api('/api/leaderboard'); return `<div class="kicker">РЕЗУЛЬТАТЫ КЛУБА</div><h1>Общий зачёт</h1><div class="card gold">${d.overall.length?d.overall.map(r=>row(`${esc(r.place)}. ${esc(r.name)}`,`${esc(r.points)} б.`)).join(''):'Пока нет результатов'}</div>${d.disciplines.map(b=>`<h2>${esc(b.name)}</h2><div class="card">${b.rows.length?b.rows.map(r=>row(`${esc(r.place)}. ${esc(r.name)}`,lap(r.best_ms))).join(''):'Нет результатов'}</div>`).join('')}`; }
 function lap(ms) { return `${Math.floor(ms/60000)}:${String(Math.floor(ms%60000/1000)).padStart(2,'0')}.${String(ms%1000).padStart(3,'0')}`; }
-async function profile() { if(!me.registered)return '<h1>Карточка пилота</h1>'+botFallback('Зарегистрируйтесь в боте, чтобы бронировать заезды.'); const p=me.profile; return `<h1>Карточка пилота</h1><div class="card gold">${row('Пилот',esc(p.display_name||p.username))}${row('Номер',esc(p.pilot_number))}${row('Телефон',esc(p.phone||'—'))}${row('Рейтинг',esc(p.rating||0))}${row('Класс',esc(p.current_class||'—'))}</div>${button('Изменить имя','nickname')}${button('Мои заезды','results')}${button('Отправить время круга','submitlap')}`; }
+function classLine(c) {
+  if(!c.qualifies) return `<div class="class-line"><span class="name">🏎 ${esc(c.class_name)}</span><span class="val">${c.starts}/${c.min_starts} стартов</span></div>`;
+  if(c.threshold!=null) {
+    const pct=Math.max(0,Math.min(100,Math.round((c.score/c.threshold)*100)));
+    return `<div class="class-line"><span class="name">🏎 ${esc(c.class_name)}</span><span class="val">${c.score} / ${c.threshold}${c.score>=c.threshold?' 🚀':''}</span></div><div class="progress" style="margin-bottom:8px"><i style="width:${pct}%"></i></div>`;
+  }
+  return `<div class="class-line"><span class="name">🏎 ${esc(c.class_name)}</span><span class="val">${c.score} баллов</span></div>`;
+}
+async function profile() {
+  if(!me.registered)return '<h1>Карточка пилота</h1>'+botFallback('Зарегистрируйтесь в боте, чтобы бронировать заезды.');
+  const p=me.profile,d=await api('/api/profile'),rank=d.rank;
+  const rankProgress=rank.rank_progress
+    ?`<div class="progress-label"><span>Ранг · рейтинг <b>${rank.rating}</b></span><span>ещё ${rank.rank_progress.points_left} до ${esc(rank.rank_progress.next_emoji)} ${esc(rank.rank_progress.next_title)}</span></div><div class="progress gold"><i style="width:${Math.round(rank.rank_progress.fraction*100)}%"></i></div>`
+    :`<div class="progress-label"><span>Ранг · рейтинг <b>${rank.rating}</b></span><span>максимальный ранг</span></div><div class="progress gold"><i style="width:100%"></i></div>`;
+  const levelProgress=rank.level_progress
+    ?`<div class="progress-label"><span>Уровень <b>${rank.level}</b>/${rank.total_levels}</span><span>ещё ${rank.level_progress.points_left} до ${rank.level_progress.next_level} ур.</span></div><div class="progress"><i style="width:${Math.round(rank.level_progress.fraction*100)}%"></i></div>`
+    :`<div class="progress-label"><span>Уровень <b>${rank.level}</b>/${rank.total_levels}</span><span>максимальный уровень</span></div><div class="progress"><i style="width:100%"></i></div>`;
+
+  const clubCard=d.club
+    ?`<div class="card"><h2>Клуб</h2><div class="stat-grid"><div><span class="n">${esc(d.club.visits)}</span><span class="l">визита</span></div><div><span class="n">${esc(d.club.hours_text)}</span><span class="l">в клубе</span></div><div><span class="n money">${rub(Math.round(d.club.bonus_balance*100))}</span><span class="l">Valevo Bonus</span></div></div></div>`
+    :`<div class="card"><h2>Клуб</h2><p class="muted">${d.club_error?'Клубные данные временно недоступны.':'Профиль синхронизируется с клубной системой автоматически.'}</p></div>`;
+
+  const a=d.achievements;
+  const achievementsCard=`<div class="card"><h2>Достижения</h2><div class="medal-row"><div><span>🥇</span><b>${a.gold}</b><small>золото</small></div><div><span>🥈</span><b>${a.silver}</b><small>серебро</small></div><div><span>🥉</span><b>${a.bronze}</b><small>бронза</small></div><div><span>🏆</span><b>${a.podiums}</b><small>подиум</small></div></div>${row('Результатов',`${a.total_results} в ${a.disciplines_count} дисциплинах`)}${a.favorite_discipline?row('Любимая дисциплина',`${esc(a.favorite_discipline)} (${a.favorite_discipline_count})`):''}${a.favorite_track?row('Любимая трасса',`${esc(a.favorite_track)} (${a.favorite_track_count})`):''}${a.last_result?row('Последний результат',`${esc(a.last_result.lap_time_text||'—')} · ${esc((a.last_result.created_at||'').slice(0,10))}`):'<p class="muted">Первый принятый круг станет началом истории пилота.</p>'}</div>`;
+
+  const tc=d.tournament_class;
+  const classCard=tc
+    ?`<div class="card"><h2>Текущий класс</h2>${classLine(tc.current)}${tc.side?classLine(tc.side):''}${tc.next_class?row('Следующий класс',esc(tc.next_class)):'<p class="muted">Максимальный класс</p>'}</div>`
+    :`<div class="card"><h2>Текущий класс</h2><p class="muted">Данные временно недоступны.</p></div>`;
+
+  const badges=d.badges;
+  const badgeGrid=badges.items.map(item=>`<div class="badge-chip ${item.unlocked?'on':'off'}" title="${esc(item.title)}">${item.unlocked?esc(item.emoji):'🔒'}</div>`).join('');
+  const badgesCard=`<div class="card"><div class="badges-head"><h2 style="margin:0">Бейджи</h2><span class="muted">Открыто <b>${badges.unlocked}/${badges.total}</b></span></div><div class="badge-grid">${badgeGrid}</div></div>`;
+
+  return `<h1>Карточка пилота</h1><div class="card gold"><div class="rank-hero"><div class="rank-emoji">${esc(rank.emoji)}</div><div class="rank-id"><b>${esc(p.display_name||p.username)}</b><span>${esc(rank.title)}${p.pilot_number?' · №'+esc(p.pilot_number):''}</span></div></div>${rankProgress}${levelProgress}${row('Телефон',esc(d.phone||'—'))}</div>${clubCard}${achievementsCard}${classCard}${badgesCard}${button('Изменить имя','nickname')}${button('Мои заезды','results')}${button('Отправить время круга','submitlap')}`;
+}
 async function referrals() { const d=await api('/api/referrals'); return `<h1>Пригласи друга</h1><div class="card gold"><div class="number">${rub(d.bonus*100)} + ${rub(d.bonus*100)}</div><p>Друг регистрируется по вашей ссылке — вы оба получаете Valevo Bonus.</p><p class="link">${esc(d.link)}</p><button class="primary" id="copy" data-link="${esc(d.link)}">Скопировать ссылку</button></div><div class="card">${row('Приглашено',esc(d.stats.invited))}${row('Получено',rub(d.stats.earned*100))}</div>`; }
 let rouletteData, spinController;
 const prizeCell=p=>`<div class="reel-cell"><span>${esc(p.emoji)}</span><b>${esc(p.title)}</b></div>`;

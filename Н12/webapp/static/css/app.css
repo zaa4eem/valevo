@@ -13,6 +13,35 @@
 .chip-toggle{min-height:auto;padding:8px 12px;font-size:12px;border-radius:20px}
 .chip-toggle[aria-pressed=true]{border-color:var(--gold);color:var(--gold);background:#32311c}
 .happy-banner{display:flex;align-items:center;gap:8px;font-size:11px;color:#0d1a10;background:linear-gradient(90deg,#ffe08a,#ffcc33);border-radius:8px;padding:8px 10px;margin:12px 0 0;font-weight:700}
+/* Карточка пилота: ранг/уровень, клуб, достижения, класс, бейджи. */
+.rank-hero{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.rank-emoji{font-size:34px;line-height:1}
+.rank-id b{display:block;font-size:17px;color:#fff;font-style:italic}
+.rank-id span{font-size:11px;color:var(--muted)}
+.progress-label{display:flex;justify-content:space-between;font-size:10.5px;color:var(--muted);margin:10px 0 4px}
+.progress-label b{color:var(--gold);font-weight:700}
+.progress{height:7px;border-radius:5px;background:#0a1830;border:1px solid var(--line);overflow:hidden}
+.progress i{display:block;height:100%;background:linear-gradient(90deg,var(--cyan),#16a8e4);border-radius:5px}
+.progress.gold i{background:linear-gradient(90deg,#ffe08a,var(--gold))}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
+.stat-grid div{background:#040d21;border:1px solid var(--line);border-radius:9px;padding:10px 4px}
+.stat-grid .n{display:block;font-size:16px;font-weight:800;color:var(--cyan);font-variant-numeric:tabular-nums}
+.stat-grid .n.money{color:var(--gold)}
+.stat-grid .l{display:block;font-size:9.5px;color:var(--muted);margin-top:2px}
+.medal-row{display:flex;justify-content:space-around;text-align:center;padding:4px 0 10px}
+.medal-row div span{display:block;font-size:20px}
+.medal-row div b{font-size:15px}
+.medal-row div small{display:block;font-size:9px;color:var(--muted)}
+.class-line{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #24457366;font-size:12px}
+.class-line:last-child{border:0}
+.class-line .name{font-weight:700}
+.class-line .val{color:var(--gold);font-weight:800;font-variant-numeric:tabular-nums}
+.badges-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.badges-head b{color:var(--gold)}
+.badge-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:7px}
+.badge-chip{aspect-ratio:1;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;border:1px solid var(--line);background:#081a35}
+.badge-chip.on{border-color:var(--gold);background:#241f0f;box-shadow:0 0 10px #ffcc3322}
+.badge-chip.off{opacity:.3;filter:grayscale(1)}
 /* Лёгкая визуальная полировка: мягче тени и радиусы, без изменения структуры. */
 .card{border-radius:13px;box-shadow:0 10px 26px -18px #000,0 0 16px #1ba5ff14}
 button{border-radius:10px}
