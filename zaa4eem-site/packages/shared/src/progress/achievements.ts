@@ -29,6 +29,7 @@ export const ACHIEVEMENT_COUNTERS = [
   'followersGained',
   'referralsJoined',
   'coinsEarnedTotal',
+  'pixelsPainted',
   'streakBest',
   'level',
 ] as const;
@@ -45,7 +46,7 @@ export interface AchievementDefinition {
   /** Paid once, when it unlocks. */
   xp: number;
   /** Grouping for the profile's collection view. */
-  group: 'Творчество' | 'Общение' | 'Идеи' | 'Игры' | 'Постоянство' | 'Приглашения';
+  group: 'Творчество' | 'Общение' | 'Идеи' | 'Игры' | 'Постоянство' | 'Приглашения' | 'Холст';
 }
 
 const XP_BY_TIER: Record<AchievementTier, number> = {
@@ -103,6 +104,15 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
   make('coins_1000', 'Первая тысяча', 'Заработать 1 000 Z-коинов', '🪙', 'BRONZE', 'coinsEarnedTotal', 1000, 'Игры'),
   make('coins_10000', 'Кошелёк потяжелел', 'Заработать 10 000 Z-коинов', '💰', 'SILVER', 'coinsEarnedTotal', 10_000, 'Игры'),
   make('coins_100000', 'Монетный двор', 'Заработать 100 000 Z-коинов', '🏦', 'GOLD', 'coinsEarnedTotal', 100_000, 'Игры'),
+
+  // --- Холст ---
+  // Thresholds set against the 30-minute cooldown, not plucked from the air:
+  // 10 pixels is one evening, 100 is a couple of weeks of showing up, and
+  // 1000 is someone who genuinely lives on the canvas.
+  make('pixel_1', 'Первый пиксель', 'Закрасить первую клетку', '🟩', 'BRONZE', 'pixelsPainted', 1, 'Холст'),
+  make('pixel_10', 'Рука набита', 'Закрасить 10 клеток', '🎨', 'BRONZE', 'pixelsPainted', 10, 'Холст'),
+  make('pixel_100', 'Художник', 'Закрасить 100 клеток', '🖼️', 'SILVER', 'pixelsPainted', 100, 'Холст'),
+  make('pixel_1000', 'Мастер холста', 'Закрасить 1000 клеток', '🏛️', 'GOLD', 'pixelsPainted', 1000, 'Холст'),
 
   // --- Постоянство ---
   make('streak_3', 'Втянулся', 'Заходить 3 дня подряд', '🔥', 'BRONZE', 'streakBest', 3, 'Постоянство'),

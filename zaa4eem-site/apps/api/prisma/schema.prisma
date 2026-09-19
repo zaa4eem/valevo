@@ -192,6 +192,8 @@ model User {
   emailTokens       EmailToken[]
   credentials       WebAuthnCredential[]
   backupCodes       BackupCode[]
+  pixelCells        PixelCell[]
+  pixelPlacements   PixelPlacement[]
 
   @@index([role])
   @@index([invitedById])
@@ -533,6 +535,7 @@ model UserProgress {
   coinsEarnedTotal  Int       @default(0)
   referralsJoined   Int       @default(0)
   daysActive        Int       @default(0)
+  pixelsPainted      Int       @default(0)
 
   /// The 5-step newcomer quest pays 24h of Premium exactly once.
   onboardingDone    Boolean   @default(false)
@@ -673,4 +676,46 @@ model BackupCode {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+/// Pixel Battle: the current state of the shared canvas.
+///
+/// One row per cell that has ever been painted, so an untouched canvas costs
+/// nothing and a fully painted one is 62 500 rows. `color` is an index into
+/// PIXEL_PALETTE rather than a hex string — the snapshot endpoint serves the
+/// whole canvas as one byte per cell, which only works if a colour is a small
+/// integer.
+model PixelCell {
+  x         Int
+  y         Int
+  color     Int
+  /// Nullable so deleting an account leaves their pixels on the canvas
+  /// (erasing them would punch holes in other people's drawings) while
+  /// dropping the attribution.
+  painterId String?
+  painter   User?    @relation(fields: [painterId], references: [id], onDelete: SetNull)
+  paintedAt DateTime @default(now())
+
+  @@id([x, y])
+  @@index([paintedAt])
+}
+
+/// Append-only log of every placement, which is what makes a cell's history
+/// ("кто это закрасил и что было раньше") answerable, and what the cooldown
+/// is measured against — no separate lastPaintedAt column to keep in sync.
+model PixelPlacement {
+  id        String   @id @default(uuid())
+  x         Int
+  y         Int
+  color     Int
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  /// Serves the cooldown check: this user's most recent placement.
+  @@index([userId, createdAt])
+  /// Serves one cell's history panel.
+  @@index([x, y, createdAt])
+  /// Serves "сколько человек рисует прямо сейчас".
+  @@index([createdAt])
 }

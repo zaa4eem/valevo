@@ -32,6 +32,7 @@ const COUNTER_BY_EVENT: Record<ProgressEvent, keyof UserProgress | null> = {
   REFERRAL_JOINED: 'referralsJoined',
   COINS_EARNED: 'coinsEarnedTotal',
   DAILY_CHECKIN: 'daysActive',
+  PIXEL_PLACED: 'pixelsPainted',
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;

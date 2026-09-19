@@ -99,6 +99,47 @@ export default function GamesPage() {
         </p>
       </Card>
 
+      {/* Hand-written rather than a row in the games table: Pixel Battle has
+          no score and no leaderboard, and listing it as a game would promise
+          both. It still belongs on this page — this is where people come
+          looking for something to do. */}
+      <Link href="/pixel">
+        <Card
+          hover
+          className="z-animate-in"
+          style={{
+            marginBottom: 16,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 14,
+            animationDelay: '30ms',
+          }}
+        >
+          <div
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 'var(--z-radius-md)',
+              background: 'var(--z-accent-soft)',
+              display: 'grid',
+              placeItems: 'center',
+              fontSize: 24,
+              flexShrink: 0,
+            }}
+          >
+            🟩
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h3 style={{ margin: '0 0 4px' }}>
+              Pixel Battle <span className="z-badge">Новое</span>
+            </h3>
+            <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)', margin: 0 }}>
+              Общий холст 250×250. Один пиксель раз в 30 минут — рисуем вместе.
+            </p>
+          </div>
+        </Card>
+      </Link>
+
       {error ? (
         <p style={{ color: 'var(--z-danger)' }}>Не удалось загрузить список игр.</p>
       ) : games === null ? (

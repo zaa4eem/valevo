@@ -71,6 +71,9 @@ export const XP_BY_EVENT = {
   FOLLOW_MADE: 2,
   REFERRAL_JOINED: 150,
   DAILY_CHECKIN: 15,
+  /// A pixel costs a 30-minute wait, so it is worth more than a like but far
+  /// less than writing something — it is one cell, not a thing you made.
+  PIXEL_PLACED: 5,
   /// Counter-only: Z-coins are already their own reward, so earning them pays no XP on top.
   COINS_EARNED: 0,
 } as const;
