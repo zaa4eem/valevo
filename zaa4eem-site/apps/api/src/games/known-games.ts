@@ -12,6 +12,15 @@ export const KNOWN_GAMES = [
     maxPlausibleScore: 500,
   },
   {
+    slug: 'neon-arkanoid',
+    title: 'Neon Arkanoid',
+    description: 'Отбивай шар, ломай блоки. Каждый уровень плотнее и быстрее предыдущего.',
+    // Reachable only by clearing a lot of levels: a level is worth its own
+    // number × 100 plus 10 a brick, so this is roughly level 12-15 of real
+    // play. Above it the score is held for review rather than rejected.
+    maxPlausibleScore: 20_000,
+  },
+  {
     slug: 'z-clicker',
     title: 'Z-Кликер',
     description: 'Кликай и копи Z-коины — потрать их на апгрейды или на Premium в магазине.',

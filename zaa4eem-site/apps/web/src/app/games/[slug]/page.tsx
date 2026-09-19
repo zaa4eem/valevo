@@ -11,10 +11,12 @@ import { Confetti } from '@/components/Confetti';
 import { useToast } from '@/lib/toast-context';
 import { SkeletonCard } from '@/components/Skeleton';
 import { NeonSnake } from '@/components/games/neon-snake/NeonSnake';
+import { NeonArkanoid } from '@/components/games/neon-arkanoid/NeonArkanoid';
 import { ZClicker } from '@/components/games/z-clicker/ZClicker';
 
 const GAME_ICONS: Record<string, string> = {
   'neon-snake': '🐍',
+  'neon-arkanoid': '🧱',
   'z-clicker': '🪙',
 };
 const DEFAULT_GAME_ICON = '🎮';
@@ -149,6 +151,8 @@ export default function GameDetailPage() {
         <Card className="z-animate-in" style={{ animationDelay: '60ms' }}>
           {game.slug === 'neon-snake' ? (
             <NeonSnake onGameOver={onGameOver} />
+          ) : game.slug === 'neon-arkanoid' ? (
+            <NeonArkanoid onGameOver={onGameOver} />
           ) : isClicker ? (
             user ? (
               <ZClicker />

@@ -37,6 +37,19 @@ export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void 
   const [status, setStatus] = useState<'ready' | 'playing' | 'over'>('ready');
   const [finalScore, setFinalScore] = useState(0);
 
+  /**
+   * The engine is built once and keeps whatever callback it was handed, so
+   * it must not be handed a closure straight from render: on a cold page
+   * load the auth context is usually still resolving at that moment, and
+   * the captured onGameOver would go on believing nobody is signed in —
+   * silently dropping every score the player earns for the rest of the
+   * session. The ref is always the current one.
+   */
+  const onGameOverRef = useRef(onGameOver);
+  useEffect(() => {
+    onGameOverRef.current = onGameOver;
+  });
+
   useEffect(() => {
     if (!canvasRef.current) return;
     const engine = new SnakeEngine({
@@ -46,7 +59,7 @@ export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void 
       onGameOver: (finalScoreValue) => {
         setStatus('over');
         setFinalScore(finalScoreValue);
-        onGameOver(finalScoreValue);
+        onGameOverRef.current(finalScoreValue);
       },
     });
     engineRef.current = engine;

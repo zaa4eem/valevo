@@ -11,6 +11,8 @@ import { SkeletonCard } from '@/components/Skeleton';
 // fallback for anything added later — purely a visual accent, not data.
 const GAME_ICONS: Record<string, string> = {
   'neon-snake': '🐍',
+  'neon-arkanoid': '🧱',
+  'z-clicker': '🪙',
 };
 const DEFAULT_GAME_ICON = '🎮';
 
