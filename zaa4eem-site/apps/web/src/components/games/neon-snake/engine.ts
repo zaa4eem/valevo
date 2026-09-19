@@ -51,13 +51,43 @@ export class SnakeEngine {
     this.onScoreChange = opts.onScoreChange;
     this.onGameOver = opts.onGameOver;
 
-    this.canvas.width = this.cols * this.cellSize;
-    this.canvas.height = this.rows * this.cellSize;
     const ctx = this.canvas.getContext('2d');
     if (!ctx) throw new Error('Canvas 2D context unavailable');
     this.ctx = ctx;
 
     this.reset();
+    this.resize(this.cellSize);
+  }
+
+  /**
+   * Re-sizes the board for a given cell size.
+   *
+   * The grid stays cols×rows on every device — only how many pixels a cell
+   * takes changes. That is deliberate and not negotiable: scores go onto a
+   * shared leaderboard, so the playfield has to be the same number of cells
+   * whether you're on a 360px phone or a desktop, or the board would be
+   * comparing different games.
+   *
+   * The backing store is sized in device pixels and the context scaled to
+   * match, so the board is crisp on a phone instead of an upscaled blur.
+   */
+  resize(cellSize: number) {
+    this.cellSize = cellSize;
+
+    const dpr = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 3);
+    const cssWidth = this.cols * cellSize;
+    const cssHeight = this.rows * cellSize;
+
+    this.canvas.width = Math.round(cssWidth * dpr);
+    this.canvas.height = Math.round(cssHeight * dpr);
+    this.canvas.style.width = `${cssWidth}px`;
+    this.canvas.style.height = `${cssHeight}px`;
+
+    // Assigning width/height clears the context state, so the transform has
+    // to be (re)applied after, not before. draw() then keeps working in
+    // plain cell coordinates and knows nothing about pixel density.
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.draw();
   }
 
   reset() {

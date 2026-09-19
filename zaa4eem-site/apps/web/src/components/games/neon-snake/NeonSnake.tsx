@@ -14,8 +14,24 @@ const KEY_TO_DIRECTION: Record<string, 'UP' | 'DOWN' | 'LEFT' | 'RIGHT'> = {
   d: 'RIGHT',
 };
 
+/** Grid stays 20x20 everywhere (see SnakeEngine.resize) — only the cell size adapts. */
+const GRID_COLS = 20;
+/** Below this the snake is a smear; above it there is no point growing further. */
+const MIN_CELL = 9;
+const MAX_CELL = 20;
+/** The canvas' own 1px border on each side. */
+const BORDER = 2;
+
+function cellSizeFor(board: HTMLElement | null): number {
+  const available = board?.clientWidth ?? 0;
+  if (available <= 0) return MAX_CELL;
+  const fitted = Math.floor((available - BORDER) / GRID_COLS);
+  return Math.max(MIN_CELL, Math.min(MAX_CELL, fitted));
+}
+
 export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const boardRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<SnakeEngine | null>(null);
   const [score, setScore] = useState(0);
   const [status, setStatus] = useState<'ready' | 'playing' | 'over'>('ready');
@@ -25,6 +41,7 @@ export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void 
     if (!canvasRef.current) return;
     const engine = new SnakeEngine({
       canvas: canvasRef.current,
+      cellSize: cellSizeFor(boardRef.current),
       onScoreChange: setScore,
       onGameOver: (finalScoreValue) => {
         setStatus('over');
@@ -35,6 +52,23 @@ export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void 
     engineRef.current = engine;
     return () => engine.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * The board was a hard 20 × 18px = 360px plus its border, which pushed the
+   * whole page sideways on any screen narrower than ~418px — that is most
+   * phones (iPhone is 390, plenty of Androids are 360). It now measures the
+   * space it actually has and picks a cell size to fit, and follows the
+   * container when the phone is rotated.
+   */
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      engineRef.current?.resize(cellSizeFor(board));
+    });
+    observer.observe(board);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -81,7 +115,8 @@ export function NeonSnake({ onGameOver }: { onGameOver: (score: number) => void 
         Счёт: <span className="z-accent-text">{score}</span>
       </div>
       <div
-        style={{ position: 'relative', touchAction: 'none' }}
+        ref={boardRef}
+        style={{ position: 'relative', touchAction: 'none', width: '100%', display: 'flex', justifyContent: 'center' }}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
