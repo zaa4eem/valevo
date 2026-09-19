@@ -3,7 +3,7 @@ const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 const view = document.querySelector('#view');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const rub = value => new Intl.NumberFormat('ru-RU', {style:'currency',currency:'RUB',maximumFractionDigits:2}).format(Number(value || 0)/100);
+const rub = value => new Intl.NumberFormat('ru-RU', {style:'currency',currency:'RUB',minimumFractionDigits:0,maximumFractionDigits:2}).format(Number(value || 0)/100);
 const row = (label,value) => `<div class="row"><span>${label}</span><b>${value}</b></div>`;
 const button = (label,screen,cls='secondary') => `<button class="${cls}" data-go="${screen}">${label}</button>`;
 let me, current = 'home', navigation = 0, booking = null;
@@ -130,9 +130,24 @@ async function book() {
   if(!me.registered)return '<h1>Бронирование</h1>'+botFallback('Для бронирования нужна регистрация пилота.');
   const options=await api('/api/booking/options');
   const today=clubDate(new Date(),options.timezone);
-  booking={options,path:'time',day:today,time:'',duration:options.durations[0],selected:[],available:null,request:0,key:crypto.randomUUID(),billAsStatic:false};
+  booking={options,path:'time',day:today,time:'',duration:options.durations[0],selected:[],available:null,request:0,key:crypto.randomUUID(),billAsStatic:false,kidsSelected:false};
   return bookingMarkup();
 }
+// Координаты зала — по финальной схеме (Figma), % от .floorplan (aspect-ratio 1000/950).
+const FLOORPLAN_POSITIONS={
+  door:{left:74.8,top:3.58,width:22,height:15.79},
+  desk:{left:14.8,top:37.05,width:60,height:9.47},
+  lounge_1:{left:82.3,top:21.89,width:16,height:20.32},
+  lounge_2:{left:45.9,top:49.47,width:28.9,height:15.47},
+  motion_2:{left:14.8,top:6.32,width:22,height:23.16},
+  motion_1:{left:46.6,top:6.32,width:22,height:23.16},
+  static_4:{left:18,top:48.42,width:20,height:20},
+  kids_static:{left:1.3,top:63.26,width:13.5,height:16.53},
+  static_3:{left:17.5,top:74.11,width:21,height:21.05},
+  static_2:{left:46.2,top:74.11,width:21,height:21.05},
+  static_1:{left:74.8,top:73.68,width:21,height:21.05},
+};
+function posStyle(p){return `left:${p.left}%;top:${p.top}%;width:${p.width}%;height:${p.height}%`;}
 function isHappyHour(b) {
   const hh=b.options.happy_hour; if(!hh||!b.day||!b.time) return false;
   const jsWeekdays=hh.weekdays.map(w=>(w+1)%7);
@@ -152,19 +167,28 @@ function bookingMarkup() {
  const happy=isHappyHour(b);
  const staticPlace=o.places.find(p=>p.type==='static'), motionPlace=o.places.find(p=>p.type==='motion');
  const happyBanner=happy?`<div class="happy-banner">⚡ Счастливые часы: будни 12:00–17:00 — статика ${rub(staticPlace.happy_hour_kopecks)}, подвижка ${rub(motionPlace.happy_hour_kopecks)}/час</div>`:'';
- const zones=`<div class="zone zone-wc">WC</div><div class="zone zone-door">ВХОД</div><div class="zone zone-desk">СТОЙКА АДМИНИСТРАТОРА</div><div class="zone zone-lounge">ЛАУНЖ-ЗОНА</div>`;
- const seatCards=o.places.map(p=>{const r=seatRate(p,b,happy);const priceHtml=happy?`${rub(r.price)}/час<span class="was">${rub(r.full)}</span>`:`${rub(r.price)}/час`;return `<button class="seat" data-seat="${esc(p.key)}" aria-pressed="${b.selected.includes(p.key)}">${esc(p.title)}<small class="p">${priceHtml}</small></button>`;}).join('');
+ const zones=`<div class="zone zone-door" style="${posStyle(FLOORPLAN_POSITIONS.door)}">ВХОД</div><div class="zone zone-desk" style="${posStyle(FLOORPLAN_POSITIONS.desk)}">СТОЙКА АДМИНИСТРАТОРА</div><div class="zone zone-lounge" style="${posStyle(FLOORPLAN_POSITIONS.lounge_1)}">ЛАУНЖ-ЗОНА</div><div class="zone zone-lounge" style="${posStyle(FLOORPLAN_POSITIONS.lounge_2)}">ЛАУНЖ-ЗОНА</div>`;
+ const seatCards=o.places.map(p=>{const r=seatRate(p,b,happy);const priceHtml=happy?`${rub(r.price)}/час<span class="was">${rub(r.full)}</span>`:`${rub(r.price)}/час`;return `<button class="seat" data-seat="${esc(p.key)}" aria-pressed="${b.selected.includes(p.key)}" style="${posStyle(FLOORPLAN_POSITIONS[p.key])}">${esc(p.title)}<small class="p">${priceHtml}</small></button>`;}).join('');
+ const kidsCard=`<button class="seat seat-kids" data-seat="kids_static" aria-pressed="${b.kidsSelected}" style="${posStyle(FLOORPLAN_POSITIONS.kids_static)}">Детский сим<small class="p">${rub(o.kids_rate_kopecks)}/ч</small></button>`;
  const motionSelected=b.selected.some(k=>b.options.places.find(p=>p.key===k)?.type==='motion');
- const motionToggle=`<button class="chip-toggle" id="bill-as-static" aria-pressed="${b.billAsStatic?'true':'false'}">${b.billAsStatic?'✓ ':''}Подвижка как статика</button><p class="muted" style="margin:6px 0 0">Платформа не будет двигаться, но останется тем же местом — просто по цене статики.</p>`;
- const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика ${rub(staticPlace.hourly_rate_kopecks)}/час · подвижка ${rub(motionPlace.hourly_rate_kopecks)}/час</p>${happyBanner}<div class="floorplan">${zones}${seatCards}</div><div style="margin-top:10px">${motionToggle}</div>${!motionSelected&&b.billAsStatic?'<p class="muted">Применится, если выберете места подвижки.</p>':''}<div class="legend" style="margin-top:10px"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
+ const motionToggle=`<p class="muted" style="margin:10px 0 6px">Хотите занять подвижную платформу, но кататься без движения — как на статике? Включите переключатель ниже.</p><button class="chip-toggle" id="bill-as-static" aria-pressed="${b.billAsStatic?'true':'false'}">${b.billAsStatic?'✓ ':''}Подвижка как статика</button>`;
+ const toggleBlock=b.kidsSelected?'':`<div style="margin-top:10px">${motionToggle}</div>${!motionSelected&&b.billAsStatic?'<p class="muted">Применится, если выберете места подвижки.</p>':''}`;
+ const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика ${rub(staticPlace.hourly_rate_kopecks)}/час · подвижка ${rub(motionPlace.hourly_rate_kopecks)}/час · детский сим ${rub(o.kids_rate_kopecks)}/час (не через YCLIENTS)</p>${happyBanner}<div class="floorplan">${zones}${seatCards}${kidsCard}</div>${toggleBlock}<div class="legend" style="margin-top:10px"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
  return `<div class="kicker">ВАШ ЗАЕЗД</div><h1>Бронирование</h1><div class="tabs"><button data-path="time" aria-pressed="${b.path==='time'}">Сначала дата и время</button><button data-path="seats" aria-pressed="${b.path==='seats'}">Сначала места</button></div>${b.path==='time'?schedule+seats:seats+schedule}<p id="availability" class="muted">Проверяем доступность…</p><div class="card gold" id="summary"></div><button class="primary" id="reserve" disabled>Отправить заявку</button><p class="muted">Заявка требует подтверждения клуба. Её статус появится в разделе «Мои бронирования».</p>`;
 }
 function bindBooking() {
  const b=booking;
  view.querySelectorAll('[data-path]').forEach(el=>el.onclick=()=>{b.path=el.dataset.path;show(bookingMarkup());bindBooking();});
  for(const id of ['day','time','duration'])document.getElementById(id).onchange=e=>{b[id]=id==='duration'?Number(e.target.value):e.target.value;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();};
- view.querySelectorAll('[data-seat]').forEach(el=>el.onclick=()=>{const key=el.dataset.seat,p=b.options.places.find(p=>p.key===key);if(b.selected.includes(key))b.selected=b.selected.filter(k=>k!==key);else{if(b.selected.length>=3)return toast('Можно выбрать до 3 мест.');if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}b.key=crypto.randomUUID();updateBooking();});
- document.querySelector('#bill-as-static').onclick=()=>{b.billAsStatic=!b.billAsStatic;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();};
+ view.querySelectorAll('[data-seat]').forEach(el=>el.onclick=()=>{
+   const key=el.dataset.seat;
+   if(key==='kids_static'){b.kidsSelected=!b.kidsSelected;if(b.kidsSelected)b.selected=[];b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();return;}
+   const p=b.options.places.find(p=>p.key===key);
+   if(b.selected.includes(key))b.selected=b.selected.filter(k=>k!==key);
+   else{if(b.kidsSelected)b.kidsSelected=false;if(b.selected.length>=3)return toast('Можно выбрать до 3 мест.');if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}
+   b.key=crypto.randomUUID();updateBooking();
+ });
+ document.querySelector('#bill-as-static')?.addEventListener('click',()=>{b.billAsStatic=!b.billAsStatic;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();});
  document.querySelector('#reserve').onclick=submitBooking;
  checkAvailability();
 }
@@ -177,19 +201,25 @@ function updateBooking() {
  const b=booking; const unavailable=k=>!b.available?.find(p=>p.key===k)?.available;
  const happy=isHappyHour(b);
  view.querySelectorAll('[data-seat]').forEach(el=>{
-   el.setAttribute('aria-pressed',b.selected.includes(el.dataset.seat));
-   el.disabled=b.available ? unavailable(el.dataset.seat)&&!b.selected.includes(el.dataset.seat) : b.path==='time';
-   const p=b.options.places.find(p=>p.key===el.dataset.seat);const r=seatRate(p,b,happy);
+   const key=el.dataset.seat;
+   if(key==='kids_static'){el.setAttribute('aria-pressed',b.kidsSelected);el.disabled=b.selected.length>0;return;}
+   el.setAttribute('aria-pressed',b.selected.includes(key));
+   el.disabled=b.kidsSelected||(b.available ? unavailable(key)&&!b.selected.includes(key) : b.path==='time');
+   const p=b.options.places.find(p=>p.key===key);const r=seatRate(p,b,happy);
    const priceEl=el.querySelector('.p');if(priceEl)priceEl.innerHTML=happy?`${rub(r.price)}/час<span class="was">${rub(r.full)}</span>`:`${rub(r.price)}/час`;
  });
  const chosen=b.options.places.filter(p=>b.selected.includes(p.key));
- const total=chosen.reduce((n,p)=>n+seatRate(p,b,happy).price*b.duration/60,0);
- const places=chosen.map(p=>esc(p.title)+(p.type==='motion'&&b.billAsStatic?' (как статика)':'')).join(', ')||'Не выбраны';
- document.querySelector('#summary').innerHTML=row('Места',places)+row('Заезд',`${esc(b.day)} · ${esc(b.time)||'—'} · ${b.duration} мин${happy?' · счастливые часы':''}`)+row('Стоимость',`<span class="money">${rub(total)}</span>`)+(b.available&&b.selected.some(unavailable)?'<p class="error">Выбранное место занято. Уберите его или измените время.</p>':'');
- document.querySelector('#reserve').disabled=!b.time||!b.selected.length||!b.available||b.selected.some(unavailable);
+ const total=b.kidsSelected?b.options.kids_rate_kopecks*b.duration/60:chosen.reduce((n,p)=>n+seatRate(p,b,happy).price*b.duration/60,0);
+ const places=b.kidsSelected?'Детский статичный сим':(chosen.map(p=>esc(p.title)+(p.type==='motion'&&b.billAsStatic?' (как статика)':'')).join(', ')||'Не выбраны');
+ document.querySelector('#summary').innerHTML=row('Места',places)+row('Заезд',`${esc(b.day)} · ${esc(b.time)||'—'} · ${b.duration} мин${happy&&!b.kidsSelected?' · счастливые часы':''}`)+row('Стоимость',`<span class="money">${rub(total)}</span>`)+(!b.kidsSelected&&b.available&&b.selected.some(unavailable)?'<p class="error">Выбранное место занято. Уберите его или измените время.</p>':'')+(b.kidsSelected?'<p class="muted">Детский сим не бронируется в YCLIENTS — администратор свяжется с вами лично после отправки заявки.</p>':'');
+ document.querySelector('#reserve').disabled=!b.time||(b.kidsSelected?false:(!b.selected.length||!b.available||b.selected.some(unavailable)));
 }
 async function submitBooking() {
  const b=booking,btn=document.querySelector('#reserve');btn.disabled=true;btn.textContent='Отправляем…';
+ if(b.kidsSelected){
+   try{await api('/api/booking/kids',{method:'POST',body:JSON.stringify({start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration,idempotency_key:b.key})});toast('Заявка отправлена. Администратор свяжется с вами.');go('home');}catch(e){toast(e.message);if(current==='book'){btn.textContent='Повторить отправку';btn.disabled=false;}}
+   return;
+ }
  try{await api('/api/bookings',{method:'POST',body:JSON.stringify({place_keys:b.selected,start_at:instant(b.day,b.time,b.options.timezone),duration_minutes:b.duration,idempotency_key:b.key,bill_as_static:b.billAsStatic})});toast('Заявка отправлена. Статус доступен в бронированиях.');go('bookings');}catch(e){toast(e.message);if(current==='book'){btn.textContent='Повторить отправку';await checkAvailability();}}
 }
 const statusNames={pending_admin:'Ожидает подтверждения',creating:'Создаётся',user_confirmed:'Подтверждено пилотом',cancelling:'Отменяется',reconciliation_required:'Требует проверки клуба',pending:'Ожидает подтверждения',confirmed:'Подтверждено',approved:'Подтверждено',cancelled:'Отменено',rejected:'Отклонено',failed:'Ошибка',cancellation_failed:'Ошибка отмены — свяжитесь с клубом'};

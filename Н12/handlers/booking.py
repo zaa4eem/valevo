@@ -71,6 +71,9 @@ HAPPY_HOUR_RATES = {"static": 60000, "motion": 80000}
 HAPPY_HOUR_WEEKDAYS = range(0, 5)  # Mon=0 .. Fri=4
 HAPPY_HOUR_START = time(12, 0)
 HAPPY_HOUR_END = time(17, 0)
+# Детский статичный сим: не бронируется через YCLIENTS (нет отдельного staff_id),
+# заявка только уведомляет администратора. Цена фиксированная, без счастливых часов.
+KIDS_RATE_KOPECKS = 50000
 
 
 def _is_happy_hour(start_at: datetime) -> bool:

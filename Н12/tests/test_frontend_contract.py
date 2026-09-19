@@ -39,7 +39,7 @@ if __name__ == '__main__':
             profile = dict(display_name='Тестовый пилот', pilot_number=42, rating=640, current_class='GT3')
             routes = {
                 '/api/me': dict(registered=True, is_admin=True, is_super_admin=True, profile=profile),
-                '/api/booking/options': dict(places=[dict(key=f'{kind}_{i}', title=f'{title} №{i+offset}', type=kind, hourly_rate_kopecks=rate) for kind,title,count,offset,rate in [('static','Статика',4,2,70000),('motion','Подвижка',2,0,100000)] for i in range(1,count+1)], durations=[30,60,90,120,180],days_ahead=14,timezone='Europe/Moscow',open_hour=12,close_hour=24),
+                '/api/booking/options': dict(places=[dict(key=f'{kind}_{i}', title=f'{title} №{i+offset}', type=kind, hourly_rate_kopecks=rate, happy_hour_kopecks=happy) for kind,title,count,offset,rate,happy in [('static','Статика',4,2,70000,60000),('motion','Подвижка',2,0,100000,80000)] for i in range(1,count+1)], kids_rate_kopecks=50000, durations=[30,60,90,120,180],days_ahead=14,timezone='Europe/Moscow',open_hour=12,close_hour=24),
                 '/api/booking/availability': dict(places=[dict(key=f'{kind}_{i}',available=(kind,i)!=('static',3)) for kind,count in [('static',4),('motion',2)] for i in range(1,count+1)]),
                 '/api/bookings': dict(bookings=[]),
                 '/api/admin/bookings': dict(bookings=[]),

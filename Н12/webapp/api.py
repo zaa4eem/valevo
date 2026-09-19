@@ -11,7 +11,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from config import BOT_TOKEN, REFERRAL_BONUS_RUB
+from config import BOT_TOKEN, REFERRAL_BONUS_RUB, SUPER_ADMIN_IDS
 from data.tournament import CLASS_LADDER, next_main_class
 from database.db import (
     get_all_pilot_display_names, get_pilot_achievements, get_pilot_by_telegram_id,
@@ -206,10 +206,19 @@ async def roulette_spin(payload: 'SpinRequest', user:TelegramWebAppUser=Depends(
     try: return {'ok':True,**(await spin(user.id,payload.idempotency_key))}
     except SpinError as exc: return JSONResponse({'ok':False,'error':str(exc),'retryable':exc.retryable},status_code=409)
 
+async def notify_super_admins(text: str) -> None:
+    if _bot is None:
+        return
+    for admin_id in SUPER_ADMIN_IDS:
+        try:
+            await _bot.send_message(chat_id=admin_id, text=text)
+        except Exception:
+            logging.getLogger(__name__).exception('Kids-sim admin notify failed for %s', admin_id)
+
 from services.miniapp_booking import create_booking_router
 from webapp.finance_api import create_finance_router
 from webapp.operations_api import create_operations_router
-app.include_router(create_booking_router(current_user))
+app.include_router(create_booking_router(current_user, notify_super_admins))
 app.include_router(create_finance_router(current_user))
 app.include_router(create_operations_router(current_user))
 

@@ -33,30 +33,35 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Обновлено под лестницу турнира v2 (MX-5 -> BTCC(+DTM) -> GT500(+Touge) -> GT3).
-# Все 7 пунктов (включая доп.дисциплины DTM и Touge) крутятся в общей карусели
-# (фиксированную левую колонку занимает не одна из дисциплин, а общий зачёт
-# турнира — см. FIXED_TOP_ITEM и renderBoard). Порядок — строго по лестнице
-# (MX-5 первым как этап 1, доп.дисциплина сразу после своего основного класса),
-# согласовано макетом. stage/stage_type определяют плашку над колонкой:
-# "main" — цифра этапа, "side" — доп.этап, "event" — вне лестницы (Week CUP).
+# Лестница турнира — MX-5(этап1) -> GT500(этап2, +F4/ALL доп) -> DTM(этап3, +Touge
+# доп) -> GT3(этап4). Это ровно MAIN_SEQUENCE/SIDE_DISCIPLINES из
+# data/tournament.py — там же считаются очки/промоушен, так что порядок и
+# состав здесь обязаны совпадать с ней, а не жить отдельным списком (раньше
+# тут была "BTCC", которой в CLASS_LADDER уже нет — расхождение и привело к
+# правке). Все 7 пунктов (включая доп.дисциплины F4/ALL и Touge) крутятся в
+# общей карусели (фиксированную левую колонку занимает не одна из дисциплин, а
+# общий зачёт турнира — см. FIXED_TOP_ITEM и renderBoard). stage/stage_type
+# определяют плашку над колонкой: "main" — цифра этапа, "side" — доп.этап,
+# "event" — вне лестницы (Week CUP). "car" — картинка машины для шапки колонки
+# (Н12/static/cars/*.png), может быть пустой строкой, если картинки ещё нет.
 # Меняя количество пунктов здесь, обязательно пересчитай @keyframes
 # carouselStep и --cycle-time ниже — они настроены именно на 7 шагов.
 DISPLAY_ORDER = [
     {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West",
-     "stage": "Этап 1", "stage_type": "main"},
-    {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "",
-     "stage": "Этап 2", "stage_type": "main"},
-    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI",
-     "stage": "Доп. этап", "stage_type": "side"},
+     "stage": "Этап 1", "stage_type": "main", "car": "/static/cars/mx5.png"},
     {"key": "GT500", "aliases": ["GT500", "GT-500"], "title": "GT500", "subtitle": "Fuji Speedway",
-     "stage": "Этап 3", "stage_type": "main"},
-    {"key": "Touge", "aliases": ["TOUGE", "TOGUE"], "title": "Touge", "subtitle": "Myogi",
-     "stage": "Доп. этап", "stage_type": "side"},
+     "stage": "Этап 2", "stage_type": "main", "car": "/static/cars/gt500.png"},
+    {"key": "F4/ALL", "aliases": ["F4/ALL", "F4", "ALL", "F1", "FORMULA", "FORMULA 1",
+                                   "ОТКРЫТЫЕ КОЛЕСА", "ОТКРЫТЫЕ КОЛЁСА"], "title": "F4 / ALL", "subtitle": "",
+     "stage": "Доп. этап", "stage_type": "side", "car": "/static/cars/f4.png"},
+    {"key": "DTM", "aliases": ["DTM"], "title": "DTM", "subtitle": "AKAGI",
+     "stage": "Этап 3", "stage_type": "main", "car": "/static/cars/dtm.png"},
+    {"key": "Touge", "aliases": ["TOUGE", "TOGUE", "TOGE"], "title": "Touge", "subtitle": "Myogi",
+     "stage": "Доп. этап", "stage_type": "side", "car": "/static/cars/touge.png"},
     {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Sebring",
-     "stage": "Этап 4", "stage_type": "main"},
+     "stage": "Этап 4", "stage_type": "main", "car": "/static/cars/gt3.png"},
     {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "PEPE CUP",
-     "subtitle": "Sochi Short | Yaris", "stage": "Отдельный кубок", "stage_type": "event"},
+     "subtitle": "Sochi Short | Yaris", "stage": "Отдельный кубок", "stage_type": "event", "car": ""},
 ]
 
 CAROUSEL_DUPLICATES = 4
@@ -440,9 +445,27 @@ body::after{
     display:flex;
     align-items:center;
     justify-content:center;
+    gap:14px;
     text-align:center;
     border-bottom:3px solid rgba(74,198,201,.72);
     background:linear-gradient(180deg,rgba(74,198,201,.14),rgba(0,0,0,.23));
+    padding:0 18px;
+}
+
+.head.with-car{text-align:left}
+
+.head .car{
+    flex:0 0 96px;
+    width:96px;
+    height:52px;
+}
+
+.head .car img{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    display:block;
+    filter:drop-shadow(0 2px 6px rgba(0,0,0,.55));
 }
 
 .head .title{
@@ -979,7 +1002,7 @@ body::after{
 .ticker b{color:var(--cyan)}
 .gold{color:var(--gold2)}
 
-/* 7 карусельных пунктов (GT3, MX-5, BTCC, DTM, GT500, Touge, Week CUP) —
+/* 7 карусельных пунктов (MX-5, GT500, F4/ALL, DTM, Touge, GT3, Week CUP) —
    каждый занимает 1/7 цикла: держит кадр CAROUSEL_HOLD_MS, затем едет
    CAROUSEL_MOVE_MS. Если поменяешь состав/число пунктов DISPLAY_ORDER —
    пересчитай проценты здесь и --cycle-time выше (сейчас 7 * (10000+1200)мс
@@ -1248,7 +1271,9 @@ function makeColumn(item, pilots, oldGroups){
 
     const head = document.createElement("div");
     head.className = "head";
-    head.innerHTML = `<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>`;
+    const carHtml = item.car ? `<div class="car"><img src="${escapeHtml(item.car)}" alt=""></div>` : "";
+    head.classList.toggle("with-car", Boolean(item.car));
+    head.innerHTML = `${carHtml}<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>`;
 
     const rows = document.createElement("div");
     rows.className = "rows";

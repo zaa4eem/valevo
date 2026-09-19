@@ -18,6 +18,12 @@ class BookingInput(BaseModel):
     bill_as_static: bool = False
 
 
+class KidsBookingInput(BaseModel):
+    start_at: datetime
+    duration_minutes: int
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
 def window(start_at, duration_minutes):
     if start_at.tzinfo is None or duration_minutes not in b.DURATION_OPTIONS:
         raise HTTPException(422, 'Укажите часовой пояс и допустимую длительность')
@@ -41,6 +47,23 @@ def public_booking(row, admin=False):
     return result
 
 
+async def ensure_kids_schema(db):
+    # Отдельная таблица: детский статичный сим не бронируется через YCLIENTS,
+    # заявка только уведомляет администратора. Не трогает booking_requests_v2.
+    await db.execute('''CREATE TABLE IF NOT EXISTS kids_sim_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        username TEXT,
+        display_name TEXT NOT NULL,
+        phone TEXT,
+        start_at TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(telegram_id, idempotency_key)
+    )''')
+
+
 async def list_bookings(user_id=None, limit=100, offset=0):
     db = await get_db()
     try:
@@ -56,7 +79,7 @@ async def list_bookings(user_id=None, limit=100, offset=0):
     return [await b._fetch_booking(bid) for bid in ids]
 
 
-def create_booking_router(current_user):
+def create_booking_router(current_user, notify_admins=None):
     router = APIRouter()
 
     def super_user(user=Depends(current_user)):
@@ -70,6 +93,7 @@ def create_booking_router(current_user):
                              'hourly_rate_kopecks': b.HOURLY_RATES[v['type']],
                              'happy_hour_kopecks': b.HAPPY_HOUR_RATES[v['type']],
                              'billable_as_static': v['type'] == 'motion'} for k, v in b.BOOKING_PLACES.items()],
+                'kids_rate_kopecks': b.KIDS_RATE_KOPECKS,
                 'durations': list(b.DURATION_OPTIONS), 'days_ahead': b.BOOKING_DAYS_AHEAD,
                 'timezone': str(b.TZ), 'open_hour': 12, 'close_hour': 24, 'today': datetime.now(b.TZ).date().isoformat(),
                 'happy_hour': {'weekdays': list(b.HAPPY_HOUR_WEEKDAYS), 'start': b.HAPPY_HOUR_START.strftime('%H:%M'),
@@ -130,6 +154,36 @@ def create_booking_router(current_user):
         if not ok:
             raise HTTPException(409, error)
         return public_booking(await b._fetch_booking(bid))
+
+    @router.post('/api/booking/kids')
+    async def create_kids(data: KidsBookingInput, user=Depends(current_user)):
+        start, end = window(data.start_at, data.duration_minutes)
+        pilot = await get_pilot_by_telegram_id(user.id)
+        if not pilot or not pilot.get('phone'):
+            raise HTTPException(409, 'Сначала завершите регистрацию и укажите телефон в боте')
+        db = await get_db()
+        try:
+            await ensure_kids_schema(db)
+            cur = await db.execute('SELECT id FROM kids_sim_requests WHERE telegram_id=? AND idempotency_key=?',
+                                    (user.id, data.idempotency_key))
+            existing = await cur.fetchone()
+            if not existing:
+                await db.execute('''INSERT INTO kids_sim_requests
+                    (telegram_id,username,display_name,phone,start_at,duration_minutes,idempotency_key,created_at)
+                    VALUES (?,?,?,?,?,?,?,?)''',
+                    (user.id, user.username, pilot['display_name'], pilot.get('phone'),
+                     start.isoformat(), data.duration_minutes, data.idempotency_key, datetime.now(b.TZ).isoformat()))
+                await db.commit()
+        finally:
+            await db.close()
+        if not existing and notify_admins:
+            await notify_admins(
+                '🧒 Заявка на детский статичный сим (вне YCLIENTS)\n'
+                f'Пилот: {pilot["display_name"]} · {pilot.get("phone") or "—"}\n'
+                f'Время: {start.strftime("%d.%m %H:%M")} · {data.duration_minutes} мин\n'
+                'Место не бронируется автоматически — свяжитесь с гостем и подготовьте детский сим.')
+        return {'ok': True, 'start_at': start.isoformat(), 'duration_minutes': data.duration_minutes,
+                'rate_kopecks': b.KIDS_RATE_KOPECKS}
 
     @router.post('/api/bookings/{booking_id}/cancel')
     async def cancel(booking_id: int, user=Depends(current_user)):
