@@ -1273,7 +1273,7 @@ function makeColumn(item, pilots, oldGroups){
     head.className = "head";
     const carHtml = item.car ? `<div class="car"><img src="${escapeHtml(item.car)}" alt=""></div>` : "";
     head.classList.toggle("with-car", Boolean(item.car));
-    head.innerHTML = `${carHtml}<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>`;
+    head.innerHTML = `<div><div class="title">${escapeHtml(item.title)}</div><div class="sub">${escapeHtml(item.subtitle)}</div></div>${carHtml}`;
 
     const rows = document.createElement("div");
     rows.className = "rows";
