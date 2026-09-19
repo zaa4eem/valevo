@@ -33,7 +33,13 @@ ENV NODE_ENV=production
 # after that entrypoint fixes up ownership of the (possibly volume-mounted,
 # possibly root-owned from a prior deploy) uploads directory — see
 # docker-entrypoint.sh. Avoids running the actual Node process as root.
-RUN apt-get update -y && apt-get install -y openssl gifsicle gosu && rm -rf /var/lib/apt/lists/*
+# ffmpeg: re-encodes every uploaded Scroll to H.264/AAC MP4 and pulls its
+# cover frame. Not optional — an iPhone's HEVC .mov stored as-is would stop
+# the feed dead on every Android that can't decode it, and without ffprobe
+# there is no way to tell a real video from a renamed text file.
+# --no-install-recommends keeps this to the codecs, not a desktop's worth of
+# GPU driver packages.
+RUN apt-get update -y && apt-get install -y --no-install-recommends openssl gifsicle gosu ffmpeg && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json* ./
 COPY packages/shared/package.json packages/shared/package.json
@@ -54,7 +60,7 @@ COPY --from=build /repo/node_modules/.prisma node_modules/.prisma
 # itself runs from.
 COPY --from=build /repo/apps/api/src apps/api/src
 COPY apps/api/tsconfig.json apps/api/tsconfig.json
-RUN mkdir -p apps/api/uploads/avatars apps/api/uploads/post-images
+RUN mkdir -p apps/api/uploads/avatars apps/api/uploads/post-images apps/api/uploads/scrolls/raw
 
 COPY apps/api/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

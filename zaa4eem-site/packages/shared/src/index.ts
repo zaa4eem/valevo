@@ -26,3 +26,4 @@ export * from './security/password-strength';
 export * from './schemas/discover';
 export * from './text/plural';
 export * from './schemas/pixel';
+export * from './schemas/scrolls';

@@ -7,6 +7,7 @@ const tabs = [
   { href: '/', label: 'Лента', icon: '🟢' },
   { href: '/ideas', label: 'Идеи', icon: '💡' },
   { href: '/search', label: 'Поиск', icon: '🔍' },
+  { href: '/scrolls', label: 'Scrolls', icon: '🎬' },
   { href: '/games', label: 'Игры', icon: '🎮' },
   { href: '/shop', label: 'Магазин', icon: '🛒' },
   { href: '/leaderboard', label: 'Лидеры', icon: '🏆' },

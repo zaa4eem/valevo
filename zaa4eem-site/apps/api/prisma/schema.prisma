@@ -194,6 +194,10 @@ model User {
   backupCodes       BackupCode[]
   pixelCells        PixelCell[]
   pixelPlacements   PixelPlacement[]
+  scrolls           Scroll[]
+  scrollsReviewed   Scroll[]             @relation("ScrollReviewer")
+  scrollLikes       ScrollLike[]
+  scrollComments    ScrollComment[]
 
   @@index([role])
   @@index([invitedById])
@@ -718,4 +722,78 @@ model PixelPlacement {
   @@index([x, y, createdAt])
   /// Serves "сколько человек рисует прямо сейчас".
   @@index([createdAt])
+}
+
+enum ScrollStatus {
+  /// Uploaded; ffmpeg is still turning it into something every phone can play.
+  PROCESSING
+  /// Transcoded and waiting for a human to watch it.
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+  /// The upload could not be read as a video at all.
+  FAILED
+}
+
+/// One clip in the vertical feed.
+///
+/// Nothing here is visible to anyone but its author until a human sets
+/// status to PUBLISHED — the moderation step is the schema's default, not
+/// something a code path has to remember to apply.
+model Scroll {
+  id              String       @id @default(uuid())
+  authorId        String
+  author          User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  /// Paths under /uploads. Empty until transcoding finishes.
+  videoUrl        String       @default("")
+  posterUrl       String       @default("")
+  caption         String       @default("")
+  durationMs      Int          @default(0)
+  width           Int          @default(0)
+  height          Int          @default(0)
+
+  status          ScrollStatus @default(PROCESSING)
+  /// Shown to the uploader, so a rejected clip never just disappears.
+  rejectionReason String?
+  reviewedById    String?
+  reviewedBy      User?        @relation("ScrollReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+
+  viewCount       Int          @default(0)
+  createdAt       DateTime     @default(now())
+  /// Set when a moderator publishes it — the feed orders by this, not by
+  /// createdAt, so a clip that sat in the queue for a day still arrives at
+  /// the top when it is finally let through.
+  publishedAt     DateTime?
+
+  likes           ScrollLike[]
+  comments        ScrollComment[]
+
+  /// Serves the feed's `where status = PUBLISHED order by publishedAt desc`.
+  @@index([status, publishedAt])
+  @@index([authorId, createdAt])
+}
+
+model ScrollLike {
+  scrollId  String
+  scroll    Scroll   @relation(fields: [scrollId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([scrollId, userId])
+  @@index([userId])
+}
+
+model ScrollComment {
+  id        String   @id @default(uuid())
+  scrollId  String
+  scroll    Scroll   @relation(fields: [scrollId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([scrollId, createdAt])
 }

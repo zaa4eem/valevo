@@ -21,6 +21,7 @@ import { ProgressModule } from './progress/progress.module';
 import { SecurityModule } from './security/security.module';
 import { DiscoverModule } from './discover/discover.module';
 import { PixelModule } from './pixel/pixel.module';
+import { ScrollsModule } from './scrolls/scrolls.module';
 import { validateEnv } from './config-validate';
 
 @Module({
@@ -55,6 +56,7 @@ import { validateEnv } from './config-validate';
     SecurityModule,
     DiscoverModule,
     PixelModule,
+    ScrollsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

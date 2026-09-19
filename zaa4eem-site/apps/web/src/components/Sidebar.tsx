@@ -8,6 +8,7 @@ const items = [
   { href: '/admin/users', label: 'Пользователи', icon: '👥' },
   { href: '/admin/ideas', label: 'Идеи', icon: '💡' },
   { href: '/admin/moderation', label: 'Модерация', icon: '🛡️' },
+  { href: '/admin/scrolls', label: 'Scrolls', icon: '🎬' },
   { href: '/admin/posts', label: 'Лента', icon: '📝' },
   { href: '/admin/idea-credits', label: 'Авторы идей', icon: '🏅' },
 ];

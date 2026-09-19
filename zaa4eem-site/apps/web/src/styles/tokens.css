@@ -1813,3 +1813,28 @@ img {
     flex: 0 0 180px;
   }
 }
+
+/* --- Scrolls -------------------------------------------------------------
+ *
+ * The vertical video rail. Sized in dvh rather than vh because a mobile
+ * browser's URL bar shrinks the viewport as you scroll, and a feed that
+ * changes height mid-swipe fights the scroll-snap.
+ */
+.z-scroll-rail {
+  height: min(78vh, 760px);
+  height: min(78dvh, 760px);
+}
+
+@media (max-width: 720px) {
+  /* The tab bar is fixed *over* the viewport, so a plain vh height puts the
+     last ~70px of every clip — the caption and the view count — underneath
+     it. The subtraction is the chrome above and below the rail: the top bar
+     and the page heading (about 135px measured), plus the 76px tab bar. */
+  .z-scroll-rail {
+    height: calc(100dvh - 211px - env(safe-area-inset-bottom));
+    max-height: 760px;
+    /* Landscape on a phone leaves almost nothing; a short rail that scrolls
+       beats a rail collapsed to a sliver. */
+    min-height: 360px;
+  }
+}
