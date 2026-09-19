@@ -328,6 +328,7 @@ export class UsersService {
       viewerFollow,
       ideaCredits,
       topGameBadges,
+      progress,
     ] = await Promise.all([
         this.prisma.idea.count({ where: { submitterId: userId } }),
         this.prisma.idea.count({
@@ -350,6 +351,10 @@ export class UsersService {
           : null,
         this.prisma.ideaCredit.findMany({ where: { creditedId: userId }, orderBy: { createdAt: 'desc' } }),
         this.getTopGameBadges(userId),
+        this.prisma.userProgress.findUnique({
+          where: { userId },
+          select: { level: true, streakDays: true },
+        }),
       ]);
 
     const bestByGame = new Map<string, { gameSlug: string; gameTitle: string; value: number }>();
@@ -385,6 +390,11 @@ export class UsersService {
       viewerIsFollowing: viewerId ? Boolean(viewerFollow) : undefined,
       presence: computePresence(user.lastActiveAt),
       ideaAuthorLevel: ideasAcceptedCount > 0 ? Math.min(ideasAcceptedCount, MAX_IDEA_AUTHOR_LEVEL) : null,
+      // The progress row is created lazily on the first XP award, so an
+      // account that has never done anything simply has none — level 1 with
+      // no streak is the honest reading of that, not an error.
+      level: progress?.level ?? 1,
+      streakDays: progress?.streakDays ?? 0,
       topGameBadges,
       isPremium: user.isPremium,
       nameStyle: user.nameStyle,

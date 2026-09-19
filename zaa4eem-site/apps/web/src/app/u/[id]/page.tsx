@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import type { PaginatedPosts, Post, PublicProfile } from '@zaa4eem/shared';
-import { formatMemberNumber } from '@zaa4eem/shared';
+import { formatMemberNumber, plural } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { useAuth } from '@/lib/auth-context';
 import { haptic } from '@/lib/telegram';
@@ -16,6 +16,7 @@ import { PremiumName } from '@/components/PremiumName';
 import { getRingClass } from '@/components/PremiumAvatar';
 import { PresenceDot } from '@/components/PresenceDot';
 import { PostCard } from '@/components/PostCard';
+import { SimilarProfiles } from '@/components/PeopleSuggestions';
 import '@/styles/premium.css';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== 'undefined' ? window.location.origin : '');
@@ -201,7 +202,19 @@ export default function PublicProfilePage() {
           }}
         />
         <div style={{ padding: 20, marginTop: -48 }}>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          {/* Wraps at phone width: the badge column under the member number
+              made this row too tall for the action button to share a line
+              with it on a 390px screen, and an overlapping two-line
+              "Редактировать профиль" is worse than one on its own row. */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 16,
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+            }}
+          >
             <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end' }}>
               {/* The ring effect's ::before extends outside the avatar's own box
                   (inset: -4px/-6px), so it needs its own wrapper — putting the
@@ -244,10 +257,32 @@ export default function PublicProfilePage() {
                 </div>
                 <PresenceDot presence={profile.presence} style={{ position: 'absolute', right: 2, bottom: 2 }} />
               </span>
-              <div style={{ paddingBottom: 4 }}>
+              <div style={{ paddingBottom: 4, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
                 <span className="z-badge" style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-faint)' }}>
                   {formatMemberNumber(profile.memberNumber)}
                 </span>
+                {/* Level and streak read as "этот человек здесь живёт", which
+                    is the single most useful thing to know before deciding
+                    to follow someone. The flame is only shown once it means
+                    something — a zero-day streak is just noise. */}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span
+                    className="z-badge"
+                    style={{ background: 'var(--z-accent-soft)', color: 'var(--z-accent)' }}
+                    title="Уровень активности на платформе"
+                  >
+                    ур. {profile.level}
+                  </span>
+                  {profile.streakDays > 0 && (
+                    <span
+                      className="z-badge"
+                      style={{ background: 'var(--z-bg-elevated)', color: 'var(--z-text-muted)' }}
+                      title={`Заходит ${profile.streakDays} ${plural(profile.streakDays, 'день', 'дня', 'дней')} подряд`}
+                    >
+                      🔥 {profile.streakDays}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             {viewer?.id === profile.id ? (
@@ -422,6 +457,12 @@ export default function PublicProfilePage() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Last on the page by design: the way out of a profile you've finished
+          reading should be another profile, not the back button. */}
+      <div style={{ marginTop: 28 }}>
+        <SimilarProfiles userId={params.id} />
       </div>
     </div>
   );

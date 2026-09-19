@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
-import type { SearchResults } from '@zaa4eem/shared';
-import { formatMemberNumber, searchTypeValues, type SearchQuery } from '@zaa4eem/shared';
+import type { Discover, SearchResults } from '@zaa4eem/shared';
+import { formatMemberNumber, plural, searchTypeValues, type SearchQuery } from '@zaa4eem/shared';
 import { api } from '@/lib/api-client';
 import { Card } from '@/components/Card';
 import { Avatar } from '@/components/Avatar';
 import { EmptyState } from '@/components/EmptyState';
 import { SkeletonCard } from '@/components/Skeleton';
+import { SuggestedPeople } from '@/components/SuggestedPeople';
 
 const IDEA_STATUS_LABELS: Record<string, string> = {
   NEW: 'Новая',
@@ -43,6 +44,20 @@ export default function SearchPage() {
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [discover, setDiscover] = useState<Discover | null>(null);
+  const [discoverFailed, setDiscoverFailed] = useState(false);
+
+  /**
+   * Loaded once on mount, not on every visit to the empty state — the
+   * recommendations shouldn't reshuffle under someone who just cleared the
+   * search box to look at them again.
+   */
+  useEffect(() => {
+    api
+      .get<Discover>('/discover')
+      .then(setDiscover)
+      .catch(() => setDiscoverFailed(true));
+  }, []);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -65,7 +80,17 @@ export default function SearchPage() {
   }, [query, type]);
 
   const trimmedQuery = query.trim();
+  const searching = trimmedQuery.length >= 2;
   const totalCount = results ? results.users.length + results.posts.length + results.ideas.length : 0;
+
+  const showPeople = type === 'all' || type === 'users';
+  const showPosts = type === 'all' || type === 'posts';
+  const showIdeas = type === 'all' || type === 'ideas';
+  const discoverIsEmpty =
+    discover !== null &&
+    (!showPeople || discover.people.length === 0) &&
+    (!showPosts || discover.posts.length === 0) &&
+    (!showIdeas || discover.ideas.length === 0);
 
   return (
     <div style={{ maxWidth: 640, margin: '0 auto' }}>
@@ -112,6 +137,96 @@ export default function SearchPage() {
             <SkeletonCard key={i} lines={1} avatar />
           ))}
         </div>
+      )}
+
+      {/* Nothing typed yet: this page used to be a blank box, which is the
+          worst possible answer to "что тут есть" — the person most likely to
+          open search is the one who doesn't know what to search for. */}
+      {!searching && !loading && (
+        <>
+          {discover === null && !discoverFailed && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <SkeletonCard key={i} lines={1} avatar />
+              ))}
+            </div>
+          )}
+          {discoverFailed && (
+            <p style={{ color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>
+              Рекомендации не загрузились — поиск при этом работает.
+            </p>
+          )}
+          {discoverIsEmpty && (
+            <EmptyState
+              icon="🌱"
+              title="Здесь пока пусто"
+              description="Платформа только разгоняется. Напиши первый пост — и попадёшь сюда."
+              action={
+                <Link href="/" className="z-btn-accent z-pop-on-active">
+                  В ленту
+                </Link>
+              }
+            />
+          )}
+          {discover && !discoverIsEmpty && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {showPeople && discover.people.length > 0 && (
+                <section>
+                  <h2 style={sectionTitleStyle}>Кого читать</h2>
+                  <SuggestedPeople people={discover.people} />
+                </section>
+              )}
+
+              {showPosts && discover.posts.length > 0 && (
+                <section>
+                  <h2 style={sectionTitleStyle}>Сейчас обсуждают</h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {discover.posts.map((p, i) => (
+                      <Link key={p.id} href={`/u/${p.author.id}`}>
+                        <Card hover className="z-animate-in" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <Avatar name={p.author.displayName} avatarUrl={p.author.avatarUrl} size={24} />
+                            <span style={{ fontSize: 'var(--z-fs-sm)', fontWeight: 700 }}>{p.author.displayName}</span>
+                            <span style={{ marginLeft: 'auto', fontSize: 'var(--z-fs-xs)', color: 'var(--z-text-faint)' }}>
+                              ♥ {p.likeCount} · 💬 {p.commentCount}
+                            </span>
+                          </div>
+                          <p style={{ margin: 0, color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>
+                            {p.body.length > 160 ? `${p.body.slice(0, 160)}…` : p.body}
+                          </p>
+                        </Card>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {showIdeas && discover.ideas.length > 0 && (
+                <section>
+                  <h2 style={sectionTitleStyle}>За эти идеи голосуют</h2>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {discover.ideas.map((idea, i) => (
+                      <Link key={idea.id} href={`/ideas/${idea.id}`}>
+                        <Card hover className="z-animate-in" style={{ animationDelay: `${Math.min(i, 8) * 40}ms` }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span className="z-badge">{IDEA_STATUS_LABELS[idea.status] ?? idea.status}</span>
+                            <span style={{ marginLeft: 'auto', fontSize: 'var(--z-fs-xs)', color: 'var(--z-accent)', fontWeight: 700 }}>
+                              ▲ {idea.voteCount} {plural(idea.voteCount, 'голос', 'голоса', 'голосов')}
+                            </span>
+                          </div>
+                          <div style={{ fontWeight: 700, marginTop: 6 }}>{idea.title}</div>
+                          <p style={{ margin: '4px 0 0', color: 'var(--z-text-muted)', fontSize: 'var(--z-fs-sm)' }}>
+                            {idea.description.length > 140 ? `${idea.description.slice(0, 140)}…` : idea.description}
+                          </p>
+                        </Card>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {results &&

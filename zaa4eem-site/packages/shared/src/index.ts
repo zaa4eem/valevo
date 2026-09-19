@@ -23,3 +23,5 @@ export * from './progress/referral-goals';
 export * from './progress/seasons';
 export * from './schemas/security';
 export * from './security/password-strength';
+export * from './schemas/discover';
+export * from './text/plural';

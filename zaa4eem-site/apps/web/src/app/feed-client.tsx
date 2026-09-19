@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { PaginatedPosts, Post } from '@zaa4eem/shared';
 
 import { api, ApiError } from '@/lib/api-client';
@@ -10,6 +10,7 @@ import { Card } from '@/components/Card';
 import { OnboardingCard } from '@/components/OnboardingCard';
 import { PremiumAvatar } from '@/components/PremiumAvatar';
 import { PostCard } from '@/components/PostCard';
+import { WhoToFollow } from '@/components/PeopleSuggestions';
 
 function Composer({ onPosted }: { onPosted: (post: Post) => void }) {
   const { user } = useAuth();
@@ -335,14 +336,20 @@ export default function HomeFeedClient({ initialPage }: { initialPage: Paginated
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {list.map((post, i) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              onChange={replacePost}
-              onDelete={removePostFromList}
-              onToggleFollowAuthor={toggleFollowAuthor}
-              index={i}
-            />
+            <Fragment key={post.id}>
+              <PostCard
+                post={post}
+                onChange={replacePost}
+                onDelete={removePostFromList}
+                onToggleFollowAuthor={toggleFollowAuthor}
+                index={i}
+              />
+              {/* Inline after the third post rather than pinned at the top:
+                  by then the reader has decided the feed is worth scrolling,
+                  which is the moment "кого читать" is an offer and not an
+                  obstacle. */}
+              {i === 2 && <WhoToFollow />}
+            </Fragment>
           ))}
           {nextCursor && (
             <button

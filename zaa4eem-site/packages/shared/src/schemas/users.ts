@@ -123,6 +123,13 @@ export const publicProfileSchema = z
     // 1..999, derived from stats.ideasAcceptedCount (capped) — null if they've
     // never had an idea accepted, so no badge renders at all.
     ideaAuthorLevel: z.number().int().min(1).max(999).nullable(),
+    // The XP level and the day streak, the same two numbers the owner sees
+    // in their own navbar. Public because they say "this person shows up",
+    // which is exactly what someone deciding whether to follow wants to know.
+    // Note this is a different thing from ideaAuthorLevel above — that one
+    // counts accepted ideas, this one counts activity of every kind.
+    level: z.number().int().min(1),
+    streakDays: z.number().int().nonnegative(),
     // Current #1 on a game's leaderboard, recomputed fresh on every profile
     // fetch — never stored, so it moves the instant someone else takes the spot.
     topGameBadges: z.array(topGameBadgeSchema),
