@@ -1,0 +1,17 @@
+# TV-борд на отдельном поддомене, а не по пути valevo.club/board — так проще:
+# tv_board.py отдаёт свои /static/... и /api/... от корня, и при проксировании
+# по пути пришлось бы переписывать все ссылки. Поддомен отдаёт весь трафик
+# как есть, без переписывания путей.
+server {
+    listen 80;
+    server_name board.valevo.club;
+
+    location / {
+        proxy_pass http://127.0.0.1:8010;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
