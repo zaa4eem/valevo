@@ -59,7 +59,7 @@ CLUB_MAP_PATH = Path(BASE_DIR) / "static" / "club_map.png"
 
 MAX_PLACES_PER_BOOKING = 3
 BOOKING_DAYS_AHEAD = 14
-DURATION_OPTIONS = (30, 60, 90, 120, 180)
+DURATION_OPTIONS = (60, 90, 120, 180)
 OPEN_TIME = time(12, 0)
 CLOSE_TIME = time(0, 0)  # 00:00 следующего дня
 BLOCKING_STATUSES = ("pending_admin", "creating", "confirmed", "user_confirmed", "cancelling", "cancellation_failed", "reconciliation_required")
@@ -825,10 +825,10 @@ def _time_keyboard(selected_date: date) -> InlineKeyboardMarkup:
 
 
 def _duration_keyboard() -> InlineKeyboardMarkup:
-    labels = {30: "30 мин", 60: "1 час", 90: "1,5 часа", 120: "2 часа", 180: "3 часа"}
+    labels = {60: "1 час", 90: "1,5 часа", 120: "2 часа", 180: "3 часа"}
     buttons = [InlineKeyboardButton(text=labels[x], callback_data=f"bk:duration:{x}") for x in DURATION_OPTIONS]
     return InlineKeyboardMarkup(
-        inline_keyboard=[buttons[:3], buttons[3:], [InlineKeyboardButton(text="❌ Отмена", callback_data="bk:cancel")]]
+        inline_keyboard=[buttons[:2], buttons[2:], [InlineKeyboardButton(text="❌ Отмена", callback_data="bk:cancel")]]
     )
 
 
