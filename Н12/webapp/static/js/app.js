@@ -4,6 +4,7 @@ tg?.ready(); tg?.expand();
 const view = document.querySelector('#view');
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const rub = value => new Intl.NumberFormat('ru-RU', {style:'currency',currency:'RUB',minimumFractionDigits:0,maximumFractionDigits:2}).format(Number(value || 0)/100);
+const diamonds = value => `${new Intl.NumberFormat('ru-RU',{minimumFractionDigits:0,maximumFractionDigits:2}).format(Number(value || 0))} 💎`;
 const row = (label,value) => `<div class="row"><span>${label}</span><b>${value}</b></div>`;
 const button = (label,screen,cls='secondary') => `<button class="${cls}" data-go="${screen}">${label}</button>`;
 let me, current = 'home', navigation = 0, booking = null;
@@ -60,7 +61,7 @@ async function profile() {
     :`<div class="progress-label"><span>Уровень <b>${rank.level}</b>/${rank.total_levels}</span><span>максимальный уровень</span></div><div class="progress"><i style="width:100%"></i></div>`;
 
   const clubCard=d.club
-    ?`<div class="card"><h2>Клуб</h2><div class="stat-grid"><div><span class="n">${esc(d.club.visits)}</span><span class="l">визита</span></div><div><span class="n">${esc(d.club.hours_text)}</span><span class="l">в клубе</span></div><div><span class="n money">${rub(Math.round(d.club.bonus_balance*100))}</span><span class="l">Valevo Bonus</span></div></div></div>`
+    ?`<div class="card"><h2>Клуб</h2><div class="stat-grid"><div><span class="n">${esc(d.club.visits)}</span><span class="l">визита</span></div><div><span class="n">${esc(d.club.hours_text)}</span><span class="l">в клубе</span></div><div><span class="n money">${diamonds(d.club.bonus_balance)}</span><span class="l">Valevo Bonus</span></div></div></div>`
     :`<div class="card"><h2>Клуб</h2><p class="muted">${d.club_error?'Клубные данные временно недоступны.':'Профиль синхронизируется с клубной системой автоматически.'}</p></div>`;
 
   const a=d.achievements;
@@ -77,7 +78,7 @@ async function profile() {
 
   return `<h1>Карточка пилота</h1><div class="card gold"><div class="rank-hero"><div class="rank-emoji">${esc(rank.emoji)}</div><div class="rank-id"><b>${esc(p.display_name||p.username)}</b><span>${esc(rank.title)}${p.pilot_number?' · №'+esc(p.pilot_number):''}</span></div></div>${rankProgress}${levelProgress}${row('Телефон',esc(d.phone||'—'))}</div>${clubCard}${achievementsCard}${classCard}${badgesCard}${button('Изменить имя','nickname')}${button('Мои заезды','results')}${button('Отправить время круга','submitlap')}`;
 }
-async function referrals() { const d=await api('/api/referrals'); return `<h1>Пригласи друга</h1><div class="card gold"><div class="number">${rub(d.bonus*100)} + ${rub(d.bonus*100)}</div><p>Друг регистрируется по вашей ссылке — вы оба получаете Valevo Bonus.</p><p class="link">${esc(d.link)}</p><button class="primary" id="copy" data-link="${esc(d.link)}">Скопировать ссылку</button></div><div class="card">${row('Приглашено',esc(d.stats.invited))}${row('Получено',rub(d.stats.earned*100))}</div>`; }
+async function referrals() { const d=await api('/api/referrals'); return `<h1>Пригласи друга</h1><div class="card gold"><div class="number">${diamonds(d.bonus)} + ${diamonds(d.bonus)}</div><p>Друг регистрируется по вашей ссылке — вы оба получаете Valevo Bonus.</p><p class="link">${esc(d.link)}</p><button class="primary" id="copy" data-link="${esc(d.link)}">Скопировать ссылку</button></div><div class="card">${row('Приглашено',esc(d.stats.invited))}${row('Получено',diamonds(d.stats.earned))}</div>`; }
 let rouletteData, spinController;
 const prizeCell=p=>`<div class="reel-cell"><span>${esc(p.emoji)}</span><b>${esc(p.title)}</b></div>`;
 function getSpinController(){
@@ -93,7 +94,7 @@ function getSpinController(){
 }
 async function roulette() {
   rouletteData=await api('/api/roulette');const d=rouletteData,c=getSpinController();
-  return `<h1>Рулетка призов</h1><p class="muted">Используйте Valevo Bonus — выигрывайте бонусы и рейтинг.</p><div class="card gold roulette-card"><div id="roulette-balance">${row('Valevo Bonus',rub(d.balance*100))}</div><div class="reel-window" id="reel-window" aria-hidden="true"><div class="reel-pointer"></div><div class="reel-strip" id="reel-strip">${d.prizes.slice(0,5).map(prizeCell).join('')}</div></div><div id="prize-result" role="status" aria-live="polite"></div><button class="primary" id="spin">${c.recovering?'Проверить предыдущий спин':`Крутить за ${rub(d.spin_cost*100)}`}</button><p class="muted spin-help">Стоимость одного спина — ${rub(d.spin_cost*100)} бонусами.</p></div><h2>Возможные призы</h2><div class="prizes">${d.prizes.map(p=>`<div class="prize">${esc(p.emoji)} ${esc(p.title)}</div>`).join('')}</div>`;
+  return `<h1>Рулетка призов</h1><p class="muted">Используйте Valevo Bonus — выигрывайте бонусы и рейтинг.</p><div class="card gold roulette-card"><div id="roulette-balance">${row('Valevo Bonus',diamonds(d.balance))}</div><div class="reel-window" id="reel-window" aria-hidden="true"><div class="reel-pointer"></div><div class="reel-strip" id="reel-strip">${d.prizes.slice(0,5).map(prizeCell).join('')}</div></div><div id="prize-result" role="status" aria-live="polite"></div><button class="primary" id="spin">${c.recovering?'Проверить предыдущий спин':`Крутить за ${diamonds(d.spin_cost)}`}</button><p class="muted spin-help">Стоимость одного спина — ${diamonds(d.spin_cost)}.</p></div><h2>Возможные призы</h2><div class="prizes">${d.prizes.map(p=>`<div class="prize">${esc(p.emoji)} ${esc(p.title)}</div>`).join('')}</div>`;
 }
 function bindRoulette(){
   const btn=document.querySelector('#spin'),holder=document.querySelector('#prize-result'),strip=document.querySelector('#reel-strip'),viewport=document.querySelector('#reel-window'),balance=document.querySelector('#roulette-balance'),catalog=rouletteData.prizes;
@@ -108,7 +109,7 @@ function bindRoulette(){
       if(!btn.isConnected)return;
       const status=result.prize_status==='queued'?'Приз ожидает начисления. Повторно крутить для получения не нужно.':result.prize_status==='failed'?'Приз зафиксирован, но начисление не завершено. Обратитесь к администратору.':'Приз начислен!';
       holder.innerHTML=`<div class="spin-win"><span>${esc(result.emoji)}</span><h2>${esc(result.title)}</h2><p>${status}</p></div>`;
-      balance.innerHTML=row('Valevo Bonus',result.balance==null?'Обновляется':rub(result.balance*100));
+      balance.innerHTML=row('Valevo Bonus',result.balance==null?'Обновляется':diamonds(result.balance));
       getSpinController().acknowledge();
       tg?.HapticFeedback?.notificationOccurred(result.prize_status==='ok'?'success':'warning');
     } catch(error) {

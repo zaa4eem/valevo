@@ -107,7 +107,7 @@ async def _close_weekcup_locked(bot):
         elif place == 2:
             bonus_amount = 1000
 
-            report_lines.append(f"🥈 {username} — {lap_time} — +1000 ₽ Valevo Bonus")
+            report_lines.append(f"🥈 {username} — {lap_time} — +1000 💎 Valevo Bonus")
 
             if telegram_id:
                 await add_bonus_wallet_entry(
@@ -133,7 +133,7 @@ async def _close_weekcup_locked(bot):
                         telegram_id,
                         "🥈 <b>Поздравляем!</b>\n\n"
                         "Ты занял <b>2 место</b> в недельном турнире Week CUP.\n\n"
-                        "На твою бонусную карту будет начислено <b>1000 бонусных рублей</b>.\n\n"
+                        "На твою бонусную карту будет начислено <b>1000 💎 Valevo Bonus</b>.\n\n"
                         "Спасибо за участие! 🏁"
                     )
                 except Exception as exc:
@@ -142,7 +142,7 @@ async def _close_weekcup_locked(bot):
         elif place == 3:
             bonus_amount = 750
 
-            report_lines.append(f"🥉 {username} — {lap_time} — +750 ₽ Valevo Bonus")
+            report_lines.append(f"🥉 {username} — {lap_time} — +750 💎 Valevo Bonus")
 
             if telegram_id:
                 await add_bonus_wallet_entry(
@@ -168,7 +168,7 @@ async def _close_weekcup_locked(bot):
                         telegram_id,
                         "🥉 <b>Поздравляем!</b>\n\n"
                         "Ты занял <b>3 место</b> в недельном турнире Week CUP.\n\n"
-                        "На твою бонусную карту будет начислено <b>750 бонусных рублей</b>.\n\n"
+                        "На твою бонусную карту будет начислено <b>750 💎 Valevo Bonus</b>.\n\n"
                         "Спасибо за участие! 🏁"
                     )
                 except Exception as exc:

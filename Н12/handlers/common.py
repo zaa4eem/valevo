@@ -311,11 +311,11 @@ async def referral_invite(message: Message):
     link = f"https://t.me/{me.username}?start=ref_{message.from_user.id}"
     await message.answer(
         "🎁 <b>ПРИГЛАСИ ДРУГА</b>\n\n"
-        f"За друга, который зарегистрируется по вашей ссылке, <b>вы оба получите по {REFERRAL_BONUS_RUB:g} ₽ Valevo Bonus</b>.\n"
+        f"За друга, который зарегистрируется по вашей ссылке, <b>вы оба получите по {REFERRAL_BONUS_RUB:g} 💎 Valevo Bonus</b>.\n"
         "Это примерно 30 минут игры на симуляторе.\n\n"
         f"🔗 <code>{link}</code>\n\n"
         f"Приглашено: <b>{stats['invited']}</b>\n"
-        f"Получено: <b>{stats['earned']:g} ₽</b>"
+        f"Получено: <b>{stats['earned']:g} 💎</b>"
     )
 
 
@@ -375,7 +375,7 @@ async def _build_profile_text(user_id: int, fallback_username: str | None) -> st
                 "🏟 <b>КЛУБ</b>\n"
                 f"📅 Визитов: <b>{visits}</b>\n"
                 f"⏱ Время в клубе: <b>{format_hours(total_hours)}</b>\n"
-                f"💎 Бонусный счёт: <b>{bonus_balance:.2f} ₽</b>"
+                f"💎 Бонусный счёт: <b>{bonus_balance:.2f} 💎</b>"
             )
         except Exception as exc:
             logger.warning("YCLIENTS profile data unavailable for %s: %s", user_id, exc)

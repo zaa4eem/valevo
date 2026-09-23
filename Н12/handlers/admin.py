@@ -429,7 +429,7 @@ async def search_pilot_by_number(message: Message, state: FSMContext):
         f"🏎 Номер: #{pilot['pilot_number']}\n"
         f"📱 {pilot['phone']}\n"
         f"📈 Рейтинг: {pilot['rating']}\n"
-        f"🎁 Бонусный счёт: {bonus_balance:.2f} ₽"
+        f"🎁 Бонусный счёт: {bonus_balance:.2f} 💎"
     )
 
     await message.answer(
@@ -711,7 +711,7 @@ async def pilot_card(callback: CallbackQuery):
         f"🏎 Номер: #{pilot.get('pilot_number', '—')}\n"
         f"📱 {pilot.get('phone', '—')}\n"
         f"📈 Рейтинг: {pilot.get('rating', 0)}\n"
-        f"🎁 Бонусный счёт: {bonus_balance:.2f} ₽")
+        f"🎁 Бонусный счёт: {bonus_balance:.2f} 💎")
     await callback.message.edit_text(text, reply_markup=pilot_manage_keyboard(tid))
 
 @router.callback_query(F.data == "back_pilots")
@@ -789,7 +789,7 @@ async def balance_plus_start(callback: CallbackQuery, state: FSMContext):
     tid = int(callback.data.split("_")[2])
     await state.update_data(balance_tid=tid, balance_action="+")
     await state.set_state(BalanceAction.waiting_for_amount)
-    await callback.message.edit_text("🎁 Введите сумму для начисления на бонусный счёт Valevo Bonus (в рублях):")
+    await callback.message.edit_text("🎁 Введите сумму для начисления на бонусный счёт Valevo Bonus (в 💎):")
 
 @router.callback_query(F.data.startswith("balance_minus_"))
 async def balance_minus_start(callback: CallbackQuery, state: FSMContext):
@@ -800,7 +800,7 @@ async def balance_minus_start(callback: CallbackQuery, state: FSMContext):
     tid = int(callback.data.split("_")[2])
     await state.update_data(balance_tid=tid, balance_action="-")
     await state.set_state(BalanceAction.waiting_for_amount)
-    await callback.message.edit_text("🎁 Введите сумму для списания с бонусного счёта Valevo Bonus (в рублях):")
+    await callback.message.edit_text("🎁 Введите сумму для списания с бонусного счёта Valevo Bonus (в 💎):")
 
 @router.message(BalanceAction.waiting_for_amount)
 async def balance_amount(message: Message, state: FSMContext):
@@ -854,15 +854,15 @@ async def balance_amount(message: Message, state: FSMContext):
         await message.answer(
             f"{header('✅', 'Бонусный счёт обновлён')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
-            f"Операция: {operation} {abs(delta):.2f} ₽\n"
-            f"Текущий бонусный счёт: {float(result.get('balance') or 0):.2f} ₽"
+            f"Операция: {operation} {abs(delta):.2f} 💎\n"
+            f"Текущий бонусный счёт: {float(result.get('balance') or 0):.2f} 💎"
         )
         if delta > 0:
             try:
                 await message.bot.send_message(
                     tid,
                     (
-                        f"🏆 На ваш бонусный счёт Valevo начислено +{amount:g}₽\n\n"
+                        f"🏆 На ваш бонусный счёт Valevo начислено +{amount:g}💎\n\n"
                         "Баланс уже доступен и может быть использован для заездов в клубе.\n\n"
                         "📈 Продолжайте подниматься в рейтинге пилотов, участвуйте в сезоне и занимайте ТОП, "
                         "чтобы получать ещё больше бонусов и наград.\n\n"
@@ -875,7 +875,7 @@ async def balance_amount(message: Message, state: FSMContext):
         await message.answer(
             f"{header('⚠️', 'Операция в очереди')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
-            f"Сумма: {delta:+.2f} ₽\n"
+            f"Сумма: {delta:+.2f} 💎\n"
             f"Причина: {result.get('message', 'карта/синхронизация пока недоступна')}\n\n"
             "Бот сам повторит начисление, когда карта Valevo Bonus будет доступна."
         )
@@ -1674,8 +1674,8 @@ async def admin_close_weekcup_button(message: Message, state: FSMContext):
         "Будет выполнено:\n"
         "1. Зафиксирован TOP-3.\n"
         "2. 1 месту уйдёт сообщение про суперприз.\n"
-        "3. 2 месту будет начислено 1000 ₽.\n"
-        "4. 3 месту будет начислено 750 ₽.\n"
+        "3. 2 месту будет начислено 1000 💎.\n"
+        "4. 3 месту будет начислено 750 💎.\n"
         "5. Таблица Week CUP будет очищена.\n\n"
         "Остальные дисциплины не будут затронуты.",
         reply_markup=keyboard

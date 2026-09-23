@@ -39,7 +39,7 @@ async def _grant(referral_id: int, side: str, telegram_id: int, amount: float) -
         yclients_client_id=pilot.get("yclients_client_id"),
         source=source,
         amount=amount,
-        reason="Реферальная программа: по 350 ₽ другу и пригласившему",
+        reason="Реферальная программа: по 350 💎 другу и пригласившему",
         yclients_status="issued" if result.get("ok") else "queued",
         yclients_operation_id=result.get("pending_operation_id"),
     )
@@ -61,7 +61,7 @@ async def process_referral_registration(referred_id: int, referrer_id: int | Non
     referred_result = await _grant(referral_id, "referred", int(referred_id), REFERRAL_BONUS_RUB)
 
     if bot:
-        text = f"🎁 <b>Реферальный бонус!</b>\n\nНачислено <b>{REFERRAL_BONUS_RUB:g} ₽ Valevo Bonus</b>."
+        text = f"🎁 <b>Реферальный бонус!</b>\n\nНачислено <b>{REFERRAL_BONUS_RUB:g} 💎 Valevo Bonus</b>."
         for tid in (int(referrer_id), int(referred_id)):
             try:
                 await bot.send_message(tid, text)

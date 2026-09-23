@@ -12,20 +12,20 @@ from services.yclients_service import change_valevo_bonus, get_valevo_bonus_bala
 logger = logging.getLogger(__name__)
 SPIN_COST_RUB = 1000
 PRIZES = [
-    ("bonus_300","💶","300 ₽ на счёт","bonus",300,60),
-    ("bonus_500","💶","500 ₽ на счёт","bonus",500,90),
-    ("bonus_700","💶","700 ₽ на счёт","bonus",700,130),
-    ("bonus_800","💰","800 ₽ на счёт","bonus",800,150),
-    ("bonus_900","💰","900 ₽ на счёт","bonus",900,120),
-    ("bonus_1000","🔄","Возврат спина — 1000 ₽","bonus",1000,100),
-    ("bonus_1200","💎","1200 ₽ на счёт","bonus",1200,70),
-    ("bonus_1500","💎","1500 ₽ на счёт","bonus",1500,40),
-    ("bonus_1800","🔥","1800 ₽ на счёт","bonus",1800,20),
-    ("bonus_2200","🔥","2200 ₽ на счёт","bonus",2200,10),
-    ("bonus_2700","🌟","2700 ₽ на счёт","bonus",2700,5),
-    ("bonus_3500","🌟","3500 ₽ на счёт","bonus",3500,3),
-    ("bonus_5000","👑","5000 ₽ на счёт","bonus",5000,2),
-    ("bonus_8000","🎉","ДЖЕКПОТ — 8000 ₽","bonus",8000,1),
+    ("bonus_300","💶","300 💎 на счёт","bonus",300,60),
+    ("bonus_500","💶","500 💎 на счёт","bonus",500,90),
+    ("bonus_700","💶","700 💎 на счёт","bonus",700,130),
+    ("bonus_800","💰","800 💎 на счёт","bonus",800,150),
+    ("bonus_900","💰","900 💎 на счёт","bonus",900,120),
+    ("bonus_1000","🔄","Возврат спина — 1000 💎","bonus",1000,100),
+    ("bonus_1200","💎","1200 💎 на счёт","bonus",1200,70),
+    ("bonus_1500","💎","1500 💎 на счёт","bonus",1500,40),
+    ("bonus_1800","🔥","1800 💎 на счёт","bonus",1800,20),
+    ("bonus_2200","🔥","2200 💎 на счёт","bonus",2200,10),
+    ("bonus_2700","🌟","2700 💎 на счёт","bonus",2700,5),
+    ("bonus_3500","🌟","3500 💎 на счёт","bonus",3500,3),
+    ("bonus_5000","👑","5000 💎 на счёт","bonus",5000,2),
+    ("bonus_8000","🎉","ДЖЕКПОТ — 8000 💎","bonus",8000,1),
     ("rating_10","🔰","+10 рейтинга","rating",10,70),
     ("rating_20","🏎","+20 рейтинга","rating",20,50),
     ("rating_35","🥉","+35 рейтинга","rating",35,35),
@@ -72,7 +72,7 @@ async def _spin(telegram_id:int, request_key:str)->dict:
         except Exception as exc:
             raise RequestRejected("Не удалось проверить баланс. Попробуйте позже.") from exc
         if balance < SPIN_COST_RUB:
-            raise RequestRejected(f"Недостаточно средств: нужно {SPIN_COST_RUB} ₽, на счету {balance:g} ₽")
+            raise RequestRejected(f"Недостаточно средств: нужно {SPIN_COST_RUB} 💎, на счету {balance:g} 💎")
         code,emoji,title,kind,value,_=random.choices(PRIZES,weights=_WEIGHTS,k=1)[0]
         await record_selection(telegram_id, request_key, {'code':code,'emoji':emoji,'title':title,'kind':kind,'value':value,'prize_status':'unconfirmed','client_id':client_id})
         charge=await change_valevo_bonus(client_id,-SPIN_COST_RUB,title=f"Рулетка: списание за спин {request_key}")
