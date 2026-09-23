@@ -8,6 +8,7 @@ def _super_admin_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="👥 Пилоты"), KeyboardButton(text="⏱️ Установить время")],
             [KeyboardButton(text="➕ Добавить трассу"), KeyboardButton(text="➖ Удалить трассу")],
             [KeyboardButton(text="🗑 Удалить время"), KeyboardButton(text="🗑 Очистить таблицу")],
+            [KeyboardButton(text="🗑 Удалить время пилота")],
             [KeyboardButton(text="🏆 Закрыть Week CUP")],
             [KeyboardButton(text="🎯 Эталоны месяца")],
             [KeyboardButton(text="📢 Рассылка"), KeyboardButton(text="🔙 Назад")],

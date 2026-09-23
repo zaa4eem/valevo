@@ -1,3 +1,4 @@
+import html
 import json
 import asyncio
 import logging
@@ -35,7 +36,7 @@ from keyboards.admin_pilots import (
 )
 from database.db import (
     add_lap, delete_lap, get_pilot_by_username, get_all_pilots,
-    get_pilot_by_telegram_id, get_pilot_by_number,
+    get_pilot_by_telegram_id, get_pilot_by_number, get_pilot_laps,
     update_pilot_rating, update_pilot_number,
     clear_all_laps, get_db,
     add_track, remove_track, get_all_disciplines, get_tracks_for_discipline,
@@ -1155,6 +1156,172 @@ async def delete_result_cancel(callback: CallbackQuery):
         return
 
     await callback.message.edit_text("❌ Удаление времени отменено.")
+    await callback.answer()
+
+
+# ======================== УДАЛЕНИЕ ВРЕМЕНИ ПИЛОТА (ЛЮБАЯ ТРАССА) ========================
+# Отдельный инструмент от "🗑 Удалить время" выше: тот показывает только круги
+# на ТЕКУЩЕЙ ("актуальной") трассе дисциплины, поэтому записи на неверной
+# трассе (баг с "устройствами" по неправильной карте) там физически не видны.
+# Здесь — все круги пилота по всем дисциплинам и трассам без фильтра.
+DELETE_PILOT_LAPS_PAGE_SIZE = 8
+
+
+class DeletePilotLap(StatesGroup):
+    pilot_number = State()
+
+
+def _pilot_laps_keyboard(telegram_id: int, laps: list, page: int) -> InlineKeyboardMarkup:
+    total_pages = max(1, (len(laps) + DELETE_PILOT_LAPS_PAGE_SIZE - 1) // DELETE_PILOT_LAPS_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * DELETE_PILOT_LAPS_PAGE_SIZE
+    page_rows = laps[start:start + DELETE_PILOT_LAPS_PAGE_SIZE]
+
+    keyboard = []
+    for row in page_rows:
+        label = (
+            f"{row['discipline']} · {_short_button_name(row['track'], 16)} "
+            f"— {row['lap_time_text']}"
+        )
+        keyboard.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=f"delpilotlap_lap:{telegram_id}:{row['lap_id']}"
+            )
+        ])
+
+    navigation = []
+    if page > 0:
+        navigation.append(InlineKeyboardButton(
+            text="⬅️", callback_data=f"delpilotlap_page:{telegram_id}:{page - 1}"
+        ))
+    navigation.append(InlineKeyboardButton(
+        text=f"{page + 1}/{total_pages}", callback_data="delpilotlap_noop"
+    ))
+    if page + 1 < total_pages:
+        navigation.append(InlineKeyboardButton(
+            text="➡️", callback_data=f"delpilotlap_page:{telegram_id}:{page + 1}"
+        ))
+    keyboard.append(navigation)
+    keyboard.append([InlineKeyboardButton(text="❌ Закрыть", callback_data="delpilotlap_cancel")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+async def _pilot_label(telegram_id: int) -> str:
+    pilot = await get_pilot_by_telegram_id(telegram_id)
+    if not pilot:
+        return f"ID {telegram_id}"
+    name = pilot.get("display_name") or pilot.get("username") or "Пилот"
+    number = pilot.get("pilot_number")
+    return f"{name} (#{number})" if number else name
+
+
+async def _render_pilot_laps(telegram_id: int, page: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    laps = await get_pilot_laps(telegram_id)
+    label = html.escape(await _pilot_label(telegram_id))
+    if not laps:
+        return (
+            f"{header('🗑', 'Удаление времени пилота')}\n\n"
+            f"👤 Пилот: <b>{label}</b>\n\n"
+            "❌ У этого пилота нет сохранённых кругов.",
+            None,
+        )
+    text = (
+        f"{header('🗑', 'Удаление времени пилота')}\n\n"
+        f"👤 Пилот: <b>{label}</b>\n"
+        f"Всего записей: <b>{len(laps)}</b>\n\n"
+        "Сначала — самые последние. Нажмите на запись, чтобы удалить её сразу:"
+    )
+    return text, _pilot_laps_keyboard(telegram_id, laps, page)
+
+
+@router.message(F.text == "🗑 Удалить время пилота")
+async def delete_pilot_lap_start(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.clear()
+    await state.set_state(DeletePilotLap.pilot_number)
+    await message.answer(
+        f"{header('🗑', 'Удаление времени пилота')}\n\n"
+        "👤 Введите номер пилота:"
+    )
+
+
+@router.message(DeletePilotLap.pilot_number, F.text.regexp(r'^\d+$'))
+async def delete_pilot_lap_pilot_number(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    number = int(message.text.strip())
+    pilot = await get_pilot_by_number(number)
+    if not pilot:
+        await message.answer("❌ Пилот с таким номером не найден. Попробуйте ещё раз.")
+        return
+    await state.clear()
+    text, keyboard = await _render_pilot_laps(pilot["telegram_id"], page=0)
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.message(DeletePilotLap.pilot_number)
+async def delete_pilot_lap_pilot_number_invalid(message: Message):
+    await message.answer("❌ Введите корректный номер пилота (только цифры).")
+
+
+@router.callback_query(F.data.startswith("delpilotlap_page:"))
+async def delete_pilot_lap_change_page(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.answer()
+    _, telegram_id, page = callback.data.split(":", 2)
+    text, keyboard = await _render_pilot_laps(int(telegram_id), int(page))
+    await callback.message.edit_text(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "delpilotlap_noop")
+async def delete_pilot_lap_noop(callback: CallbackQuery):
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("delpilotlap_lap:"))
+async def delete_pilot_lap_confirm(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+
+    _, telegram_id, lap_id = callback.data.split(":", 2)
+    telegram_id = int(telegram_id)
+    lap_id = int(lap_id)
+
+    laps = await get_pilot_laps(telegram_id)
+    removed = next((row for row in laps if row["lap_id"] == lap_id), None)
+
+    await delete_lap(lap_id)
+    await callback.answer("Время удалено")
+
+    if removed:
+        label = html.escape(await _pilot_label(telegram_id))
+        await callback.message.answer(
+            f"{header('✅', 'Время удалено')}\n\n"
+            f"👤 {label}\n"
+            f"🏆 {removed['discipline']}\n"
+            f"🗺 {removed['track']}\n"
+            f"⏱ {removed['lap_time_text']}"
+        )
+
+    text, keyboard = await _render_pilot_laps(telegram_id, page=0)
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception:
+        await callback.message.answer(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "delpilotlap_cancel")
+async def delete_pilot_lap_cancel(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Доступ запрещён", show_alert=True)
+        return
+    await callback.message.edit_text("❌ Удаление времени пилота закрыто.")
     await callback.answer()
 
 

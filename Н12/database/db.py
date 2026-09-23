@@ -658,6 +658,28 @@ async def delete_lap(lap_id: int):
     await db.close()
 
 
+async def get_pilot_laps(telegram_id: int, limit: int = 100):
+    """Все сохранённые круги пилота по всем дисциплинам и трассам без каких-либо
+    фильтров по "актуальной" трассе — для ручной чистки записей на неверной
+    трассе, которые из-за этого не видны через обычное удаление по таблице."""
+    db = await get_db()
+    cursor = await db.execute(
+        '''SELECT l.id, d.name, l.track, l.lap_time_text, l.created_at
+           FROM laps l JOIN disciplines d ON d.id = l.discipline_id
+           WHERE l.telegram_id = ?
+           ORDER BY l.created_at DESC, l.id DESC
+           LIMIT ?''',
+        (telegram_id, limit)
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+    await db.close()
+    return [
+        {"lap_id": r[0], "discipline": r[1], "track": r[2], "lap_time_text": r[3], "created_at": r[4]}
+        for r in rows
+    ]
+
+
 async def get_disciplines_with_current_results():
     """Возвращает дисциплины, у которых есть хотя бы один результат.
 
