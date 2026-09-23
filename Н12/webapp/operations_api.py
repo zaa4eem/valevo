@@ -8,11 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from database import db
-from data.tournament import CLASS_LADDER
+from data.tournament import CLASS_LADDER, canonical_class_name
 from handlers.common import sanitize_pilot_name
 from services.achievements import check_achievements_after_lap
 from services import miniapp_laps
-from services.tournament import check_and_process_promotion, month_bounds
+from services.tournament import check_and_process_promotion, month_bounds, active_track_for_class
 from utils.time_parser import time_to_ms
 
 logger = logging.getLogger(__name__)
@@ -95,14 +95,23 @@ def create_operations_router(current_user):
     async def disciplines(_user=Depends(current_user)):
         names = await db.get_all_disciplines()
         month_key, _, _ = month_bounds()
-        return {'disciplines': [{'name': name, 'tracks': await db.get_tracks_for_discipline(name)} for name in names],
+        return {'disciplines': [{'name': name, 'tracks': await db.get_tracks_for_discipline(name),
+                                  'is_ladder': canonical_class_name(name) in CLASS_LADDER} for name in names],
                 'month_key': month_key, 'benchmarks': await db.get_all_class_benchmarks(month_key)}
 
     @router.post('/admin/laps')
     async def lap(body: LapInput, _user=Depends(staff)):
         lap_ms = parse_lap(body.lap_time)
         await discipline_exists(body.discipline)
-        if body.track not in await db.get_tracks_for_discipline(body.discipline):
+        is_ladder, active_track = await active_track_for_class(body.discipline)
+        if is_ladder and not active_track:
+            raise HTTPException(409, 'Эталон на эту дисциплину в этом сезоне ещё не задан — '
+                                      'сначала задайте его в «Эталоны месяца»')
+        if is_ladder:
+            if body.track.strip().casefold() != active_track.casefold():
+                raise HTTPException(422, f'Для этой дисциплины в этом сезоне принимается только '
+                                          f'трасса эталона «{active_track}»')
+        elif body.track not in await db.get_tracks_for_discipline(body.discipline):
             raise HTTPException(422, 'Неизвестная трасса для дисциплины')
         pilot = await db.get_pilot_by_number(body.pilot_number)
         if not pilot:

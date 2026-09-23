@@ -19,6 +19,7 @@ from data.tournament import (
     previous_month_bounds as _previous_month_bounds,
     next_main_class,
 )
+from database import db as _db
 from database.db import (
     get_all_class_benchmarks,
     get_month_tournament_bests,
@@ -52,6 +53,35 @@ def month_bounds() -> tuple[str, str, str]:
         close_hour=SEASON_CLOSE_HOUR,
         close_minute=SEASON_CLOSE_MINUTE,
     )
+
+
+async def active_track_for_class(class_name: str) -> tuple[bool, str | None]:
+    """Единственная верная трасса дисциплины в идущем сейчас сезоне.
+
+    Возвращает (is_ladder_class, track):
+    - is_ladder_class=False — дисциплина вне турнирной лестницы (например,
+      Week CUP), эталона у неё в принципе нет — вызывающий код не должен
+      ограничивать выбор трассы.
+    - is_ladder_class=True, track=None — дисциплина в лестнице, но эталон на
+      этот сезон ещё не задан администратором. Записывать круги нельзя: без
+      привязки к конкретной трассе "официальной" тихо становится трасса
+      последнего отправленного круга (см. get_month_tournament_bests), и
+      предыдущие результаты на других трассах пропадают из зачёта.
+    - is_ladder_class=True, track=<строка> — единственная трасса, которую
+      можно предлагать пилоту/админу для записи времени в этом сезоне.
+    """
+    canonical = canonical_class_name(class_name)
+    if canonical not in CLASS_LADDER:
+        return False, None
+    month_key, _start, _end = month_bounds()
+    # Через объект модуля, а не прямым импортом функции — иначе тесты,
+    # подменяющие database.db.get_all_class_benchmarks (как это уже принято
+    # в tests/test_operations_api.py), эту подмену не увидят: прямой импорт
+    # связывает функцию на момент импорта модуля, до применения monkeypatch.
+    benchmarks = await _db.get_all_class_benchmarks(month_key)
+    track = (benchmarks.get(canonical) or {}).get("track")
+    track = str(track).strip() if track else None
+    return True, (track or None)
 
 
 def closing_season_bounds() -> tuple[str, str, str]:

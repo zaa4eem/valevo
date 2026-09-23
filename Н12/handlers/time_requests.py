@@ -21,6 +21,7 @@ from aiogram.types import (
 from config import SUPER_ADMIN_IDS, GROUP_ID, MOSCOW_TZ
 
 from data.tournament import is_class_unlocked
+from services.tournament import active_track_for_class
 
 from database.db import (
     add_lap,
@@ -390,6 +391,40 @@ async def user_time_request_discipline(
             show_alert=True
         )
         await state.clear()
+        return
+
+    is_ladder, active_track = await active_track_for_class(discipline)
+
+    if is_ladder and not active_track:
+        await state.clear()
+        text = (
+            f"🏆 Дисциплина: <b>{html.escape(discipline)}</b>\n\n"
+            "⚠️ Эталон на эту дисциплину в этом сезоне ещё не задан "
+            "администратором — заявки по ней пока не принимаются. "
+            "Попробуйте позже."
+        )
+        try:
+            await callback.message.edit_text(text)
+        except Exception:
+            await callback.message.answer(
+                text, reply_markup=get_menu(callback.from_user.id)
+            )
+        return
+
+    if is_ladder:
+        # Трасса одна — та, что задана эталоном сезона, выбирать нечего.
+        await state.update_data(discipline=discipline, track=active_track)
+        await state.set_state(TimeRequestForm.lap_time)
+        text = (
+            f"🏆 Дисциплина: <b>{html.escape(discipline)}</b>\n"
+            f"🗺 Трасса (эталон сезона): <b>{html.escape(active_track)}</b>\n\n"
+            "⏱ Введите время круга.\n"
+            "Пример: <code>01:18.565</code>"
+        )
+        try:
+            await callback.message.edit_text(text)
+        except Exception:
+            await callback.message.answer(text)
         return
 
     tracks = await get_tracks_for_discipline(

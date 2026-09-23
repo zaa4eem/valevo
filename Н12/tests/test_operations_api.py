@@ -49,6 +49,7 @@ def test_lap_validated_and_scored(setup, monkeypatch):
     user.is_super_admin = True
     monkeypatch.setattr(ops.db, 'get_all_disciplines', AsyncMock(return_value=['GT3']))
     monkeypatch.setattr(ops.db, 'get_tracks_for_discipline', AsyncMock(return_value=['Spa']))
+    monkeypatch.setattr(ops.db, 'get_all_class_benchmarks', AsyncMock(return_value={'GT3':{'track':'Spa'}}))
     monkeypatch.setattr(ops.db, 'get_pilot_by_number', AsyncMock(return_value={'telegram_id':55,'username':'pilot'}))
     save = AsyncMock(return_value=(9, True, None))
     monkeypatch.setattr(ops.miniapp_laps, 'save_lap', save)
@@ -83,7 +84,7 @@ def test_read_operations_scope_and_registration(setup, monkeypatch):
     monkeypatch.setattr(ops.db, 'get_all_disciplines', AsyncMock(return_value=['GT3']))
     monkeypatch.setattr(ops.db, 'get_tracks_for_discipline', AsyncMock(return_value=['Spa']))
     monkeypatch.setattr(ops.db, 'get_all_class_benchmarks', AsyncMock(return_value={}))
-    assert client.get('/api/disciplines').json()['disciplines'] == [{'name':'GT3','tracks':['Spa']}]
+    assert client.get('/api/disciplines').json()['disciplines'] == [{'name':'GT3','tracks':['Spa'],'is_ladder':True}]
 
 
 def test_super_benchmark_and_delete_validate_before_write(setup, monkeypatch):
@@ -111,6 +112,7 @@ def test_post_save_scoring_error_is_not_retryable_failure(setup, monkeypatch):
     user.is_admin = True
     monkeypatch.setattr(ops.db, 'get_all_disciplines', AsyncMock(return_value=['GT3']))
     monkeypatch.setattr(ops.db, 'get_tracks_for_discipline', AsyncMock(return_value=['Spa']))
+    monkeypatch.setattr(ops.db, 'get_all_class_benchmarks', AsyncMock(return_value={'GT3':{'track':'Spa'}}))
     monkeypatch.setattr(ops.db, 'get_pilot_by_number', AsyncMock(return_value={'telegram_id':55,'username':'pilot'}))
     monkeypatch.setattr(ops.miniapp_laps, 'save_lap', AsyncMock(return_value=(9, True, None)))
     monkeypatch.setattr(ops.miniapp_laps, 'finish_lap', AsyncMock())

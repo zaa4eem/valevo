@@ -17,7 +17,7 @@ from aiogram.types import (
 
 from config import ADMIN_IDS, SUPER_ADMIN_IDS, GROUP_ID
 from utils.message_style import DIVIDER, header
-from services.tournament import check_and_process_promotion, month_bounds, live_class_score
+from services.tournament import check_and_process_promotion, month_bounds, live_class_score, active_track_for_class
 from services.achievements import check_achievements_after_lap
 from services.standings_watch import refresh_standings_after_lap
 from services.phone_normalizer import normalize_phone_for_bot
@@ -456,6 +456,32 @@ async def choose_discipline(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     discipline = callback.data.split("_", 1)[1]
     await state.update_data(discipline=discipline)
+
+    is_ladder, active_track = await active_track_for_class(discipline)
+
+    if is_ladder and not active_track:
+        await state.clear()
+        text = (
+            f"⚠️ Эталон на дисциплину «{discipline}» в этом сезоне ещё не задан.\n\n"
+            "Сначала задайте его через «🎯 Эталоны месяца», затем можно будет вносить время."
+        )
+        try:
+            await callback.message.edit_text(text)
+        except Exception:
+            await callback.message.answer(text)
+        return
+
+    if is_ladder:
+        # Трасса одна — та, что задана эталоном сезона, выбирать нечего.
+        await state.update_data(track=active_track)
+        await state.set_state(AddLap.pilot_number)
+        text = f"🗺 Трасса (эталон сезона): {active_track}\n\n👤 Введите номер пилота:"
+        try:
+            await callback.message.edit_text(text)
+        except Exception:
+            await callback.message.answer(text)
+        return
+
     await state.set_state(AddLap.track)
     try:
         keyboard = await get_tracks_keyboard(discipline)
