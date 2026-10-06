@@ -15,6 +15,11 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./backups:/app/backups
+    # Нужен только в режиме BOT_MODE=webhook (см. .env.example) — тогда сюда
+    # стучится cloudflared с хоста. В режиме polling (по умолчанию) порт
+    # просто никем не используется, publish безвреден.
+    ports:
+      - "127.0.0.1:${WEBHOOK_LOCAL_PORT:-8088}:8088"
     stop_grace_period: 30s
 
   valevo-webapp:

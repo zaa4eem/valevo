@@ -8,6 +8,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import ErrorEvent
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from pytz import timezone
@@ -15,12 +17,18 @@ from handlers import booking, time_requests
 
 from config import (
     ADMIN_IDS,
+    BOT_MODE,
     BOT_TOKEN,
     MOSCOW_TZ,
     SEASON_CLOSE_DAY,
     SEASON_CLOSE_HOUR,
     SEASON_CLOSE_MINUTE,
     validate_required_settings,
+    WEBHOOK_BASE_URL,
+    WEBHOOK_LOCAL_HOST,
+    WEBHOOK_LOCAL_PORT,
+    WEBHOOK_PATH,
+    WEBHOOK_SECRET,
     YCLIENTS_SYNC_INTERVAL_MINUTES,
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
@@ -258,9 +266,16 @@ async def main() -> None:
         build_time = datetime.fromtimestamp(os.path.getmtime(exe_path)).strftime("%Y-%m-%d %H:%M:%S")
     except OSError:
         build_time = "неизвестно"
-    logger.info("Бот запущен (сборка от %s)", build_time)
+    logger.info("Бот запущен (сборка от %s, режим: %s)", build_time, BOT_MODE)
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        if BOT_MODE == "webhook":
+            await _run_webhook(bot, dp)
+        else:
+            # На случай, если раньше был выставлен webhook (ручным вызовом или
+            # предыдущим запуском в режиме webhook) — иначе getUpdates падает
+            # с TelegramConflictError: "can't use getUpdates while webhook is active".
+            await bot.delete_webhook(drop_pending_updates=False)
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         for task in background_tasks:
             task.cancel()
@@ -268,6 +283,39 @@ async def main() -> None:
         if scheduler.running:
             scheduler.shutdown(wait=False)
         await bot.session.close()
+
+
+async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
+    """Поднимает локальный HTTP-сервер и регистрирует вебхук в Telegram.
+
+    Сервер слушает только WEBHOOK_LOCAL_HOST:WEBHOOK_LOCAL_PORT (по умолчанию
+    127.0.0.1:8088) — наружу его отдаёт туннель (cloudflared), сам процесс
+    HTTPS не поднимает. secret_token проверяется aiogram на каждый запрос —
+    это официальный механизм Telegram для защиты вебхука, его должна
+    подтверждать каждая входящая заявка через заголовок
+    X-Telegram-Bot-Api-Secret-Token.
+    """
+    webhook_url = f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=WEBHOOK_SECRET,
+        allowed_updates=dp.resolve_used_update_types(),
+    )
+    logger.info("Webhook зарегистрирован: %s", webhook_url)
+
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, WEBHOOK_LOCAL_HOST, WEBHOOK_LOCAL_PORT)
+    await site.start()
+    logger.info("Webhook-сервер слушает %s:%s%s", WEBHOOK_LOCAL_HOST, WEBHOOK_LOCAL_PORT, WEBHOOK_PATH)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
 
 
 if __name__ == "__main__":

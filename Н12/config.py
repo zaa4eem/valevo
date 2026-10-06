@@ -125,6 +125,19 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip().rstrip("/")
 WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0").strip() or "0.0.0.0"
 WEBAPP_PORT = _int_env("WEBAPP_PORT", 8080)
 
+# Режим получения апдейтов от Telegram: "polling" (по умолчанию, бот сам
+# стучится к Telegram) или "webhook" (Telegram стучится к нам). Webhook не
+# занимает исходящее соединение постоянно, но требует HTTPS-адрес на одном
+# из портов, которые Telegram поддерживает для вебхуков (443, 80, 88, 8443) —
+# у нас это решается туннелем cloudflared, локально бот просто слушает
+# WEBHOOK_LOCAL_HOST:WEBHOOK_LOCAL_PORT по обычному HTTP.
+BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip().rstrip("/")
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/telegram-webhook").strip() or "/telegram-webhook"
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+WEBHOOK_LOCAL_HOST = os.getenv("WEBHOOK_LOCAL_HOST", "0.0.0.0").strip() or "0.0.0.0"
+WEBHOOK_LOCAL_PORT = _int_env("WEBHOOK_LOCAL_PORT", 8088)
+
 MOSCOW_TZ = os.getenv("MOSCOW_TZ", "Europe/Moscow")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 
@@ -156,5 +169,10 @@ def validate_required_settings() -> None:
         missing.append("BOT_TOKEN")
     if not STAFF_IDS:
         missing.append("ADMIN_IDS or SUPER_ADMIN_IDS")
+    if BOT_MODE == "webhook":
+        if not WEBHOOK_BASE_URL:
+            missing.append("WEBHOOK_BASE_URL")
+        if not WEBHOOK_SECRET:
+            missing.append("WEBHOOK_SECRET")
     if missing:
         raise RuntimeError("Не заполнены обязательные настройки: " + ", ".join(missing))
