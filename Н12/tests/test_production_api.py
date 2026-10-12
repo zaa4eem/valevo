@@ -1,5 +1,7 @@
+import asyncio
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
+import pytest
 from fastapi.testclient import TestClient
 from webapp import api
 
@@ -43,6 +45,25 @@ def test_ready_fails_when_database_is_unavailable(monkeypatch):
     response=TestClient(api.app).get('/api/ready')
     assert response.status_code==503
     assert 'private path' not in response.text
+
+
+def test_send_bot_message_requires_running_bot():
+    assert api._bot is None
+    with pytest.raises(RuntimeError):
+        asyncio.run(api.send_bot_message(123, 'hi'))
+
+
+def test_support_endpoint_wired_onto_shared_app(monkeypatch):
+    from webapp import operations_api as ops
+    client = TestClient(api.app)
+    api.app.dependency_overrides[api.current_user] = lambda: SimpleNamespace(id=42)
+    monkeypatch.setattr(ops.db, 'get_pilot_by_telegram_id', AsyncMock(return_value={'display_name': 'Racer', 'pilot_number': 7}))
+    monkeypatch.setattr(ops, 'SUPER_ADMIN_IDS', [999])
+    try:
+        response = client.post('/api/support', json={'message': 'Нужна помощь'})
+        assert response.status_code == 503
+    finally:
+        api.app.dependency_overrides.clear()
 
 
 def test_internal_errors_are_json_and_do_not_leak_details(monkeypatch):

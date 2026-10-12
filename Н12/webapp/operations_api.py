@@ -7,12 +7,16 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from config import SUPER_ADMIN_IDS
 from database import db
 from data.tournament import CLASS_LADDER, canonical_class_name
 from handlers.common import sanitize_pilot_name
 from services.achievements import check_achievements_after_lap
 from services import miniapp_laps
+from services.phone_normalizer import normalize_phone_for_bot
 from services.tournament import check_and_process_promotion, month_bounds, active_track_for_class
+from services.yclients_auto import auto_sync_pilot_with_yclients, issue_or_queue_valevo_bonus
+from services.yclients_service import get_valevo_bonus_balance
 from utils.time_parser import time_to_ms
 
 logger = logging.getLogger(__name__)
@@ -39,6 +43,23 @@ class BenchmarkInput(BaseModel):
     lap_time: str = Field(max_length=20)
 
 
+class PilotUpdate(BaseModel):
+    telegram_id: int
+    pilot_number: int = Field(gt=0)
+    phone: str = Field(min_length=5, max_length=20)
+
+
+class BalanceOperation(BaseModel):
+    telegram_id: int
+    amount: float = Field(gt=0)
+    action: str = Field(pattern=r'^(credit|debit)$')
+    comment: str = Field(min_length=1, max_length=300)
+
+
+class SupportMessage(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+
+
 def parse_lap(value: str) -> int:
     try:
         result = time_to_ms(value)
@@ -49,8 +70,13 @@ def parse_lap(value: str) -> int:
         raise HTTPException(422, 'Введите положительное время круга, например 01:18.565') from exc
 
 
-def create_operations_router(current_user):
+def create_operations_router(current_user, send_message=None):
     router = APIRouter(prefix='/api')
+
+    async def notify(chat_id: int, text: str) -> None:
+        if send_message is None:
+            raise RuntimeError('notifications unavailable')
+        await send_message(chat_id, text)
 
     def staff(user=Depends(current_user)):
         if not (user.is_admin or user.is_super_admin):
@@ -142,8 +168,99 @@ def create_operations_router(current_user):
     @router.get('/super/pilots')
     async def pilots(pilot_number: int = Query(gt=0), _user=Depends(super_admin)):
         pilot = await db.get_pilot_by_number(pilot_number)
-        fields = ('telegram_id', 'username', 'display_name', 'pilot_number', 'phone', 'rating', 'current_class')
-        return {'pilots': [{key: pilot.get(key) for key in fields}] if pilot else []}
+        if not pilot:
+            return {'pilots': []}
+        fields = ('telegram_id', 'username', 'display_name', 'pilot_number', 'phone', 'rating')
+        data = {key: pilot.get(key) for key in fields}
+        data['current_class'] = await db.get_pilot_class(pilot['telegram_id'])
+        balance = 0.0
+        if pilot.get('yclients_client_id'):
+            try:
+                balance = float(await get_valevo_bonus_balance(pilot['yclients_client_id']) or 0)
+            except Exception:
+                logger.exception('Failed to load bonus balance for pilot %s', pilot['telegram_id'])
+        data['bonus_balance'] = round(balance, 2)
+        return {'pilots': [data]}
+
+    @router.patch('/super/pilots')
+    async def update_pilot(body: PilotUpdate, _user=Depends(super_admin)):
+        phone = normalize_phone_for_bot(body.phone)
+        if not phone:
+            raise HTTPException(422, 'Введите корректный российский номер телефона')
+        ok, reason = await db.update_pilot_contact(body.telegram_id, body.pilot_number, phone)
+        if not ok:
+            detail = {
+                'number_taken': (409, 'Этот номер уже занят другим пилотом'),
+                'phone_taken': (409, 'Этот телефон уже привязан к другому пилоту'),
+                'not_found': (404, 'Пилот не найден'),
+            }.get(reason, (409, 'Не удалось сохранить изменения, попробуйте ещё раз'))
+            raise HTTPException(*detail)
+        return {'ok': True, 'pilot_number': body.pilot_number, 'phone': phone}
+
+    @router.post('/super/balance')
+    async def balance_operation(body: BalanceOperation, user=Depends(super_admin)):
+        pilot = await db.get_pilot_by_telegram_id(body.telegram_id)
+        if not pilot:
+            raise HTTPException(404, 'Пилот не найден')
+        if not pilot.get('yclients_client_id'):
+            try:
+                await auto_sync_pilot_with_yclients(body.telegram_id, pilot.get('phone'), pilot.get('username'))
+                pilot = await db.get_pilot_by_telegram_id(body.telegram_id)
+            except Exception:
+                logger.exception('Auto sync before bonus failed for %s', body.telegram_id)
+
+        delta = body.amount if body.action == 'credit' else -body.amount
+        operation = 'Начисление' if delta > 0 else 'Списание'
+        pilot_name = pilot.get('display_name') or pilot.get('username') or 'Пилот'
+        comment = body.comment.strip()
+
+        result = await issue_or_queue_valevo_bonus(
+            telegram_id=body.telegram_id,
+            client_id=pilot.get('yclients_client_id'),
+            amount=delta,
+            title=f'Valevo Bonus: {operation.lower()} администратором {user.id} (мини-апп) — {comment}',
+            source='admin_manual_miniapp',
+            phone=pilot.get('phone'),
+            name=pilot_name,
+        )
+
+        if result.get('ok'):
+            notify_text = (
+                f"🏆 На ваш бонусный счёт Valevo начислено +{body.amount:g}💎\n\nКомментарий: {comment}\n\n"
+                "Баланс уже доступен и может быть использован для заездов в клубе."
+                if delta > 0 else
+                f"🎟 С вашего бонусного счёта Valevo списано {body.amount:g}💎\n\nКомментарий: {comment}\n\n"
+                f"Текущий баланс: {float(result.get('balance') or 0):.2f}💎"
+            )
+            try:
+                await notify(body.telegram_id, notify_text)
+            except Exception:
+                logger.exception('Balance notify failed for pilot %s', body.telegram_id)
+            return {'ok': True, 'status': 'done', 'balance': round(float(result.get('balance') or 0), 2)}
+
+        if result.get('status') == 'queued':
+            return {'ok': True, 'status': 'queued',
+                    'message': result.get('message', 'карта/синхронизация пока недоступна')}
+
+        raise HTTPException(502, f"Ошибка YCLIENTS: {result.get('message', 'неизвестная ошибка')}")
+
+    @router.post('/support')
+    async def support(body: SupportMessage, user=Depends(current_user)):
+        pilot = await db.get_pilot_by_telegram_id(user.id)
+        name = (pilot or {}).get('display_name') or (pilot or {}).get('username') or f'ID {user.id}'
+        number = (pilot or {}).get('pilot_number')
+        who = f'{name} (#{number})' if number else name
+        text = f'📨 Обращение в поддержку из мини-аппа\n\nОт: {who}\nTelegram ID: {user.id}\n\n{body.message.strip()}'
+        delivered = False
+        for admin_id in SUPER_ADMIN_IDS:
+            try:
+                await notify(admin_id, text)
+                delivered = True
+            except Exception:
+                logger.exception('Support notify failed for admin %s', admin_id)
+        if not delivered:
+            raise HTTPException(503, 'Не удалось отправить сообщение. Попробуйте позже или напишите в бота напрямую.')
+        return {'ok': True}
 
     @router.post('/super/tracks')
     async def add_track(body: TrackInput, _user=Depends(super_admin)):

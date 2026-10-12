@@ -558,6 +558,31 @@ async def update_pilot_number(telegram_id, number):
     finally:
         await db.close()
 
+async def update_pilot_contact(telegram_id: int, pilot_number: int, phone: str) -> tuple[bool, str | None]:
+    """Обновляет номер пилота и телефон одним вызовом (для админ-редактирования в мини-аппе).
+
+    Возвращает (True, None) при успехе, иначе (False, причина):
+    'number_taken', 'phone_taken', 'not_found'.
+    """
+    db = await get_db()
+    try:
+        cursor = await db.execute('SELECT telegram_id FROM pilots WHERE pilot_number = ?', (pilot_number,))
+        row = await cursor.fetchone()
+        if row and int(row[0]) != int(telegram_id):
+            return False, "number_taken"
+        cursor = await db.execute('SELECT telegram_id FROM pilots WHERE phone = ?', (phone,))
+        row = await cursor.fetchone()
+        if row and int(row[0]) != int(telegram_id):
+            return False, "phone_taken"
+        cursor = await db.execute(
+            'UPDATE pilots SET pilot_number = ?, phone = ? WHERE telegram_id = ?',
+            (pilot_number, phone, telegram_id)
+        )
+        await db.commit()
+        return (True, None) if cursor.rowcount == 1 else (False, "not_found")
+    finally:
+        await db.close()
+
 async def update_display_name(telegram_id, new_display_name):
     """Возвращает True, если ник обновлён, иначе False (если ник занят).
 

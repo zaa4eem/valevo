@@ -36,7 +36,7 @@ if __name__ == '__main__':
     class Fixture(BaseHTTPRequestHandler):
         def do_GET(self):
             path = self.path.split('?')[0]
-            profile = dict(display_name='Тестовый пилот', pilot_number=42, rating=640, current_class='GT3')
+            profile = dict(telegram_id=100042, username='test_pilot', display_name='Тестовый пилот', pilot_number=42, phone='89991234567', rating=640, current_class='GT3')
             routes = {
                 '/api/me': dict(registered=True, is_admin=True, is_super_admin=True, profile=profile),
                 '/api/booking/options': dict(places=[dict(key=f'{kind}_{i}', title=f'{title} №{i+offset}', type=kind, hourly_rate_kopecks=rate, happy_hour_kopecks=happy) for kind,title,count,offset,rate,happy in [('static','Статика',4,2,70000,60000),('motion','Подвижка',2,0,100000,80000)] for i in range(1,count+1)], kids_rate_kopecks=50000, durations=[60,90,120,180],days_ahead=14,timezone='Europe/Moscow',open_hour=12,close_hour=24),
@@ -46,7 +46,7 @@ if __name__ == '__main__':
                 '/api/leaderboard': dict(overall=[],disciplines=[]),
                 '/api/roulette': dict(balance=5000,spin_cost=1000,prizes=[dict(code=f'rating_{i}',emoji='🏎️',title=f'+{i} рейтинга',kind='rating',value=i) for i in [10,20,35,50,75,120]]),
                 '/api/disciplines': dict(disciplines=[dict(name='GT3',tracks=['Monza'])],benchmarks={},month_key='2026-09'),
-                '/api/super/pilots': dict(pilots=[profile]),
+                '/api/super/pilots': dict(pilots=[{**profile, 'bonus_balance': 2500}]),
                 '/api/results': dict(total_results=1,podiums=0,gold=0,silver=0,bronze=0,last_result=None,disciplines_count=1),
                 '/api/admin/finance': dict(turnover_kopecks=300000,commission_kopecks=30000,club_kopecks=270000,booking_count=1,hours=3,daily=[dict(date='2026-09-13',turnover_kopecks=300000)]),
             }
@@ -63,7 +63,16 @@ if __name__ == '__main__':
             self.rfile.read(int(self.headers.get('Content-Length',0)))
             if self.path=='/api/roulette/spin':
                 self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(dict(code='rating_50',emoji='🏎️',title='+50 рейтинга',kind='rating',value=50,balance=4000,prize_status='ok')).encode());return
+            if self.path=='/api/super/balance':
+                self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(dict(ok=True,status='done',balance=3000)).encode());return
+            if self.path=='/api/support':
+                self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(dict(ok=True)).encode());return
             self.send_response(409);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'error':'Тестовая ошибка: заявка не создана'}).encode())
+        def do_PATCH(self):
+            self.rfile.read(int(self.headers.get('Content-Length',0)))
+            if self.path=='/api/super/pilots':
+                self.send_response(200);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps(dict(ok=True,pilot_number=42,phone='89991234567')).encode());return
+            self.send_response(404);self.send_header('Content-Type','application/json');self.end_headers();self.wfile.write(json.dumps({'error':'not found'}).encode())
     HTTPServer(('127.0.0.1', int(os.getenv('VALEVO_FIXTURE_PORT','8766'))),Fixture).serve_forever()
 
 def test_runtime_timezone_refunds_auth_and_role_guard():

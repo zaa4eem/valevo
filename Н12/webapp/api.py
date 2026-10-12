@@ -215,12 +215,17 @@ async def notify_super_admins(text: str) -> None:
         except Exception:
             logging.getLogger(__name__).exception('Kids-sim admin notify failed for %s', admin_id)
 
+async def send_bot_message(chat_id: int, text: str) -> None:
+    if _bot is None:
+        raise RuntimeError('Бот ещё запускается')
+    await _bot.send_message(chat_id=chat_id, text=text)
+
 from services.miniapp_booking import create_booking_router
 from webapp.finance_api import create_finance_router
 from webapp.operations_api import create_operations_router
 app.include_router(create_booking_router(current_user, notify_super_admins))
 app.include_router(create_finance_router(current_user))
-app.include_router(create_operations_router(current_user))
+app.include_router(create_operations_router(current_user, send_bot_message))
 
 app.mount('/assets',StaticFiles(directory=STATIC),name='assets')
 @app.get('/')

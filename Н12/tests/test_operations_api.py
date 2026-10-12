@@ -17,6 +17,16 @@ def setup(monkeypatch):
     return ops, user, TestClient(app)
 
 
+@pytest.fixture
+def setup_with_notify(monkeypatch):
+    from webapp import operations_api as ops
+    user = SimpleNamespace(id=11, is_admin=False, is_super_admin=False)
+    notify = AsyncMock()
+    app = FastAPI()
+    app.include_router(ops.create_operations_router(lambda: user, notify))
+    return ops, user, TestClient(app), notify
+
+
 def test_profile_scoped_and_duplicate(setup, monkeypatch):
     ops, user, client = setup
     monkeypatch.setattr(ops.db, 'get_pilot_by_telegram_id', AsyncMock(return_value={'username':'pilot'}))
@@ -121,6 +131,92 @@ def test_post_save_scoring_error_is_not_retryable_failure(setup, monkeypatch):
     assert response.status_code == 200
     assert response.json()['lap_id'] == 9
     assert response.json()['warning']
+
+
+def test_pilot_search_includes_balance_and_class(setup, monkeypatch):
+    ops, user, client = setup
+    user.is_super_admin = True
+    monkeypatch.setattr(ops.db, 'get_pilot_by_number', AsyncMock(return_value={
+        'telegram_id': 55, 'username': 'pilot', 'display_name': 'Racer', 'pilot_number': 42,
+        'phone': '89991234567', 'rating': 100, 'yclients_client_id': 7,
+    }))
+    monkeypatch.setattr(ops.db, 'get_pilot_class', AsyncMock(return_value='GT3'))
+    monkeypatch.setattr(ops, 'get_valevo_bonus_balance', AsyncMock(return_value=2500))
+    data = client.get('/api/super/pilots?pilot_number=42').json()
+    assert data['pilots'] == [{
+        'telegram_id': 55, 'username': 'pilot', 'display_name': 'Racer', 'pilot_number': 42,
+        'phone': '89991234567', 'rating': 100, 'current_class': 'GT3', 'bonus_balance': 2500.0,
+    }]
+    monkeypatch.setattr(ops.db, 'get_pilot_by_number', AsyncMock(return_value=None))
+    assert client.get('/api/super/pilots?pilot_number=43').json()['pilots'] == []
+
+
+def test_update_pilot_contact_validates_before_write(setup, monkeypatch):
+    ops, user, client = setup
+    body = {'telegram_id': 55, 'pilot_number': 42, 'phone': '89991234567'}
+    assert client.patch('/api/super/pilots', json=body).status_code == 403
+    user.is_super_admin = True
+    assert client.patch('/api/super/pilots', json={**body, 'phone': 'abc'}).status_code == 422
+    update = AsyncMock(return_value=(False, 'number_taken'))
+    monkeypatch.setattr(ops.db, 'update_pilot_contact', update)
+    assert client.patch('/api/super/pilots', json=body).status_code == 409
+    update.return_value = (False, 'not_found')
+    assert client.patch('/api/super/pilots', json=body).status_code == 404
+    update.return_value = (True, None)
+    response = client.patch('/api/super/pilots', json=body)
+    assert response.status_code == 200
+    assert update.await_args.args == (55, 42, '89991234567')
+
+
+def test_balance_operation_credits_and_notifies_pilot(setup_with_notify, monkeypatch):
+    ops, user, client, notify = setup_with_notify
+    user.is_super_admin = True
+    monkeypatch.setattr(ops.db, 'get_pilot_by_telegram_id', AsyncMock(return_value={
+        'telegram_id': 55, 'display_name': 'Racer', 'phone': '89991234567', 'yclients_client_id': 7,
+    }))
+    issue = AsyncMock(return_value={'ok': True, 'balance': 3000})
+    monkeypatch.setattr(ops, 'issue_or_queue_valevo_bonus', issue)
+    body = {'telegram_id': 55, 'amount': 500, 'action': 'credit', 'comment': 'приз за турнир'}
+    response = client.post('/api/super/balance', json=body)
+    assert response.status_code == 200
+    assert response.json() == {'ok': True, 'status': 'done', 'balance': 3000.0}
+    assert issue.await_args.kwargs['amount'] == 500
+    assert 'приз за турнир' in issue.await_args.kwargs['title']
+    notify.assert_awaited_once()
+    assert notify.await_args.args[0] == 55
+    assert 'приз за турнир' in notify.await_args.args[1]
+
+
+def test_balance_operation_queued_and_yclients_error(setup, monkeypatch):
+    ops, user, client = setup
+    user.is_super_admin = True
+    monkeypatch.setattr(ops.db, 'get_pilot_by_telegram_id', AsyncMock(return_value={
+        'telegram_id': 55, 'display_name': 'Racer', 'phone': None, 'yclients_client_id': None,
+    }))
+    monkeypatch.setattr(ops, 'auto_sync_pilot_with_yclients', AsyncMock(side_effect=RuntimeError('no link')))
+    body = {'telegram_id': 55, 'amount': 100, 'action': 'debit', 'comment': 'компенсация'}
+    monkeypatch.setattr(ops, 'issue_or_queue_valevo_bonus',
+                         AsyncMock(return_value={'ok': False, 'status': 'queued', 'message': 'нет карты'}))
+    queued = client.post('/api/super/balance', json=body)
+    assert queued.status_code == 200
+    assert queued.json() == {'ok': True, 'status': 'queued', 'message': 'нет карты'}
+    monkeypatch.setattr(ops, 'issue_or_queue_valevo_bonus',
+                         AsyncMock(return_value={'ok': False, 'status': 'yclients_error', 'message': 'сбой API'}))
+    failed = client.post('/api/super/balance', json=body)
+    assert failed.status_code == 502
+
+
+def test_support_broadcasts_to_admins_and_requires_delivery(setup_with_notify, monkeypatch):
+    ops, user, client, notify = setup_with_notify
+    monkeypatch.setattr(ops, 'SUPER_ADMIN_IDS', [100, 200])
+    monkeypatch.setattr(ops.db, 'get_pilot_by_telegram_id', AsyncMock(return_value={
+        'display_name': 'Racer', 'pilot_number': 42,
+    }))
+    response = client.post('/api/support', json={'message': 'Не вижу запись на сегодня'})
+    assert response.status_code == 200
+    assert notify.await_count == 2
+    notify.side_effect = RuntimeError('bot unavailable')
+    assert client.post('/api/support', json={'message': 'ещё раз'}).status_code == 503
 
 
 def test_lap_idempotency_atomic_replay_and_payload_conflict(tmp_path, monkeypatch):

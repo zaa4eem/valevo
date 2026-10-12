@@ -107,6 +107,7 @@ class ChangePilotPhone(StatesGroup):
 
 class BalanceAction(StatesGroup):
     waiting_for_amount = State()
+    waiting_for_comment = State()
 
 class ClearTableConfirm(StatesGroup):
     wait = State()
@@ -815,10 +816,26 @@ async def balance_amount(message: Message, state: FSMContext):
         await message.answer("❌ Введите положительное число.")
         return
 
+    await state.update_data(balance_amount=amount)
+    await state.set_state(BalanceAction.waiting_for_comment)
+    await message.answer("✏️ Добавьте комментарий к операции (за что начисление или списание). Пилот увидит этот текст в уведомлении:")
+
+
+@router.message(BalanceAction.waiting_for_comment)
+async def balance_comment(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    comment = (message.text or "").strip()
+    if not comment:
+        await message.answer("❌ Комментарий не может быть пустым. Напишите, за что начисление или списание.")
+        return
+
     data = await state.get_data()
     tid = data.get("balance_tid")
     action = data.get("balance_action")
-    if tid is None or action is None:
+    amount = data.get("balance_amount")
+    if tid is None or action is None or amount is None:
         await message.answer("❌ Данные операции потеряны. Откройте профиль пилота заново.")
         await state.clear()
         return
@@ -844,7 +861,7 @@ async def balance_amount(message: Message, state: FSMContext):
         telegram_id=tid,
         client_id=pilot.get("yclients_client_id"),
         amount=delta,
-        title=f"Valevo Bonus: {operation.lower()} администратором {message.from_user.id}",
+        title=f"Valevo Bonus: {operation.lower()} администратором {message.from_user.id} — {comment}",
         source="admin_manual",
         phone=pilot.get("phone"),
         name=pilot_name,
@@ -855,27 +872,35 @@ async def balance_amount(message: Message, state: FSMContext):
             f"{header('✅', 'Бонусный счёт обновлён')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
             f"Операция: {operation} {abs(delta):.2f} 💎\n"
+            f"Комментарий: {comment}\n"
             f"Текущий бонусный счёт: {float(result.get('balance') or 0):.2f} 💎"
         )
-        if delta > 0:
-            try:
-                await message.bot.send_message(
-                    tid,
-                    (
-                        f"🏆 На ваш бонусный счёт Valevo начислено +{amount:g}💎\n\n"
-                        "Баланс уже доступен и может быть использован для заездов в клубе.\n\n"
-                        "📈 Продолжайте подниматься в рейтинге пилотов, участвуйте в сезоне и занимайте ТОП, "
-                        "чтобы получать ещё больше бонусов и наград.\n\n"
-                        "Ждём вас на трассе 🏁"
-                    )
-                )
-            except Exception as exc:
-                logger.warning("Не удалось отправить уведомление пилоту %s: %s", tid, exc)
+        notify_text = (
+            (
+                f"🏆 На ваш бонусный счёт Valevo начислено +{amount:g}💎\n\n"
+                f"Комментарий: {comment}\n\n"
+                "Баланс уже доступен и может быть использован для заездов в клубе.\n\n"
+                "📈 Продолжайте подниматься в рейтинге пилотов, участвуйте в сезоне и занимайте ТОП, "
+                "чтобы получать ещё больше бонусов и наград.\n\n"
+                "Ждём вас на трассе 🏁"
+            )
+            if delta > 0 else
+            (
+                f"🎟 С вашего бонусного счёта Valevo списано {amount:g}💎\n\n"
+                f"Комментарий: {comment}\n\n"
+                f"Текущий баланс: {float(result.get('balance') or 0):.2f}💎"
+            )
+        )
+        try:
+            await message.bot.send_message(tid, notify_text)
+        except Exception as exc:
+            logger.warning("Не удалось отправить уведомление пилоту %s: %s", tid, exc)
     elif result.get("status") == "queued":
         await message.answer(
             f"{header('⚠️', 'Операция в очереди')}\n\n"
             f"👤 Пилот: {pilot_name}\n"
             f"Сумма: {delta:+.2f} 💎\n"
+            f"Комментарий: {comment}\n"
             f"Причина: {result.get('message', 'карта/синхронизация пока недоступна')}\n\n"
             "Бот сам повторит начисление, когда карта Valevo Bonus будет доступна."
         )
