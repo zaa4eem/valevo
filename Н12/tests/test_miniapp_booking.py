@@ -115,6 +115,18 @@ def test_invalid_places_cannot_be_stored(store, keys):
     asyncio.run(run())
 
 
+def test_no_cap_on_number_of_places_of_the_same_type(store):
+    async def run():
+        args = selection()
+        args['place_type'] = 'static'
+        args['place_keys'] = ['static_1', 'static_2', 'static_3', 'static_4']
+        ok, booking_id, error = await b._create_pending_booking(**args)
+        assert ok, error
+        booking = await b._fetch_booking(booking_id)
+        assert sorted(item['place_key'] for item in booking['items']) == ['static_1', 'static_2', 'static_3', 'static_4']
+    asyncio.run(run())
+
+
 def test_concurrent_bookings_only_one_claims_seats(store):
     async def run():
         first, second = await asyncio.gather(b._create_pending_booking(**selection()), b._create_pending_booking(**selection()))

@@ -11,7 +11,7 @@ from handlers import booking as b
 
 
 class BookingInput(BaseModel):
-    place_keys: list[str] = Field(min_length=1, max_length=3)
+    place_keys: list[str] = Field(min_length=1, max_length=len(b.BOOKING_PLACES))
     start_at: datetime
     duration_minutes: int
     idempotency_key: str = Field(min_length=8, max_length=128)

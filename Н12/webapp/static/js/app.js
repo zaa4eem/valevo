@@ -174,7 +174,7 @@ function bookingMarkup() {
  const motionSelected=b.selected.some(k=>b.options.places.find(p=>p.key===k)?.type==='motion');
  const motionToggle=`<p class="muted" style="margin:10px 0 6px">Хотите занять подвижную платформу, но кататься без движения — как на статике? Включите переключатель ниже.</p><button class="chip-toggle" id="bill-as-static" aria-pressed="${b.billAsStatic?'true':'false'}">${b.billAsStatic?'✓ ':''}Подвижка как статика</button>`;
  const toggleBlock=b.kidsSelected?'':`<div style="margin-top:10px">${motionToggle}</div>${!motionSelected&&b.billAsStatic?'<p class="muted">Применится, если выберете места подвижки.</p>':''}`;
- const seats=`<h2>Выберите места</h2><p class="muted">До 3 мест одного типа · статика ${rub(staticPlace.hourly_rate_kopecks)}/час · подвижка ${rub(motionPlace.hourly_rate_kopecks)}/час · детский сим ${rub(o.kids_rate_kopecks)}/час (не через YCLIENTS)</p>${happyBanner}<div class="floorplan">${zones}${seatCards}${kidsCard}</div>${toggleBlock}<div class="legend" style="margin-top:10px"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
+ const seats=`<h2>Выберите места</h2><p class="muted">Места одного типа · статика ${rub(staticPlace.hourly_rate_kopecks)}/час · подвижка ${rub(motionPlace.hourly_rate_kopecks)}/час · детский сим ${rub(o.kids_rate_kopecks)}/час (не через YCLIENTS)</p>${happyBanner}<div class="floorplan">${zones}${seatCards}${kidsCard}</div>${toggleBlock}<div class="legend" style="margin-top:10px"><span>Голубой — свободно</span><span>Золотой — выбрано</span></div>`;
  return `<div class="kicker">ВАШ ЗАЕЗД</div><h1>Бронирование</h1><div class="tabs"><button data-path="time" aria-pressed="${b.path==='time'}">Сначала дата и время</button><button data-path="seats" aria-pressed="${b.path==='seats'}">Сначала места</button></div>${b.path==='time'?schedule+seats:seats+schedule}<p id="availability" class="muted">Проверяем доступность…</p><div class="card gold" id="summary"></div><button class="primary" id="reserve" disabled>Отправить заявку</button><p class="muted">Заявка требует подтверждения клуба. Её статус появится в разделе «Мои бронирования».</p>`;
 }
 function bindBooking() {
@@ -186,7 +186,7 @@ function bindBooking() {
    if(key==='kids_static'){b.kidsSelected=!b.kidsSelected;if(b.kidsSelected)b.selected=[];b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();return;}
    const p=b.options.places.find(p=>p.key===key);
    if(b.selected.includes(key))b.selected=b.selected.filter(k=>k!==key);
-   else{if(b.kidsSelected)b.kidsSelected=false;if(b.selected.length>=3)return toast('Можно выбрать до 3 мест.');if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}
+   else{if(b.kidsSelected)b.kidsSelected=false;if(b.selected.length&&b.options.places.find(p=>p.key===b.selected[0]).type!==p.type)return toast('Выберите места одного типа.');b.selected.push(key);}
    b.key=crypto.randomUUID();updateBooking();
  });
  document.querySelector('#bill-as-static')?.addEventListener('click',()=>{b.billAsStatic=!b.billAsStatic;b.key=crypto.randomUUID();show(bookingMarkup());bindBooking();});

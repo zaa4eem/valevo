@@ -56,8 +56,6 @@ BOOKING_PLACES: dict[str, dict[str, Any]] = {
 }
 
 CLUB_MAP_PATH = Path(BASE_DIR) / "static" / "club_map.png"
-
-MAX_PLACES_PER_BOOKING = 3
 BOOKING_DAYS_AHEAD = 14
 DURATION_OPTIONS = (60, 90, 120, 180)
 OPEN_TIME = time(12, 0)
@@ -346,11 +344,11 @@ async def _create_pending_booking(
     idempotency_key: str | None = None,
     bill_as_static: bool = False,
 ) -> tuple[bool, int | None, str | None]:
-    if (not 1 <= len(place_keys) <= MAX_PLACES_PER_BOOKING
+    if (not place_keys
         or len(set(place_keys)) != len(place_keys)
         or place_type not in HOURLY_RATES
         or any(key not in BOOKING_PLACES or BOOKING_PLACES[key]['type'] != place_type for key in place_keys)):
-        return False, None, "Выберите до трёх разных мест одного типа"
+        return False, None, "Выберите разные места одного типа"
     # Подвижку можно забронировать по тарифу статики (место остаётся тем же физическим
     # юнитом — просто не будет двигаться). Обратное — бронировать статику по тарифу
     # подвижки — не имеет смысла и запросом не поддерживается.
@@ -1010,7 +1008,7 @@ async def booking_choose_type(callback: CallbackQuery, state: FSMContext) -> Non
 
     text = (
         "🖥 <b>Выберите конкретные места.</b>\n"
-        f"Можно выбрать от 1 до {MAX_PLACES_PER_BOOKING}.\n\n"
+        "Можно выбрать одно или несколько мест одного типа.\n\n"
         "На карте клуба номера должны совпадать с кнопками ниже."
     )
     keyboard = _places_keyboard(place_type, [])
@@ -1040,9 +1038,6 @@ async def booking_toggle_place(callback: CallbackQuery, state: FSMContext) -> No
     if key in selected:
         selected.remove(key)
     else:
-        if len(selected) >= MAX_PLACES_PER_BOOKING:
-            await callback.answer(f"Можно выбрать максимум {MAX_PLACES_PER_BOOKING} места", show_alert=True)
-            return
         selected.append(key)
     await state.update_data(selected_places=selected)
     await callback.answer()
