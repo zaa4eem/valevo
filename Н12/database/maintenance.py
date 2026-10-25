@@ -1,5 +1,6 @@
 import asyncio
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +33,16 @@ async def create_sqlite_backup(prefix: str = "valevo") -> Path:
         if extra.exists():
             shutil.copy2(extra, BACKUP_DIR / f"{extra.name}.{timestamp}")
     return target
+
+
+async def run_db_backup(keep_days: int = 14) -> None:
+    """Ежедневный бэкап + удаление копий старше keep_days дней."""
+    path = await create_sqlite_backup()
+    cutoff = time.time() - keep_days * 86400
+    for pattern in ("valevo_????????_??????.db", "valevo.db-*.*"):
+        for f in BACKUP_DIR.glob(pattern):
+            if f != path and f.stat().st_mtime < cutoff:
+                f.unlink()
 
 
 if __name__ == "__main__":

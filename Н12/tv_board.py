@@ -86,7 +86,7 @@ HTML_TEMPLATE = r"""
     --silver:#d7dee8;
     --bronze:#cd7f32;
     /* Карбоновая "плетёнка" — общая текстура-подложка для топ-5 общего зачёта:
-       два перекрёстных диагональных штриха, как на настоящих гоночных панелях. */
+       два перекрёстных диагональных штриха */
     --carbon:
         repeating-linear-gradient(45deg, rgba(255,255,255,.035) 0 3px, transparent 3px 7px),
         repeating-linear-gradient(-45deg, rgba(0,0,0,.18) 0 3px, transparent 3px 7px);

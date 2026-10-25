@@ -14,6 +14,7 @@ from services.achievements import check_achievements_after_lap
 from services import miniapp_laps
 from services.tournament import check_and_process_promotion, month_bounds
 from utils.time_parser import time_to_ms
+from utils.score_parser import is_score_discipline, parse_score
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,16 @@ class BenchmarkInput(BaseModel):
     class_name: str = Field(min_length=1, max_length=100)
     track: str = Field(min_length=1, max_length=200)
     lap_time: str = Field(max_length=20)
+
+
+def parse_lap_result(discipline: str, value: str) -> tuple[str, int]:
+    """Week CUP принимает баллы 0–100, остальные дисциплины — время круга."""
+    if is_score_discipline(discipline):
+        try:
+            return parse_score(value)
+        except ValueError as exc:
+            raise HTTPException(422, 'Введите баллы от 0 до 100, например 98.6') from exc
+    return value.strip(), parse_lap(value)
 
 
 def parse_lap(value: str) -> int:
@@ -100,7 +111,7 @@ def create_operations_router(current_user):
 
     @router.post('/admin/laps')
     async def lap(body: LapInput, _user=Depends(staff)):
-        lap_ms = parse_lap(body.lap_time)
+        lap_text, lap_ms = parse_lap_result(body.discipline, body.lap_time)
         await discipline_exists(body.discipline)
         if body.track not in await db.get_tracks_for_discipline(body.discipline):
             raise HTTPException(422, 'Неизвестная трасса для дисциплины')
@@ -111,7 +122,7 @@ def create_operations_router(current_user):
             lap_id, created, response = await miniapp_laps.save_lap(_user.id, body.idempotency_key,
                 dict(discipline=body.discipline, username=pilot.get('username'),
                      telegram_id=pilot['telegram_id'], track=body.track,
-                     lap_time_text=body.lap_time.strip(), lap_time_ms=lap_ms))
+                     lap_time_text=lap_text, lap_time_ms=lap_ms))
         except miniapp_laps.LapConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         if not created:

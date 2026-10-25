@@ -10,6 +10,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import ErrorEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from database.maintenance import run_db_backup
 from pytz import timezone
 from handlers import booking, time_requests
 
@@ -184,6 +185,17 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
+    if not scheduler.get_job("db_backup"):
+        scheduler.add_job(
+            run_db_backup,
+            CronTrigger(hour=23, minute=0, timezone=moscow_tz),
+            id="db_backup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
+        )
+
     from services.booking_notifications import process_notifications
     scheduler.add_job(process_notifications, 'interval', seconds=30, args=[bot],
                       id='booking_notifications', replace_existing=True,
@@ -192,7 +204,6 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.running:
         scheduler.start()
 
-    # Автосинхронизация не должна блокировать запуск бота.
     background_tasks = [
         asyncio.create_task(auto_sync_all_pilots(bot, notify_admin=True)),
         asyncio.create_task(process_pending_yclients_operations(bot)),
@@ -200,12 +211,6 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(booking.process_booking_reminders(bot)),
     ]
 
-    # Догоняем пропущенное закрытие, если бот был выключен в этот момент.
-    # Повторный запуск безопасен: награды защищены таблицей season_awards
-    # (плюс проверка по префиксу месяца для закрытий по прежней схеме), а
-    # релегация — флагом relegation_done:<сезон> в bot_settings. Раньше флага
-    # не было, и каждый перезапуск бота в день закрытия понижал ещё одну
-    # порцию пилотов поверх уже понижённых.
     close_moment_passed = (
         now.day > SEASON_CLOSE_DAY
         or (
@@ -232,10 +237,6 @@ async def main() -> None:
     tournament_migration = await apply_tournament_update()
     logger.info("Tournament v3 active: %s", tournament_migration)
 
-    # Разовый перенос эталонов в ключ текущего сезона. Сезон теперь считается
-    # от закрытия до закрытия, и после 20-го числа его ключ указывает на
-    # следующий месяц — без переноса эталоны, заданные по прежней схеме,
-    # оказались бы "не заданы" и обнулили бы баллы всех пилотов.
     try:
         carried = await carry_benchmarks_to_current_season()
         if carried:
