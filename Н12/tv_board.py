@@ -43,7 +43,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Меняя количество пунктов здесь, обязательно пересчитай @keyframes
 # carouselStep и --cycle-time ниже — они настроены именно на 7 шагов.
 DISPLAY_ORDER = [
-    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West",
+    {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Laguna Seca",
      "stage": "Этап 1", "stage_type": "main"},
     {"key": "BTCC", "aliases": ["BTCC"], "title": "BTCC", "subtitle": "",
      "stage": "Этап 2", "stage_type": "main"},
@@ -55,8 +55,8 @@ DISPLAY_ORDER = [
      "stage": "Доп. этап", "stage_type": "side"},
     {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Sebring",
      "stage": "Этап 4", "stage_type": "main"},
-    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "PEPE CUP",
-     "subtitle": "Sochi Short | Yaris", "stage": "Отдельный кубок", "stage_type": "event"},
+    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "DRIFT CUP",
+     "subtitle": " ", "stage": "Отдельный кубок", "stage_type": "event"},
 ]
 
 CAROUSEL_DUPLICATES = 4
@@ -1325,7 +1325,7 @@ function renderBoard(data, animate=true){
     const participants = (data.tournament && data.tournament.participants) || 0;
     const topItem = {
         key:"TOP",
-        title:"top rating 🏆",
+        title:"ТОП Турнира 🏆",
         subtitle:"",
         stage:"Бета тест",
         stage_type:"beta",
