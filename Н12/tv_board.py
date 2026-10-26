@@ -33,19 +33,6 @@ app = FastAPI(title="Valevo TV Board")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-# Лестница турнира — MX-5(этап1) -> GT500(этап2, +F4/ALL доп) -> DTM(этап3, +Touge
-# доп) -> GT3(этап4). Это ровно MAIN_SEQUENCE/SIDE_DISCIPLINES из
-# data/tournament.py — там же считаются очки/промоушен, так что порядок и
-# состав здесь обязаны совпадать с ней, а не жить отдельным списком (раньше
-# тут была "BTCC", которой в CLASS_LADDER уже нет — расхождение и привело к
-# правке). Все 7 пунктов (включая доп.дисциплины F4/ALL и Touge) крутятся в
-# общей карусели (фиксированную левую колонку занимает не одна из дисциплин, а
-# общий зачёт турнира — см. FIXED_TOP_ITEM и renderBoard). stage/stage_type
-# определяют плашку над колонкой: "main" — цифра этапа, "side" — доп.этап,
-# "event" — вне лестницы (Week CUP). "car" — картинка машины для шапки колонки
-# (Н12/static/cars/*.png), может быть пустой строкой, если картинки ещё нет.
-# Меняя количество пунктов здесь, обязательно пересчитай @keyframes
-# carouselStep и --cycle-time ниже — они настроены именно на 7 шагов.
 DISPLAY_ORDER = [
     {"key": "MX-5", "aliases": ["MX-5", "MX5", "MIATA"], "title": "MX-5", "subtitle": "Suzuka West",
      "stage": "Этап 1", "stage_type": "main", "car": "/static/cars/mx5.png"},
@@ -60,7 +47,7 @@ DISPLAY_ORDER = [
      "stage": "Доп. этап", "stage_type": "side", "car": "/static/cars/touge.png"},
     {"key": "GT3", "aliases": ["GT3", "GT-3", "GT4", "GT-4"], "title": "GT3", "subtitle": "Sebring",
      "stage": "Этап 4", "stage_type": "main", "car": "/static/cars/gt3.png"},
-    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "PEPE CUP",
+    {"key": "WEEK CUP", "aliases": ["WEEK CUP", "WEEKCUP", "WEEK", "WEEK_CUP"], "title": "DRIFT",
      "subtitle": "Sochi Short | Yaris", "stage": "Отдельный кубок", "stage_type": "event", "car": ""},
 ]
 
