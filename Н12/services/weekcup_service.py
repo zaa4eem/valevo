@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+from utils.score_parser import format_result_text
 from database.db import (
     get_weekcup_top3,
     get_weekcup_all_results,
@@ -86,7 +87,7 @@ async def _close_weekcup_locked(bot):
         place = row["place"]
         telegram_id = row.get("telegram_id")
         username = _safe_name(row.get("display_name") or row.get("username"))
-        lap_time = row.get("lap_time_text") or "—"
+        lap_time = format_result_text(row.get("lap_time_text") or "—")
         yclients_client_id = row.get("yclients_client_id")
 
         if place == 1:

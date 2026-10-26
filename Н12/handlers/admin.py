@@ -24,6 +24,7 @@ from services.standings_watch import refresh_standings_after_lap
 from services.phone_normalizer import normalize_phone_for_bot
 from services.weekcup_service import close_weekcup
 from utils.time_parser import time_to_ms
+from utils.score_parser import SCORE_EXAMPLE, is_score_discipline, parse_result, result_line
 from data.tournament import CLASS_LADDER
 from keyboards.menu import get_menu
 from keyboards.disciplines import get_disciplines_keyboard
@@ -535,7 +536,12 @@ async def enter_pilot_number(message: Message, state: FSMContext):
         return
     await state.update_data(username=pilot["username"], selected_telegram_id=pilot["telegram_id"])
     await safe_delete_message(message.bot, message.chat.id, message.message_id)
-    msg = await message.answer("⏱ Введите время круга:\nПример: 01:18.565")
+    if is_score_discipline((await state.get_data()).get("discipline")):
+        msg = await message.answer(
+            f"🎯 Введите баллы (от 0 до 100, 100.0 — лучший результат):\nПример: {SCORE_EXAMPLE}"
+        )
+    else:
+        msg = await message.answer("⏱ Введите время круга:\nПример: 01:18.565")
     await state.update_data(bot_message_id=msg.message_id)
     await state.set_state(AddLap.lap_time)
 
@@ -563,21 +569,27 @@ async def finish_lap(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    is_score = is_score_discipline(discipline)
     try:
-        lap_ms = time_to_ms(lap_text)
+        lap_text, lap_ms = parse_result(discipline, lap_text)
     except Exception as e:
-        logger.warning(f"Неверный формат времени: {lap_text} ({e})")
+        logger.warning(f"Неверный формат результата: {lap_text} ({e})")
+        error_text = (
+            f"❌ Неверные баллы (нужно число от 0 до 100)\nПример: {SCORE_EXAMPLE}"
+            if is_score else
+            "❌ Неверный формат времени\nПример: 01:18.565"
+        )
         bot_msg = data.get("bot_message_id")
         if bot_msg:
             try:
                 await message.bot.edit_message_text(
                     chat_id=message.chat.id, message_id=bot_msg,
-                    text="❌ Неверный формат времени\nПример: 01:18.565"
+                    text=error_text
                 )
             except Exception:
                 pass
         else:
-            await message.answer("❌ Неверный формат времени\nПример: 01:18.565")
+            await message.answer(error_text)
         return
 
     lap_id = await add_lap(
@@ -605,7 +617,7 @@ async def finish_lap(message: Message, state: FSMContext):
     undo_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Отменить (30 сек)", callback_data=f"undo_lap:{undo_data}")]
     ])
-    text = f"{header('✅', 'Круг засчитан!')}\n\n🏆 {discipline}\n👤 @{username}\n🗺 {track}\n⏱ {lap_text}"
+    text = f"{header('✅', 'Круг засчитан!')}\n\n🏆 {discipline}\n👤 @{username}\n🗺 {track}\n{result_line(discipline, lap_text)}"
     bot_msg = data.get("bot_message_id")
     if bot_msg:
         try:
@@ -1645,7 +1657,7 @@ async def send_notifications(bot, discipline, new_username, lap_text, selected_t
 
     if group_id:
         leaderboard = await build_leaderboard()
-        group_msg = f"{header('🔥', 'Новый результат!')}\n\n🏆 {discipline}\n👤 @{new_username}\n🗺 {track}\n⏱ {lap_text}"
+        group_msg = f"{header('🔥', 'Новый результат!')}\n\n🏆 {discipline}\n👤 @{new_username}\n🗺 {track}\n{result_line(discipline, lap_text)}"
         try:
             await bot.send_message(group_id, group_msg)
             await bot.send_message(group_id, leaderboard)

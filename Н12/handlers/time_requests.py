@@ -47,7 +47,13 @@ from keyboards.menu import get_menu
 from services.tournament import check_and_process_promotion
 from services.achievements import check_achievements_after_lap
 from utils.message_style import DIVIDER, header
-from utils.time_parser import time_to_ms
+from utils.score_parser import (
+    SCORE_EXAMPLE,
+    is_score_discipline,
+    parse_result,
+    result_label,
+    result_line,
+)
 
 
 router = Router()
@@ -77,6 +83,20 @@ class TimeRequestForm(StatesGroup):
     track = State()
     lap_time = State()
     proof = State()
+
+
+def lap_input_prompt(discipline) -> str:
+    """Что просим ввести: баллы для Week CUP, время круга для остальных."""
+    if is_score_discipline(discipline):
+        return (
+            "🎯 Введите баллы за заезд (от 0 до 100, "
+            "где 100.0 — лучший результат).\n"
+            f"Пример: <code>{SCORE_EXAMPLE}</code>"
+        )
+    return (
+        "⏱ Введите время круга.\n"
+        "Пример: <code>01:18.565</code>"
+    )
 
 
 def cancel_keyboard() -> ReplyKeyboardMarkup:
@@ -266,7 +286,7 @@ def request_caption(
         f"{class_line}"
         f"🏆 Дисциплина: <b>{safe_discipline}</b>\n"
         f"🗺 Трасса: <b>{safe_track}</b>\n"
-        f"⏱ Время: <b>{safe_lap_time}</b>\n"
+        f"{'🎯' if is_score_discipline(discipline) else '⏱'} {result_label(discipline)}: <b>{safe_lap_time}</b>\n"
         f"{warning_line}\n"
         "📸 Фотография результата прикреплена выше.\n\n"
         "Проверьте фотографию и выберите решение."
@@ -490,13 +510,11 @@ async def user_time_request_track(
     try:
         await callback.message.edit_text(
             f"🗺 Трасса: <b>{html.escape(track)}</b>\n\n"
-            "⏱ Введите время круга.\n"
-            "Пример: <code>01:18.565</code>"
+            + lap_input_prompt(data.get("discipline"))
         )
     except Exception:
         await callback.message.answer(
-            "⏱ Введите время круга.\n"
-            "Пример: <code>01:18.565</code>"
+            lap_input_prompt(data.get("discipline"))
         )
 
 
@@ -520,16 +538,28 @@ async def user_time_request_lap_time(
         )
         return
 
-    lap_time_text = message.text.strip()
+    data = await state.get_data()
+    discipline = data.get("discipline")
 
     try:
-        lap_time_ms = time_to_ms(lap_time_text)
-    except Exception:
-        await message.answer(
-            "❌ Неверный формат времени.\n\n"
-            "Введите результат в формате:\n"
-            "<code>01:18.565</code>"
+        lap_time_text, lap_time_ms = parse_result(
+            discipline,
+            message.text,
         )
+    except Exception:
+        if is_score_discipline(discipline):
+            await message.answer(
+                "❌ Неверные баллы.\n\n"
+                "Введите число от 0 до 100 "
+                "(100.0 — лучший результат).\n"
+                f"Пример: <code>{SCORE_EXAMPLE}</code>"
+            )
+        else:
+            await message.answer(
+                "❌ Неверный формат времени.\n\n"
+                "Введите результат в формате:\n"
+                "<code>01:18.565</code>"
+            )
         return
 
     await state.update_data(
@@ -541,7 +571,7 @@ async def user_time_request_lap_time(
     await message.answer(
         "📸 <b>Теперь отправьте фотографию результата</b>.\n\n"
         "На фотографии должны быть отчётливо видны:\n"
-        "• итоговое время;\n"
+        f"• {'итоговые баллы' if is_score_discipline(discipline) else 'итоговое время'};\n"
         "• выбранная трасса или экран результата.\n\n"
         "Документы, видео и фотографии без подтверждения "
         "времени администратор может отклонить.",
@@ -690,7 +720,7 @@ async def user_time_request_proof(
         "✅ <b>Заявка отправлена администрации</b>.\n\n"
         f"🏆 Дисциплина: <b>{html.escape(discipline)}</b>\n"
         f"🗺 Трасса: <b>{html.escape(track)}</b>\n"
-        f"⏱ Время: <b>{html.escape(lap_time_text)}</b>\n\n"
+        f"{'🎯' if is_score_discipline(discipline) else '⏱'} {result_label(discipline)}: <b>{html.escape(lap_time_text)}</b>\n\n"
         "После проверки фотографии бот сообщит решение.\n"
         f"Повторная заявка будет доступна через "
         f"{TIME_REQUEST_COOLDOWN_MINUTES} минут.",
@@ -1025,7 +1055,8 @@ async def admin_reject_time_request(
                 f"<b>{html.escape(str(request['discipline']))}</b>\n"
                 f"🗺 Трасса: "
                 f"<b>{html.escape(str(request['track']))}</b>\n"
-                f"⏱ Время: "
+                f"{'🎯' if is_score_discipline(request['discipline']) else '⏱'} "
+                f"{result_label(request['discipline'])}: "
                 f"<b>{html.escape(str(request['lap_time_text']))}</b>\n\n"
                 "Проверьте фотографию результата и отправьте "
                 "новую заявку после окончания ограничения."

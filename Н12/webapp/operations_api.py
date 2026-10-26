@@ -18,6 +18,7 @@ from services.tournament import check_and_process_promotion, month_bounds, activ
 from services.yclients_auto import auto_sync_pilot_with_yclients, issue_or_queue_valevo_bonus
 from services.yclients_service import get_valevo_bonus_balance
 from utils.time_parser import time_to_ms
+from utils.score_parser import is_score_discipline, parse_score
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,16 @@ class BalanceOperation(BaseModel):
 
 class SupportMessage(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
+
+
+def parse_lap_result(discipline: str, value: str) -> tuple[str, int]:
+    """Week CUP принимает баллы 0–100, остальные дисциплины — время круга."""
+    if is_score_discipline(discipline):
+        try:
+            return parse_score(value)
+        except ValueError as exc:
+            raise HTTPException(422, 'Введите баллы от 0 до 100, например 98.6') from exc
+    return value.strip(), parse_lap(value)
 
 
 def parse_lap(value: str) -> int:
@@ -127,7 +138,7 @@ def create_operations_router(current_user, send_message=None):
 
     @router.post('/admin/laps')
     async def lap(body: LapInput, _user=Depends(staff)):
-        lap_ms = parse_lap(body.lap_time)
+        lap_text, lap_ms = parse_lap_result(body.discipline, body.lap_time)
         await discipline_exists(body.discipline)
         is_ladder, active_track = await active_track_for_class(body.discipline)
         if is_ladder and not active_track:
@@ -146,7 +157,7 @@ def create_operations_router(current_user, send_message=None):
             lap_id, created, response = await miniapp_laps.save_lap(_user.id, body.idempotency_key,
                 dict(discipline=body.discipline, username=pilot.get('username'),
                      telegram_id=pilot['telegram_id'], track=body.track,
-                     lap_time_text=body.lap_time.strip(), lap_time_ms=lap_ms))
+                     lap_time_text=lap_text, lap_time_ms=lap_ms))
         except miniapp_laps.LapConflict as exc:
             raise HTTPException(409, str(exc)) from exc
         if not created:

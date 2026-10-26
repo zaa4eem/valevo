@@ -33,6 +33,7 @@ from config import (
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
 from database.db import carry_benchmarks_to_current_season, init_db
+from database.maintenance import run_db_backup
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
 from services.experience_rewards import process_completed_bookings
@@ -190,6 +191,17 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             replace_existing=True,
             misfire_grace_time=900,
             coalesce=True,
+        )
+
+    if not scheduler.get_job("db_backup"):
+        scheduler.add_job(
+            run_db_backup,
+            CronTrigger(hour=23, minute=0, timezone=moscow_tz),
+            id="db_backup",
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
         )
 
     from services.booking_notifications import process_notifications

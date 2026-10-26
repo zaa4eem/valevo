@@ -1536,7 +1536,7 @@ async def get_weekcup_top3():
                 p.yclients_client_id,
                 ROW_NUMBER() OVER (
                     PARTITION BY COALESCE(CAST(l.telegram_id AS TEXT), l.username)
-                    ORDER BY l.lap_time_ms ASC
+                    ORDER BY l.lap_time_ms ASC, l.id ASC
                 ) AS rn
             FROM laps l
             JOIN disciplines d ON d.id = l.discipline_id
@@ -1556,7 +1556,7 @@ async def get_weekcup_top3():
             yclients_client_id
         FROM best_laps
         WHERE rn = 1
-        ORDER BY lap_time_ms ASC
+        ORDER BY lap_time_ms ASC, id ASC
         LIMIT 3
         """
     )
