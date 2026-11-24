@@ -15,6 +15,11 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./backups:/app/backups
+    # Нужен только в режиме BOT_MODE=webhook (см. .env.example) — тогда сюда
+    # стучится cloudflared с хоста. В режиме polling (по умолчанию) порт
+    # просто никем не используется, publish безвреден.
+    ports:
+      - "127.0.0.1:${WEBHOOK_LOCAL_PORT:-8088}:8088"
     stop_grace_period: 30s
 
   valevo-webapp:
@@ -37,5 +42,35 @@ services:
       - ./backups:/app/backups
     ports:
       - "127.0.0.1:${WEBAPP_PORT:-8080}:8080"
+    depends_on:
+      - valevo-bot
+
+  valevo-tvboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    container_name: valevo-tvboard
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATA_DIR: /app/data
+      DB_NAME: /app/data/valevo.db
+      LOG_DIR: /app/logs
+      BACKUP_DIR: /app/backups
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./backups:/app/backups
+    ports:
+      - "127.0.0.1:${TVBOARD_PORT:-8010}:8010"
+    command: ["python", "tv_board.py"]
+    # Переопределяем healthcheck из Dockerfile.webapp: там проверяется
+    # порт 8080/api/ready, а TV-борд слушает 8010 и такого пути не отдаёт.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     depends_on:
       - valevo-bot

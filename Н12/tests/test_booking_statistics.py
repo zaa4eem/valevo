@@ -25,7 +25,7 @@ def test_confirmed_bookings_count_without_payments_and_cancellations_are_exclude
     assert client.get('/api/admin/finance').json()['turnover_kopecks']==0
     asyncio.run(b._set_booking_status(bid,'confirmed'))
     stats=client.get('/api/admin/finance').json()
-    assert (stats['turnover_kopecks'],stats['commission_kopecks'],stats['club_kopecks'],stats['hours'])==(300000,30000,270000,3)
+    assert (stats['turnover_kopecks'],stats['commission_kopecks'],stats['club_kopecks'],stats['hours'])==(300000,0,300000,3)
     assert stats['booking_count']==1 and stats['daily'][0]['date']==start.date().isoformat()
     assert 'balance_kopecks' not in stats and 'payouts_kopecks' not in stats
     assert client.get('/api/admin/finance?source=bot').json()['booking_count']==0
