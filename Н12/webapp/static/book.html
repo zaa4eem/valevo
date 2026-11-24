@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#03091b">
+<title>VALEVO · Запись</title>
+<link rel="stylesheet" href="/assets/css/app.css?v=20261124b">
+<style>
+.places{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.places button{min-height:64px}
+.places button small{display:block;color:var(--muted);font-size:11px}
+.places button[disabled]{opacity:.35}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{width:auto;min-height:40px}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+  <a class="brand" href="/"><img src="/assets/logo.png" alt="ВАЛЕВО"></a>
+  <span class="badge">ГОСТЬ</span>
+</header>
+<main id="view"><p class="muted">Загрузка…</p></main>
+</div>
+<div id="toast" role="status" hidden></div>
+<script>
+const view = document.querySelector('#view');
+const toastEl = document.querySelector('#toast');
+let options, day, duration, time, places = [], kids = false, avail = [], dayBlocks = [], dayKids = [], key = sessionStorage.getItem('valevo-book-key') || crypto.randomUUID();
+sessionStorage.setItem('valevo-book-key', key);
+
+function toast(text) {
+  toastEl.hidden = false;
+  toastEl.textContent = text;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toastEl.hidden = true; }, 3200);
+}
+function esc(s) {
+  const map = {'&':'amp','<':'lt','>':'gt','"':'quot',"'"::'#39'};
+  return String(s ?? '').replace(/[&<>"']/g, c => '&' + map[c] + ';');
+}
+function money(n) { return new Intl.NumberFormat('ru-RU').format(Math.round(n)) + ' ₽'; }
+function addDays(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+function weekday(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+}
+function labelDay(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+function moscowNow() {
+  const s = new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Moscow' });
+  return { day: s.slice(0, 10), time: s.slice(11, 16) };
+}
+function slots() {
+  const out = [];
+  const now = moscowNow();
+  for (let m = 12 * 60; m + duration <= 24 * 60; m += 30) {
+    const hh = String(Math.floor(m / 60)).padStart(2, '0');
+    const mm = String(m % 60).padStart(2, '0');
+    const t = hh + ':' + mm;
+    if (day > now.day || (day === now.day && t > now.time)) {
+      if (kids && kidsBusy(t)) continue;
+      out.push(t);
+    }
+  }
+  return out;
+}
+function happy() { const [h, m] = time.split(':').map(Number); return weekday(day) < 5 && h * 60 + m < 17 * 60; }
+function rate(type) { return happy() ? options.happy[type] : options.rates[type]; }
+function chosen() { return options.places.filter(p => places.includes(p.key)); }
+function total() {
+  if (kids) return options.kids_rate * duration / 60;
+  const rows = chosen();
+  if (!rows.length) return 0;
+  return rate(rows[0].type) * duration / 60 * rows.length;
+}
+function taken(key) { const row = avail.find(p => p.key === key); return row ? !row.available : false; }
+function halfHours() {
+  const out = [];
+  for (let m = 12 * 60; m < 24 * 60; m += 30) out.push(String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'));
+  return out;
+}
+function toMin(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+function shortPlace(title) { return String(title).replace('Статика ', 'С ').replace('Подвижка ', 'П '); }
+function occupied(key, t) {
+  const m = toMin(t);
+  return dayBlocks.some(b => b.place_key === key && m >= toMin(b.start) && m < toMin(b.start) + Number(b.minutes));
+}
+function kidsBusy(t) {
+  const start = toMin(t);
+  return dayKids.some(k => {
+    const a = toMin(k.start);
+    return start < a + Number(k.minutes) && start + duration > a;
+  });
+}
+function canStart(key, t) {
+  if (!t || !duration) return false;
+  const start = toMin(t);
+  if (!duration || start + duration > 24 * 60) return false;
+  const now = moscowNow();
+  if (day < now.day || (day === now.day && t <= now.time)) return false;
+  for (let m = start; m < start + duration; m += 30) {
+    const label = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    if (occupied(key, label)) return false;
+  }
+  return true;
+}
+function dayGrid() {
+  const times = halfHours();
+  const span = {}, skip = {};
+  dayBlocks.forEach(block => {
+    const i = times.indexOf(block.start);
+    if (i < 0) return;
+    const n = Math.max(1, Math.round(Number(block.minutes) / 30));
+    span[block.place_key + '|' + block.start] = n;
+    for (let k = 1; k < n && i + k < times.length; k++) skip[block.place_key + '|' + times[i + k]] = 1;
+  });
+  const head = options.places.map(p => `<th>${esc(shortPlace(p.title))}</th>`).join('');
+  const body = times.map(t => {
+    const cells = options.places.map(p => {
+      const id = p.key + '|' + t;
+      if (skip[id]) return '';
+      if (span[id]) return `<td class="busy" rowspan="${span[id]}">занято</td>`;
+      const now = moscowNow();
+      const past = day < now.day || (day === now.day && t <= now.time);
+      const on = !kids && places.includes(p.key) && time && toMin(t) >= toMin(time) && toMin(t) < toMin(time) + duration;
+      if (past) return `<td class="past"></td>`;
+      if (!canStart(p.key, t)) return `<td class="blocked"></td>`;
+      return `<td class="${on ? 'pick' : 'free'}" data-cell="${esc(t)}|${esc(p.key)}"></td>`;
+    }).join('');
+    return `<tr><th class="hh">${t}</th>${cells}</tr>`;
+  }).join('');
+  return `<div class="gridwrap"><table class="daygrid"><thead><tr><th class="hh"></th>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = Array.isArray(data.detail) ? 'Проверьте поля' : data.detail;
+    throw new Error(data.error || detail || 'Не удалось отправить');
+  }
+  return data;
+}
+
+function render() {
+  const name = view.querySelector('#name')?.value || '';
+  const phone = view.querySelector('#phone')?.value || '';
+  const times = slots();
+  if (!times.includes(time)) time = times[0] || '';
+  const type = chosen()[0]?.type;
+  view.innerHTML = `
+    <section class="card hero">
+      <div class="kicker">VALEVO · ЗАПИСЬ</div>
+      <h1>Заезд без регистрации</h1>
+      <p class="muted">12:00–24:00 · заявка уходит администратору</p>
+    </section>
+    <label for="name">Имя</label><input id="name" maxlength="40" autocomplete="name" required>
+    <label for="phone">Телефон</label><input id="phone" inputmode="tel" autocomplete="tel" placeholder="8 900 000-00-00" required>
+    <label for="day">День</label>
+    <select id="day">${Array.from({length: options.days_ahead}, (_, i) => {
+      const iso = addDays(options.today, i);
+      return `<option value="${iso}" ${iso === day ? 'selected' : ''}>${esc(labelDay(iso))}</option>`;
+    }).join('')}</select>
+    <label>Длительность</label>
+    <div class="chips" id="dur">${options.durations.map(d => `<button type="button" data-duration="${d}" aria-pressed="${d === duration}">${d} мин</button>`).join('')}</div>
+    ${dayGrid()}
+    <label for="time">Время</label>
+    <select id="time" ${time ? '' : 'disabled'}>${times.map(t => `<option ${t === time ? 'selected' : ''}>${t}</option>`).join('') || '<option>Нет свободного времени</option>'}</select>
+    ${happy() && time ? '<div class="happy-banner">Счастливые часы до 17:00</div>' : ''}
+    <label>Место</label>
+    <div class="places" id="places">
+      ${options.places.map(p => {
+        const on = places.includes(p.key);
+        const off = kids || taken(p.key) || (type && type !== p.type);
+        return `<button type="button" data-place="${p.key}" aria-pressed="${on}" ${off && !on ? 'disabled' : ''}>${esc(p.title)}<small>${money(rate(p.type))} / час</small></button>`;
+      }).join('')}
+      <button type="button" data-kids="1" aria-pressed="${kids}">Детский сим<small>${money(options.kids_rate)} / час</small></button>
+    </div>
+    <div class="card">
+      <div class="row"><span>К оплате</span><b class="money">${money(total())}</b></div>
+      <p class="muted">${kids ? 'Администратор свяжется и подготовит детский сим.' : 'Статика и подвижка в одной заявке не смешиваются. До трёх мест.'}</p>
+    </div>
+    <button class="primary" id="send" ${!time || (!kids && !places.length) ? 'disabled' : ''}>Отправить заявку</button>`;
+  view.querySelector('#name').value = name;
+  view.querySelector('#phone').value = phone;
+  view.querySelector('#day').onchange = e => { day = e.target.value; places = []; refresh(); };
+  view.querySelector('#time').onchange = e => { time = e.target.value; places = []; refresh(); };
+  view.querySelectorAll('[data-cell]').forEach(cell => cell.onclick = () => {
+    const [t, key] = cell.dataset.cell.split('|');
+    time = t;
+    kids = false;
+    const type = options.places.find(p => p.key === key).type;
+    const current = chosen()[0];
+    if (current && current.type !== type) places = [];
+    if (!places.includes(key) && places.length < 3) places = places.concat(key);
+    refresh();
+  });
+  view.querySelectorAll('[data-duration]').forEach(btn => btn.onclick = () => { duration = Number(btn.dataset.duration); places = []; render(); refresh(); });
+  view.querySelectorAll('[data-place]').forEach(btn => btn.onclick = () => {
+    const k = btn.dataset.place;
+    kids = false;
+    places = places.includes(k) ? places.filter(x => x !== k) : places.concat(k).slice(0, 3);
+    render();
+  });
+  const kidsBtn = view.querySelector('[data-kids]');
+  kidsBtn.onclick = () => { kids = !kids; if (kids) places = []; render(); };
+  view.querySelector('#send').onclick = submit;
+}
+
+async function refresh() {
+  const now = moscowNow();
+  if (day === now.day && time && time <= now.time) time = '';
+  try {
+    const board = await api('/api/public/booking/day?date=' + day);
+    dayBlocks = board.blocks || [];
+    dayKids = board.kids || [];
+  } catch (e) {
+    toast(e.message);
+  }
+  if (!time || !duration) { render(); return; }
+  try {
+    const slot = await api('/api/public/booking/availability?' + new URLSearchParams({ start_at: `${day}T${time}:00+03:00`, duration_minutes: String(duration) }));
+    avail = slot.places || [];
+    places = places.filter(k => !taken(k) && canStart(k, time));
+  } catch (e) {
+    toast(e.message);
+  }
+  render();
+}
+
+async function submit() {
+  const name = view.querySelector('#name').value.trim();
+  const phone = view.querySelector('#phone').value.trim();
+  const btn = view.querySelector('#send');
+  if (name.length < 2 || !phone || !time) { toast('Укажите имя, телефон и время'); return; }
+  btn.disabled = true;
+  btn.textContent = 'Отправляем…';
+  const start_at = `${day}T${time}:00+03:00`;
+  const sentKey = key;
+  const sentPhone = phone;
+  try {
+    if (kids) {
+      await api('/api/public/kids', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, phone, start_at, duration_minutes: duration, idempotency_key: key }) });
+    } else {
+      await api('/api/public/bookings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, phone, place_keys: places, start_at, duration_minutes: duration, idempotency_key: key }) });
+    }
+    key = crypto.randomUUID();
+    sessionStorage.setItem('valevo-book-key', key);
+    view.innerHTML = `<section class="card"><div class="kicker">ЗАЯВКА</div><h1>Отправлена</h1><p>Администратор примет запись. Если телефон есть в клубе, заявка появится и в миниаппе.</p><button class="primary" id="again">Новая заявка</button>${kids ? '' : '<button id="drop">Снять эту заявку</button>'}</section>`;
+    view.querySelector('#again').onclick = () => { places = []; kids = false; render(); refresh(); };
+    const drop = view.querySelector('#drop');
+    if (drop) drop.onclick = async () => {
+      drop.disabled = true;
+      try {
+        await api('/api/public/bookings/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: sentPhone, idempotency_key: sentKey }) });
+        view.innerHTML = '<section class="card"><h1>Заявка снята</h1><button class="primary" id="again">Новая заявка</button></section>';
+        view.querySelector('#again').onclick = () => { places = []; kids = false; render(); refresh(); };
+      } catch (err) { toast(err.message); drop.disabled = false; }
+    };
+  } catch (e) {
+    toast(e.message);
+    if (/ключ/i.test(e.message)) { key = crypto.randomUUID(); sessionStorage.setItem('valevo-book-key', key); }
+    btn.disabled = false;
+    btn.textContent = 'Отправить заявку';
+  }
+}
+
+api('/api/public/booking/options').then(data => {
+  options = data;
+  day = data.today;
+  duration = data.durations[0];
+  time = slots()[0] || '';
+  render();
+  refresh();
+}).catch(e => { view.innerHTML = `<p class="error">${esc(e.message)}</p>`; });
+</script>
+</body>
+</html>
