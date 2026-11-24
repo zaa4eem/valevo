@@ -121,9 +121,28 @@ YCLIENTS_SYNC_INTERVAL_MINUTES = _int_env("YCLIENTS_SYNC_INTERVAL_MINUTES", 360)
 YCLIENTS_CARD_RETRY_INTERVAL_MINUTES = _int_env("YCLIENTS_CARD_RETRY_INTERVAL_MINUTES", 360)
 SEASON_BONUS_EXPIRE_DAYS = _int_env("SEASON_BONUS_EXPIRE_DAYS", 30)
 REFERRAL_BONUS_RUB = _float_env("REFERRAL_BONUS_RUB", 350.0)
+BOOKING_STATIC_RUB_PER_HOUR = _float_env("BOOKING_STATIC_RUB_PER_HOUR", 700.0)
+BOOKING_MOTION_RUB_PER_HOUR = _float_env("BOOKING_MOTION_RUB_PER_HOUR", 1000.0)
+BOOKING_HAPPY_STATIC_RUB_PER_HOUR = _float_env("BOOKING_HAPPY_STATIC_RUB_PER_HOUR", 600.0)
+BOOKING_HAPPY_MOTION_RUB_PER_HOUR = _float_env("BOOKING_HAPPY_MOTION_RUB_PER_HOUR", 800.0)
+BOOKING_COMMISSION_PERCENT = _float_env("BOOKING_COMMISSION_PERCENT", 0.0)
 WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip().rstrip("/")
 WEBAPP_HOST = os.getenv("WEBAPP_HOST", "0.0.0.0").strip() or "0.0.0.0"
 WEBAPP_PORT = _int_env("WEBAPP_PORT", 8080)
+CRM_PASSWORD = os.getenv("CRM_PASSWORD", "").strip()
+
+# Режим получения апдейтов от Telegram: "polling" (по умолчанию, бот сам
+# стучится к Telegram) или "webhook" (Telegram стучится к нам). Webhook не
+# занимает исходящее соединение постоянно, но требует HTTPS-адрес на одном
+# из портов, которые Telegram поддерживает для вебхуков (443, 80, 88, 8443) —
+# у нас это решается туннелем cloudflared, локально бот просто слушает
+# WEBHOOK_LOCAL_HOST:WEBHOOK_LOCAL_PORT по обычному HTTP.
+BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip().rstrip("/")
+WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/telegram-webhook").strip() or "/telegram-webhook"
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
+WEBHOOK_LOCAL_HOST = os.getenv("WEBHOOK_LOCAL_HOST", "0.0.0.0").strip() or "0.0.0.0"
+WEBHOOK_LOCAL_PORT = _int_env("WEBHOOK_LOCAL_PORT", 8088)
 
 MOSCOW_TZ = os.getenv("MOSCOW_TZ", "Europe/Moscow")
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
@@ -139,8 +158,9 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 #
 # Ограничение дня 1..28 — чтобы момент закрытия существовал в любом месяце,
 # включая февраль.
-SEASON_CLOSE_DAY = max(1, min(28, _int_env("SEASON_CLOSE_DAY", 20)))
-SEASON_CLOSE_HOUR = max(0, min(23, _int_env("SEASON_CLOSE_HOUR", 18)))
+SEASON_CLOSE_DAY = max(1, min(28, _int_env("SEASON_CLOSE_DAY", 24
+)))
+SEASON_CLOSE_HOUR = max(0, min(23, _int_env("SEASON_CLOSE_HOUR", 17)))
 SEASON_CLOSE_MINUTE = max(0, min(59, _int_env("SEASON_CLOSE_MINUTE", 0)))
 
 # Тихие часы для уведомлений о турнирном зачёте (МСК): в это окно бот не пишет
@@ -156,5 +176,10 @@ def validate_required_settings() -> None:
         missing.append("BOT_TOKEN")
     if not STAFF_IDS:
         missing.append("ADMIN_IDS or SUPER_ADMIN_IDS")
+    if BOT_MODE == "webhook":
+        if not WEBHOOK_BASE_URL:
+            missing.append("WEBHOOK_BASE_URL")
+        if not WEBHOOK_SECRET:
+            missing.append("WEBHOOK_SECRET")
     if missing:
         raise RuntimeError("Не заполнены обязательные настройки: " + ", ".join(missing))
