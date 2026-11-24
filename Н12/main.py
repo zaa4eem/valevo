@@ -8,27 +8,36 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import ErrorEvent
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from database.maintenance import run_db_backup
 from pytz import timezone
 from handlers import booking, time_requests
 
 from config import (
     ADMIN_IDS,
+    BOT_MODE,
     BOT_TOKEN,
     MOSCOW_TZ,
     SEASON_CLOSE_DAY,
     SEASON_CLOSE_HOUR,
     SEASON_CLOSE_MINUTE,
     validate_required_settings,
+    WEBHOOK_BASE_URL,
+    WEBHOOK_LOCAL_HOST,
+    WEBHOOK_LOCAL_PORT,
+    WEBHOOK_PATH,
+    WEBHOOK_SECRET,
     YCLIENTS_SYNC_INTERVAL_MINUTES,
     YCLIENTS_CARD_RETRY_INTERVAL_MINUTES,
 )
 from database.db import carry_benchmarks_to_current_season, init_db
+from database.maintenance import run_db_backup
 from handlers import admin, bookings_admin, common, profile_experience
 from services.monthly_reset import perform_monthly_reset
 from services.experience_rewards import process_completed_bookings
+from services.yclients_service import yclients_enabled
 from services.yclients_auto import auto_sync_all_pilots, process_pending_yclients_operations
 from services.bonus_expiration import expire_season_bonuses
 from services.tournament_update import apply_tournament_update
@@ -126,7 +135,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
-    if not scheduler.get_job("yclients_auto_sync"):
+    if yclients_enabled() and not scheduler.get_job("yclients_auto_sync"):
         scheduler.add_job(
             auto_sync_all_pilots,
             "interval",
@@ -138,7 +147,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
             coalesce=True,
         )
 
-    if not scheduler.get_job("yclients_pending_retry"):
+    if yclients_enabled() and not scheduler.get_job("yclients_pending_retry"):
         scheduler.add_job(
             process_pending_yclients_operations,
             "interval",
@@ -204,6 +213,7 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
     if not scheduler.running:
         scheduler.start()
 
+    # Автосинхронизация не должна блокировать запуск бота.
     background_tasks = [
         asyncio.create_task(auto_sync_all_pilots(bot, notify_admin=True)),
         asyncio.create_task(process_pending_yclients_operations(bot)),
@@ -211,6 +221,12 @@ async def _run_startup_jobs(bot: Bot, scheduler: AsyncIOScheduler) -> list[async
         asyncio.create_task(booking.process_booking_reminders(bot)),
     ]
 
+    # Догоняем пропущенное закрытие, если бот был выключен в этот момент.
+    # Повторный запуск безопасен: награды защищены таблицей season_awards
+    # (плюс проверка по префиксу месяца для закрытий по прежней схеме), а
+    # релегация — флагом relegation_done:<сезон> в bot_settings. Раньше флага
+    # не было, и каждый перезапуск бота в день закрытия понижал ещё одну
+    # порцию пилотов поверх уже пониженных.
     close_moment_passed = (
         now.day > SEASON_CLOSE_DAY
         or (
@@ -237,6 +253,10 @@ async def main() -> None:
     tournament_migration = await apply_tournament_update()
     logger.info("Tournament v3 active: %s", tournament_migration)
 
+    # Разовый перенос эталонов в ключ текущего сезона. Сезон теперь считается
+    # от закрытия до закрытия, и после 20-го числа его ключ указывает на
+    # следующий месяц — без переноса эталоны, заданные по прежней схеме,
+    # оказались бы "не заданы" и обнулили бы баллы всех пилотов.
     try:
         carried = await carry_benchmarks_to_current_season()
         if carried:
@@ -259,9 +279,16 @@ async def main() -> None:
         build_time = datetime.fromtimestamp(os.path.getmtime(exe_path)).strftime("%Y-%m-%d %H:%M:%S")
     except OSError:
         build_time = "неизвестно"
-    logger.info("Бот запущен (сборка от %s)", build_time)
+    logger.info("Бот запущен (сборка от %s, режим: %s)", build_time, BOT_MODE)
     try:
-        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        if BOT_MODE == "webhook":
+            await _run_webhook(bot, dp)
+        else:
+            # На случай, если раньше был выставлен webhook (ручным вызовом или
+            # предыдущим запуском в режиме webhook) — иначе getUpdates падает
+            # с TelegramConflictError: "can't use getUpdates while webhook is active".
+            await bot.delete_webhook(drop_pending_updates=False)
+            await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         for task in background_tasks:
             task.cancel()
@@ -269,6 +296,39 @@ async def main() -> None:
         if scheduler.running:
             scheduler.shutdown(wait=False)
         await bot.session.close()
+
+
+async def _run_webhook(bot: Bot, dp: Dispatcher) -> None:
+    """Поднимает локальный HTTP-сервер и регистрирует вебхук в Telegram.
+
+    Сервер слушает только WEBHOOK_LOCAL_HOST:WEBHOOK_LOCAL_PORT (по умолчанию
+    127.0.0.1:8088) — наружу его отдаёт туннель (cloudflared), сам процесс
+    HTTPS не поднимает. secret_token проверяется aiogram на каждый запрос —
+    это официальный механизм Telegram для защиты вебхука, его должна
+    подтверждать каждая входящая заявка через заголовок
+    X-Telegram-Bot-Api-Secret-Token.
+    """
+    webhook_url = f"{WEBHOOK_BASE_URL}{WEBHOOK_PATH}"
+    await bot.set_webhook(
+        url=webhook_url,
+        secret_token=WEBHOOK_SECRET,
+        allowed_updates=dp.resolve_used_update_types(),
+    )
+    logger.info("Webhook зарегистрирован: %s", webhook_url)
+
+    app = web.Application()
+    SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, WEBHOOK_LOCAL_HOST, WEBHOOK_LOCAL_PORT)
+    await site.start()
+    logger.info("Webhook-сервер слушает %s:%s%s", WEBHOOK_LOCAL_HOST, WEBHOOK_LOCAL_PORT, WEBHOOK_PATH)
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await runner.cleanup()
 
 
 if __name__ == "__main__":
