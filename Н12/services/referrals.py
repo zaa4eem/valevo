@@ -39,10 +39,12 @@ async def _grant(referral_id: int, side: str, telegram_id: int, amount: float) -
         yclients_client_id=pilot.get("yclients_client_id"),
         source=source,
         amount=amount,
-        reason="Реферальная программа: по 350 ₽ другу и пригласившему",
+        reason="Реферальная программа: по 350 💎 другу и пригласившему",
         yclients_status="issued" if result.get("ok") else "queued",
         yclients_operation_id=result.get("pending_operation_id"),
     )
+    if not result.get("ok"):
+        return result
     await mark_referral_rewarded(referral_id, side)
     return result
 
@@ -61,10 +63,15 @@ async def process_referral_registration(referred_id: int, referrer_id: int | Non
     referred_result = await _grant(referral_id, "referred", int(referred_id), REFERRAL_BONUS_RUB)
 
     if bot:
-        text = f"🎁 <b>Реферальный бонус!</b>\n\nНачислено <b>{REFERRAL_BONUS_RUB:g} ₽ Valevo Bonus</b>."
-        for tid in (int(referrer_id), int(referred_id)):
+        text = f"🎁 <b>Реферальный бонус!</b>\n\nНачислено <b>{REFERRAL_BONUS_RUB:g} 💎 Valevo Bonus</b>."
+        if referrer_result.get("ok"):
             try:
-                await bot.send_message(tid, text)
+                await bot.send_message(int(referrer_id), text)
             except Exception:
-                logger.exception("Не удалось отправить уведомление о реферальном бонусе: %s", tid)
+                logger.exception("Не удалось отправить уведомление о реферальном бонусе: %s", referrer_id)
+        if referred_result.get("ok"):
+            try:
+                await bot.send_message(int(referred_id), text)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление о реферальном бонусе: %s", referred_id)
     return {"ok": True, "referral_id": referral_id, "referrer": referrer_result, "referred": referred_result}

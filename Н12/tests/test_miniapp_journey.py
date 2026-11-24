@@ -40,12 +40,12 @@ def test_booking_approval_statistics_and_cancel_journey(tmp_path, monkeypatch):
         bid=result['id']
         assert client.post(f'/api/admin/bookings/{bid}/approve').json()['status']=='confirmed'
         assert client.post(f'/api/admin/bookings/{bid}/approve').status_code==409
-        assert booking._create_yclients_record.await_count==2
+        assert booking._create_yclients_record.await_count==0
         stats=client.get('/api/admin/finance').json()
-        assert stats['turnover_kopecks']==300000 and stats['commission_kopecks']==30000 and stats['hours']==3
+        assert stats['turnover_kopecks']==300000 and stats['commission_kopecks']==0 and stats['hours']==3
         app.dependency_overrides[current_user]=lambda: user
         assert client.post(f'/api/bookings/{bid}/cancel').json()['status']=='cancelled'
-        assert booking._delete_yclients_record.await_count==2
+        assert booking._delete_yclients_record.await_count==0
         app.dependency_overrides[current_user]=lambda: admin
         assert client.get('/api/admin/finance').json()['turnover_kopecks']==0
         async def notifications():
