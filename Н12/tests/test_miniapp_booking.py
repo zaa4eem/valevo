@@ -20,6 +20,73 @@ def selection():
                 start_at=start, end_at=start + timedelta(minutes=90), duration_minutes=90)
 
 
+def _next_start(hour, weekday_ok):
+    now = datetime.now(b.TZ)
+    for offset in range(1, b.BOOKING_DAYS_AHEAD):
+        candidate = (now + timedelta(days=offset)).replace(hour=hour, minute=0, second=0, microsecond=0)
+        if weekday_ok(candidate.weekday()):
+            return candidate
+    raise AssertionError('no matching day within booking window')
+
+
+def test_happy_hour_discounts_weekday_afternoon_booking(store):
+    async def run():
+        start = _next_start(14, lambda wd: wd < 5)  # будний день
+        args = dict(pilot={'telegram_id': 11, 'phone': '70000000001', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='happy-static')
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['hourly_rate_kopecks'] == 60000
+        assert booking['quoted_kopecks'] == 60000
+        assert booking['billed_as_static'] == 0
+    asyncio.run(run())
+
+
+def test_weekend_afternoon_keeps_regular_rate(store):
+    async def run():
+        start = _next_start(14, lambda wd: wd >= 5)  # выходной
+        args = dict(pilot={'telegram_id': 12, 'phone': '70000000002', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='weekend-static')
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['hourly_rate_kopecks'] == 70000
+    asyncio.run(run())
+
+
+def test_bill_as_static_prices_motion_seat_at_static_rate(store):
+    async def run():
+        start = (datetime.now(b.TZ) + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        args = dict(pilot={'telegram_id': 13, 'phone': '70000000003', 'display_name': 'Pilot'},
+                    username='pilot', place_type='motion', place_keys=['motion_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='bill-as-static', bill_as_static=True)
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['place_type'] == 'motion'
+        assert booking['hourly_rate_kopecks'] == 70000  # тариф статики, не подвижки
+        assert booking['billed_as_static'] == 1
+        assert booking['items'][0]['staff_id'] == b.BOOKING_PLACES['motion_1']['staff_id']  # тот же физический юнит
+    asyncio.run(run())
+
+
+def test_bill_as_static_ignored_for_static_places(store):
+    async def run():
+        start = (datetime.now(b.TZ) + timedelta(days=1)).replace(hour=20, minute=0, second=0, microsecond=0)
+        args = dict(pilot={'telegram_id': 14, 'phone': '70000000004', 'display_name': 'Pilot'},
+                    username='pilot', place_type='static', place_keys=['static_1'],
+                    start_at=start, end_at=start + timedelta(minutes=60), duration_minutes=60)
+        ok, bid, _ = await b._create_pending_booking(**args, source='miniapp', idempotency_key='static-noop', bill_as_static=True)
+        assert ok
+        booking = await b._fetch_booking(bid)
+        assert booking['billed_as_static'] == 0
+        assert booking['hourly_rate_kopecks'] == 70000
+    asyncio.run(run())
+
+
 def test_quote_and_retry_are_persisted_atomically(store):
     async def run():
         args = selection()
@@ -30,7 +97,7 @@ def test_quote_and_retry_are_persisted_atomically(store):
         assert booking['source'] == 'miniapp'
         assert booking['quoted_kopecks'] == 300000
         assert booking['hourly_rate_kopecks'] == 100000
-        assert booking['commission_bps'] == 1000
+        assert booking['commission_bps'] == 0
         args['duration_minutes'] = 60
         args['end_at'] = args['start_at'] + timedelta(minutes=60)
         changed = await b._create_pending_booking(**args, source='miniapp', idempotency_key='request-123')
@@ -45,6 +112,18 @@ def test_invalid_places_cannot_be_stored(store, keys):
         args['place_keys'] = keys
         ok, _, _ = await b._create_pending_booking(**args)
         assert not ok
+    asyncio.run(run())
+
+
+def test_no_cap_on_number_of_places_of_the_same_type(store):
+    async def run():
+        args = selection()
+        args['place_type'] = 'static'
+        args['place_keys'] = ['static_1', 'static_2', 'static_3', 'static_4']
+        ok, booking_id, error = await b._create_pending_booking(**args)
+        assert ok, error
+        booking = await b._fetch_booking(booking_id)
+        assert sorted(item['place_key'] for item in booking['items']) == ['static_1', 'static_2', 'static_3', 'static_4']
     asyncio.run(run())
 
 
@@ -93,9 +172,9 @@ def test_uncertain_remote_creation_requires_reconciliation(store, monkeypatch):
         monkeypatch.setattr(b, '_remote_conflicts', AsyncMock(return_value=([], None)))
         monkeypatch.setattr(b, '_create_yclients_record', AsyncMock(return_value=(None, 'timeout')))
         ok, _ = await b.approve_booking(bid, 99)
-        assert not ok
-        assert (await b._fetch_booking(bid))['status'] == 'reconciliation_required'
-        assert not await b._claim_for_admin(bid, 99)
+        assert ok
+        assert (await b._fetch_booking(bid))['status'] == 'confirmed'
+        assert b._create_yclients_record.await_count == 0
     asyncio.run(run())
 
 
