@@ -295,9 +295,46 @@ def _loyalty_card_balance(card: dict[str, Any] | None) -> float:
     return round(max(values), 2)
 
 
-async def get_valevo_bonus_balance(client_id: int, session: aiohttp.ClientSession | None = None) -> float:
+async def remote_bonus_balance(client_id: int, session: aiohttp.ClientSession | None = None) -> float:
     card = await find_valevo_bonus_card(client_id, session=session)
     return _loyalty_card_balance(card)
+
+
+async def remote_bonus_state(client_id: int) -> tuple[bool, float]:
+    """(известно, баланс). False значит ответ не получен: ноль из этого делать нельзя."""
+    if not client_id or not yclients_enabled():
+        return False, 0.0
+    data = await _request("GET", f"{BASE_URL}/loyalty/client_cards/{client_id}")
+    if not isinstance(data, dict) or not data.get("success"):
+        return False, 0.0
+    cards = data.get("data")
+    if isinstance(cards, dict):
+        cards = cards.get("data") or cards.get("cards") or []
+    if not isinstance(cards, list):
+        return False, 0.0
+    configured = str(YCLIENTS_LOYALTY_CARD_TYPE_ID or "").strip()
+    chosen = None
+    for card in cards:
+        if not isinstance(card, dict):
+            continue
+        if configured and str(card.get("type_id")) == configured:
+            chosen = card
+            break
+        card_type = card.get("type") if isinstance(card.get("type"), dict) else {}
+        title = str(card_type.get("title") or card.get("title") or "").lower()
+        if "valevo" in title and "bonus" in title:
+            chosen = card
+    if chosen is None and not configured:
+        return True, 0.0
+    if chosen is None:
+        return True, 0.0
+    return True, _loyalty_card_balance(chosen)
+
+
+async def get_valevo_bonus_balance(client_id: int, session: aiohttp.ClientSession | None = None) -> float:
+    del session
+    from services.club_bonus import balance_by_client
+    return await balance_by_client(client_id)
 
 
 async def add_loyalty_cashback(card_id: int | str, amount_rub: float, title: str,
@@ -313,7 +350,7 @@ async def add_loyalty_cashback(card_id: int | str, amount_rub: float, title: str
     return None
 
 
-async def change_valevo_bonus(client_id: int, delta_rub: float, title: str = "Valevo Bonus",
+async def remote_change_bonus(client_id: int, delta_rub: float, title: str = "Valevo Bonus",
                               phone: str | None = None, name: str | None = None) -> dict[str, Any]:
     if not yclients_enabled():
         return {"ok": False, "status": "disabled", "message": "YCLIENTS credentials are missing"}
@@ -333,10 +370,16 @@ async def change_valevo_bonus(client_id: int, delta_rub: float, title: str = "Va
         if not result:
             return {"ok": False, "status": "yclients_error", "message": "YCLIENTS не подтвердил транзакцию по карте Valevo Bonus",
                     "client_id": client_id, "card_id": card.get("id"), "amount": delta}
-        new_balance = await get_valevo_bonus_balance(client_id, session=session)
+        new_balance = await remote_bonus_balance(client_id, session=session)
         return {"ok": True, "status": "issued" if delta > 0 else "withdrawn", "client_id": client_id,
                 "card_id": card.get("id"), "amount": delta, "balance": new_balance,
                 "card_status": ensured.get("status")}
+
+
+async def change_valevo_bonus(client_id: int, delta_rub: float, title: str = "Valevo Bonus",
+                              phone: str | None = None, name: str | None = None) -> dict[str, Any]:
+    from services.club_bonus import change_by_client
+    return await change_by_client(client_id, delta_rub, title, phone, name)
 
 
 async def issue_season_cashback(client_id: int, bonus_hours: int, reason: str = "season_award") -> dict[str, Any]:
