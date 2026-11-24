@@ -118,26 +118,14 @@ async def issue_or_queue_valevo_bonus(
     phone: str | None = None,
     name: str | None = None,
 ) -> dict:
-    """Начисляет бонус. Если карты нет/нет доступа — кладёт операцию в очередь, чтобы деньги не потерялись."""
-    if not client_id:
-        op_id = await create_pending_yclients_operation(telegram_id, None, "bonus", amount, title, source, last_error="no_client_id")
-        return {"ok": False, "status": "queued", "message": "Нет yclients_client_id, операция в очереди", "pending_operation_id": op_id}
-
-    result = await change_valevo_bonus(client_id, amount, title=title, phone=phone, name=name)
-    if result.get("ok"):
+    """Начисляет бонус на карту клуба. В очередь — только если нет телефона."""
+    result = await change_valevo_bonus(client_id or 0, amount, title=title, phone=phone, name=name)
+    if result.get("ok") or result.get("status") == "insufficient":
         return result
-
-    op_id = await create_pending_yclients_operation(
-        telegram_id=telegram_id,
-        yclients_client_id=client_id,
-        operation_type="bonus",
-        amount=amount,
-        title=title,
-        source=source,
-        last_error=result.get("message") or result.get("status"),
-    )
-    result.update({"status": "queued", "pending_operation_id": op_id})
-    return result
+    if result.get("status") != "no_phone":
+        return result
+    op_id = await create_pending_yclients_operation(telegram_id, client_id, "bonus", amount, title, source, last_error="no_phone")
+    return {"ok": False, "status": "queued", "message": "Нет телефона для бонусной карты", "pending_operation_id": op_id}
 
 
 _pending_ops_lock = asyncio.Lock()
@@ -217,7 +205,29 @@ async def _process_pending_yclients_operations_locked(bot=None, limit: int = 100
         attempts = int(op.get("attempts") or 0)
         client_id = await _resolve_client_id(op)
 
-        if client_id is None:
+        if op["operation_type"] == "bonus":
+            pilot = None
+            if op.get("telegram_id"):
+                pilot = await get_pilot_by_telegram_id(op["telegram_id"])
+            phone = (pilot or {}).get("phone")
+            if not phone:
+                reason = "no_phone"
+                if attempts + 1 >= MAX_PENDING_ATTEMPTS:
+                    await _give_up_on_operation(bot, op, reason)
+                    given_up += 1
+                else:
+                    await update_pending_yclients_operation(op["id"], "retry", last_error=reason)
+                    failed += 1
+                await asyncio.sleep(0.15)
+                continue
+            result = await change_valevo_bonus(
+                client_id or 0, op["amount"], title=op.get("title") or "Valevo Bonus",
+                phone=phone, name=(pilot or {}).get("display_name"),
+            )
+            ok = bool(result.get("ok"))
+            error_text = result.get("message") or result.get("status")
+            card_id = None
+        elif client_id is None:
             reason = "no_client_id"
             if attempts + 1 >= MAX_PENDING_ATTEMPTS:
                 await _give_up_on_operation(bot, op, reason)
@@ -234,14 +244,7 @@ async def _process_pending_yclients_operations_locked(bot=None, limit: int = 100
                 ok = bool(ensured.get("ok"))
                 error_text = ensured.get("message")
                 card_id = str((ensured.get("card") or {}).get("id")) if ok else None
-            elif op["operation_type"] == "bonus":
-                result = await change_valevo_bonus(
-                    client_id, op["amount"], title=op.get("title") or "Valevo Bonus",
-                )
-                ok = bool(result.get("ok"))
-                error_text = result.get("message") or result.get("status")
-                card_id = str(result.get("card_id")) if ok else None
-            else:
+            elif op["operation_type"] != "bonus":
                 await _give_up_on_operation(bot, op, f"unknown_operation_type:{op['operation_type']}")
                 given_up += 1
                 await asyncio.sleep(0.15)
