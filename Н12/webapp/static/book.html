@@ -37,7 +37,7 @@ function toast(text) {
   toast._t = setTimeout(() => { toastEl.hidden = true; }, 3200);
 }
 function esc(s) {
-  const map = {'&':'amp','<':'lt','>':'gt','\u0022':'quot','\u0022\u0027\u0022':'#39'};
+  const map = {'&':'amp','<':'lt','>':'gt','"':'quot','"'"':'#39'};
   return String(s ?? '').replace(/[&<>"']/g, c => '&' + map[c] + ';');
 }
 function money(n) { return new Intl.NumberFormat('ru-RU').format(Math.round(n)) + ' ₽'; }
