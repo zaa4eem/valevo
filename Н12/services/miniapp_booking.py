@@ -11,7 +11,14 @@ from handlers import booking as b
 
 
 class BookingInput(BaseModel):
-    place_keys: list[str] = Field(min_length=1, max_length=3)
+    place_keys: list[str] = Field(min_length=1, max_length=len(b.BOOKING_PLACES))
+    start_at: datetime
+    duration_minutes: int
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    bill_as_static: bool = False
+
+
+class KidsBookingInput(BaseModel):
     start_at: datetime
     duration_minutes: int
     idempotency_key: str = Field(min_length=8, max_length=128)
@@ -31,12 +38,97 @@ def window(start_at, duration_minutes):
 
 
 def public_booking(row, admin=False):
-    fields = ['id', 'start_at', 'end_at', 'duration_minutes', 'place_type', 'status', 'source', 'quoted_kopecks', 'created_at']
+    fields = ['id', 'start_at', 'end_at', 'duration_minutes', 'place_type', 'status', 'source', 'quoted_kopecks',
+              'hourly_rate_kopecks', 'billed_as_static', 'created_at']
     if admin:
         fields += ['telegram_id', 'display_name', 'phone']
     result = {k: row.get(k) for k in fields}
     result['items'] = [{k: item[k] for k in ('place_key', 'place_title')} for item in row['items']]
     return result
+
+
+async def ensure_kids_schema(db):
+    # Отдельная таблица: детский статичный сим не бронируется через YCLIENTS,
+    # заявка только уведомляет администратора. Не трогает booking_requests_v2.
+    await db.execute('''CREATE TABLE IF NOT EXISTS kids_sim_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id INTEGER NOT NULL,
+        username TEXT,
+        display_name TEXT NOT NULL,
+        phone TEXT,
+        start_at TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        UNIQUE(telegram_id, idempotency_key)
+    )''')
+    try:
+        await db.execute("ALTER TABLE kids_sim_requests ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    except Exception:
+        pass
+
+
+def _kids_end(start_at: str, minutes: int):
+    return datetime.fromisoformat(start_at) + timedelta(minutes=int(minutes))
+
+
+async def kids_overlap(db, start: datetime, end: datetime) -> bool:
+    await ensure_kids_schema(db)
+    cur = await db.execute(
+        """SELECT start_at, duration_minutes FROM kids_sim_requests
+           WHERE COALESCE(status, 'active')='active' AND substr(start_at, 1, 10)=?""",
+        (start.date().isoformat(),),
+    )
+    for start_at, minutes in await cur.fetchall():
+        other_start = datetime.fromisoformat(start_at)
+        other_end = other_start + timedelta(minutes=int(minutes))
+        if other_start < end and other_end > start:
+            return True
+    return False
+
+
+async def save_kids_request(*, telegram_id: int, username: str, name: str, phone: str, start: datetime, duration: int, key: str) -> str:
+    """ok, duplicate, used или busy."""
+    db = await get_db()
+    try:
+        await ensure_kids_schema(db)
+        await db.execute("BEGIN IMMEDIATE")
+        cur = await db.execute(
+            """SELECT display_name, phone, start_at, duration_minutes, COALESCE(status, 'active')
+               FROM kids_sim_requests WHERE telegram_id=? AND idempotency_key=?""",
+            (int(telegram_id), key),
+        )
+        existing = await cur.fetchone()
+        if existing:
+            await db.commit()
+            same = (
+                existing[0] == name
+                and existing[1] == phone
+                and existing[2] == start.isoformat()
+                and int(existing[3]) == int(duration)
+                and existing[4] == "active"
+            )
+            return "duplicate" if same else "used"
+        if await kids_overlap(db, start, start + timedelta(minutes=duration)):
+            await db.rollback()
+            return "busy"
+        await db.execute(
+            """INSERT INTO kids_sim_requests
+               (telegram_id, username, display_name, phone, start_at, duration_minutes, idempotency_key, created_at, status)
+               VALUES (?,?,?,?,?,?,?,?, 'active')""",
+            (int(telegram_id), username or "", name, phone, start.isoformat(), int(duration), key, datetime.now(b.TZ).isoformat()),
+        )
+        await db.commit()
+        return "ok"
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await db.close()
 
 
 async def list_bookings(user_id=None, limit=100, offset=0):
@@ -54,7 +146,7 @@ async def list_bookings(user_id=None, limit=100, offset=0):
     return [await b._fetch_booking(bid) for bid in ids]
 
 
-def create_booking_router(current_user):
+def create_booking_router(current_user, notify_admins=None):
     router = APIRouter()
 
     def super_user(user=Depends(current_user)):
@@ -62,11 +154,22 @@ def create_booking_router(current_user):
             raise HTTPException(403, 'Доступ только супер-администратору')
         return user
 
+    def signed(user=Depends(current_user)):
+        if int(getattr(user, "id", 0) or 0) <= 0:
+            raise HTTPException(401, "Откройте клуб из Telegram")
+        return user
+
     @router.get('/api/booking/options')
     async def options(user=Depends(current_user)):
-        return {'places': [{'key': k, 'title': v['title'], 'type': v['type'], 'hourly_rate_kopecks': b.HOURLY_RATES[v['type']]} for k, v in b.BOOKING_PLACES.items()],
+        return {'places': [{'key': k, 'title': v['title'], 'type': v['type'],
+                             'hourly_rate_kopecks': b.HOURLY_RATES[v['type']],
+                             'happy_hour_kopecks': b.HAPPY_HOUR_RATES[v['type']],
+                             'billable_as_static': v['type'] == 'motion'} for k, v in b.BOOKING_PLACES.items()],
+                'kids_rate_kopecks': b.KIDS_RATE_KOPECKS,
                 'durations': list(b.DURATION_OPTIONS), 'days_ahead': b.BOOKING_DAYS_AHEAD,
-                'timezone': str(b.TZ), 'open_hour': 12, 'close_hour': 24, 'today': datetime.now(b.TZ).date().isoformat()}
+                'timezone': str(b.TZ), 'open_hour': 12, 'close_hour': 24, 'today': datetime.now(b.TZ).date().isoformat(),
+                'happy_hour': {'weekdays': list(b.HAPPY_HOUR_WEEKDAYS), 'start': b.HAPPY_HOUR_START.strftime('%H:%M'),
+                                'end': b.HAPPY_HOUR_END.strftime('%H:%M')}}
 
     @router.get('/api/booking/availability')
     async def availability(start_at: datetime, duration_minutes: int, user=Depends(current_user)):
@@ -79,17 +182,17 @@ def create_booking_router(current_user):
             else:
                 remote, error = await b._remote_conflicts([key], start, end)
                 if error:
-                    raise HTTPException(503, 'Не удалось проверить доступность в YCLIENTS')
+                    raise HTTPException(503, 'Не удалось проверить доступность')
                 available = not remote
             places.append({'key': key, 'available': available})
         return {'places': places}
 
     @router.get('/api/bookings')
-    async def mine(user=Depends(current_user), limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
+    async def mine(user=Depends(signed), limit: int = Query(100, ge=1, le=100), offset: int = Query(0, ge=0)):
         return {'bookings': [public_booking(row) for row in await list_bookings(user.id, limit, offset)]}
 
     @router.post('/api/bookings')
-    async def create(data: BookingInput, user=Depends(current_user)):
+    async def create(data: BookingInput, user=Depends(signed)):
         if data.start_at.tzinfo is None or data.duration_minutes not in b.DURATION_OPTIONS:
             raise HTTPException(422, 'Укажите часовой пояс и допустимую длительность')
         start = data.start_at.astimezone(b.TZ)
@@ -113,18 +216,42 @@ def create_booking_router(current_user):
             start, end = window(data.start_at, data.duration_minutes)
             remote, error = await b._remote_conflicts(data.place_keys, start, end)
             if error:
-                raise HTTPException(503, 'Не удалось проверить доступность в YCLIENTS')
+                raise HTTPException(503, 'Не удалось проверить доступность')
             if remote:
                 raise HTTPException(409, 'Выбранное место уже занято')
         ok, bid, error = await b._create_pending_booking(pilot=pilot, username=user.username,
             place_type=place_type, place_keys=data.place_keys, start_at=start, end_at=end,
-            duration_minutes=data.duration_minutes, source='miniapp', idempotency_key=data.idempotency_key)
+            duration_minutes=data.duration_minutes, source='miniapp', idempotency_key=data.idempotency_key,
+            bill_as_static=data.bill_as_static and place_type == 'motion')
         if not ok:
             raise HTTPException(409, error)
         return public_booking(await b._fetch_booking(bid))
 
+    @router.post('/api/booking/kids')
+    async def create_kids(data: KidsBookingInput, user=Depends(signed)):
+        start, end = window(data.start_at, data.duration_minutes)
+        pilot = await get_pilot_by_telegram_id(user.id)
+        if not pilot or not pilot.get('phone'):
+            raise HTTPException(409, 'Сначала завершите регистрацию и укажите телефон в боте')
+        from services.miniapp_booking import save_kids_request
+        result = await save_kids_request(
+            telegram_id=user.id, username=user.username or "", name=pilot['display_name'],
+            phone=pilot.get('phone') or "", start=start, duration=data.duration_minutes, key=data.idempotency_key,
+        )
+        if result == "busy":
+            raise HTTPException(409, "Детский сим уже занят на это время")
+        if result == "used":
+            raise HTTPException(409, "Ключ запроса уже использован")
+        if result == "ok" and notify_admins:
+            await notify_admins(
+                'Детский сим\n'
+                f'Пилот: {pilot["display_name"]} · {pilot.get("phone") or "—"}\n'
+                f'Время: {start.strftime("%d.%m %H:%M")} · {data.duration_minutes} мин')
+        return {'ok': True, 'start_at': start.isoformat(), 'duration_minutes': data.duration_minutes,
+                'rate_kopecks': b.KIDS_RATE_KOPECKS}
+
     @router.post('/api/bookings/{booking_id}/cancel')
-    async def cancel(booking_id: int, user=Depends(current_user)):
+    async def cancel(booking_id: int, user=Depends(signed)):
         row = await b._fetch_booking(booking_id)
         if not row or row['telegram_id'] != user.id:
             raise HTTPException(404, 'Бронь не найдена')
